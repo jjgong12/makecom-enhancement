@@ -9,10 +9,10 @@ import traceback
 import time
 
 # Version info
-VERSION = "v22-enhancement"
+VERSION = "v24-enhancement"
 
-class WeddingRingEnhancerV22:
-    """v22 Wedding Ring Enhancement - Simple Color Enhancement"""
+class WeddingRingEnhancerV24:
+    """v24 Wedding Ring Enhancement - Simple Color Enhancement"""
     
     def __init__(self):
         print(f"[{VERSION}] Initializing - Simple Enhancement")
@@ -55,7 +55,7 @@ class WeddingRingEnhancerV22:
             return image
 
 def handler(job):
-    """RunPod handler function - FIXED OUTPUT STRUCTURE"""
+    """RunPod handler function - V24 FIXED"""
     print(f"[{VERSION}] ====== Handler Started ======")
     
     try:
@@ -63,13 +63,13 @@ def handler(job):
         print(f"[{VERSION}] Input type: {type(job_input)}")
         print(f"[{VERSION}] Input keys: {list(job_input.keys()) if isinstance(job_input, dict) else 'Not a dict'}")
         
-        # Find base64 image - try multiple possible locations
+        # Find base64 image - FIXED to include 'image_base64'
         base64_image = None
         
-        # Direct access attempts
+        # Direct access attempts - CRITICAL FIX: Added 'image_base64'
         if isinstance(job_input, dict):
-            # Try common keys
-            for key in ['image', 'base64', 'data', 'input', 'file', 'imageData']:
+            # Try common keys INCLUDING 'image_base64'
+            for key in ['image_base64', 'image', 'base64', 'data', 'input', 'file', 'imageData']:
                 if key in job_input:
                     value = job_input[key]
                     if isinstance(value, str) and len(value) > 100:
@@ -81,7 +81,7 @@ def handler(job):
         if not base64_image and isinstance(job_input, dict):
             for key, value in job_input.items():
                 if isinstance(value, dict):
-                    for sub_key in ['image', 'base64', 'data']:
+                    for sub_key in ['image_base64', 'image', 'base64', 'data']:
                         if sub_key in value and isinstance(value[sub_key], str) and len(value[sub_key]) > 100:
                             base64_image = value[sub_key]
                             print(f"[{VERSION}] Found image in nested: {key}.{sub_key}")
@@ -95,21 +95,18 @@ def handler(job):
             print(f"[{VERSION}] Input was direct base64 string")
         
         if not base64_image:
-            error_result = {
+            return {
                 "output": {
                     "enhanced_image": None,
                     "error": "No image data found in input",
                     "success": False,
                     "version": VERSION,
                     "debug_info": {
-                        "input_type": str(type(job_input)),
                         "input_keys": list(job_input.keys()) if isinstance(job_input, dict) else [],
-                        "input_sample": str(job_input)[:200] if job_input else "Empty"
+                        "first_key": list(job_input.keys())[0] if isinstance(job_input, dict) and job_input else None
                     }
                 }
             }
-            print(f"[{VERSION}] ERROR: No image found, returning: {error_result}")
-            return error_result
         
         # Process the image
         print(f"[{VERSION}] Base64 length: {len(base64_image)}")
@@ -137,7 +134,7 @@ def handler(job):
                 
             print(f"[{VERSION}] Image decoded successfully: {image.size}")
         except Exception as e:
-            error_result = {
+            return {
                 "output": {
                     "enhanced_image": None,
                     "error": f"Failed to decode base64: {str(e)}",
@@ -145,11 +142,9 @@ def handler(job):
                     "version": VERSION
                 }
             }
-            print(f"[{VERSION}] ERROR decoding: {e}")
-            return error_result
         
         # Apply enhancement
-        enhancer = WeddingRingEnhancerV22()
+        enhancer = WeddingRingEnhancerV24()
         enhanced_image = enhancer.apply_simple_enhancement(image)
         print(f"[{VERSION}] Enhancement applied")
         
@@ -166,9 +161,7 @@ def handler(job):
         
         print(f"[{VERSION}] Enhanced base64 length: {len(enhanced_base64)}")
         
-        # Create output structure that Make.com expects
-        # RunPod wraps this in {"data": {"output": ...}}
-        # So Make.com path will be: {{4.data.output.output.enhanced_image}}
+        # Return proper structure for Make.com
         result = {
             "output": {
                 "enhanced_image": enhanced_base64,
@@ -181,9 +174,6 @@ def handler(job):
         }
         
         print(f"[{VERSION}] ====== Success - Returning Result ======")
-        print(f"[{VERSION}] Output structure: {list(result.keys())}")
-        print(f"[{VERSION}] Output.output keys: {list(result['output'].keys())}")
-        
         return result
         
     except Exception as e:
@@ -205,7 +195,7 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("Enhanced Handler with Fixed Output Structure")
+    print("V24 - Fixed Input Key Detection")
     print("Make.com path: {{4.data.output.output.enhanced_image}}")
     print("="*70)
     
