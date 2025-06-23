@@ -9,10 +9,10 @@ import traceback
 import time
 
 # Version info
-VERSION = "v21-enhancement"
+VERSION = "v22-enhancement"
 
-class WeddingRingEnhancerV21:
-    """v21 Wedding Ring Enhancement - Simple Color Enhancement"""
+class WeddingRingEnhancerV22:
+    """v22 Wedding Ring Enhancement - Simple Color Enhancement"""
     
     def __init__(self):
         print(f"[{VERSION}] Initializing - Simple Enhancement")
@@ -54,167 +54,159 @@ class WeddingRingEnhancerV21:
             print(f"[{VERSION}] Enhancement error: {e}")
             return image
 
-# 전역 인스턴스
-enhancer_instance = None
-
-def get_enhancer():
-    """싱글톤 enhancer 인스턴스"""
-    global enhancer_instance
-    if enhancer_instance is None:
-        enhancer_instance = WeddingRingEnhancerV21()
-    return enhancer_instance
-
-def find_base64_in_dict(data, depth=0, max_depth=10):
-    """중첩된 딕셔너리에서 base64 이미지 찾기"""
-    if depth > max_depth:
-        return None
-    
-    if isinstance(data, str) and len(data) > 100:
-        return data
-    
-    if isinstance(data, dict):
-        for key in ['image', 'base64', 'data', 'input', 'file']:
-            if key in data and isinstance(data[key], str) and len(data[key]) > 100:
-                return data[key]
-        
-        for value in data.values():
-            result = find_base64_in_dict(value, depth + 1, max_depth)
-            if result:
-                return result
-    
-    elif isinstance(data, list):
-        for item in data:
-            result = find_base64_in_dict(item, depth + 1, max_depth)
-            if result:
-                return result
-    
-    return None
-
-def decode_base64_image(base64_str):
-    """Base64 문자열을 PIL Image로 디코드"""
-    try:
-        # Data URL 형식 처리
-        if ',' in base64_str:
-            base64_str = base64_str.split(',')[1]
-        
-        # 공백 제거
-        base64_str = base64_str.strip()
-        
-        # Padding 추가
-        padding = 4 - len(base64_str) % 4
-        if padding != 4:
-            base64_str += '=' * padding
-        
-        # 디코드
-        img_data = base64.b64decode(base64_str)
-        img = Image.open(io.BytesIO(img_data))
-        
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        return img
-        
-    except Exception as e:
-        print(f"[{VERSION}] Error decoding base64: {e}")
-        raise
-
-def encode_image_to_base64(image, format='PNG'):
-    """이미지를 base64로 인코딩 (Make.com 호환)"""
-    try:
-        if isinstance(image, np.ndarray):
-            image = Image.fromarray(image)
-        
-        buffer = io.BytesIO()
-        image.save(buffer, format=format, quality=95 if format == 'JPEG' else None)
-        buffer.seek(0)
-        
-        # Base64 인코딩
-        base64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        # CRITICAL: Make.com을 위해 padding 제거
-        # Google Apps Script에서는 padding을 다시 추가해야 함:
-        # while (base64Data.length % 4 !== 0) { base64Data += '='; }
-        base64_str = base64_str.rstrip('=')
-        
-        return base64_str
-        
-    except Exception as e:
-        print(f"[{VERSION}] Error encoding image: {e}")
-        raise
-
 def handler(job):
-    """RunPod 핸들러"""
+    """RunPod handler function - FIXED OUTPUT STRUCTURE"""
+    print(f"[{VERSION}] ====== Handler Started ======")
+    
     try:
-        start_time = time.time()
-        job_input = job["input"]
+        job_input = job.get("input", {})
+        print(f"[{VERSION}] Input type: {type(job_input)}")
+        print(f"[{VERSION}] Input keys: {list(job_input.keys()) if isinstance(job_input, dict) else 'Not a dict'}")
         
-        print(f"[{VERSION}] Processing started")
-        print(f"[{VERSION}] Input structure: {type(job_input)}")
+        # Find base64 image - try multiple possible locations
+        base64_image = None
         
-        # Base64 이미지 찾기
-        base64_image = find_base64_in_dict(job_input)
+        # Direct access attempts
+        if isinstance(job_input, dict):
+            # Try common keys
+            for key in ['image', 'base64', 'data', 'input', 'file', 'imageData']:
+                if key in job_input:
+                    value = job_input[key]
+                    if isinstance(value, str) and len(value) > 100:
+                        base64_image = value
+                        print(f"[{VERSION}] Found image in key: {key}")
+                        break
+        
+        # If still not found, check nested structure
+        if not base64_image and isinstance(job_input, dict):
+            for key, value in job_input.items():
+                if isinstance(value, dict):
+                    for sub_key in ['image', 'base64', 'data']:
+                        if sub_key in value and isinstance(value[sub_key], str) and len(value[sub_key]) > 100:
+                            base64_image = value[sub_key]
+                            print(f"[{VERSION}] Found image in nested: {key}.{sub_key}")
+                            break
+                if base64_image:
+                    break
+        
+        # Last resort - if input is string
+        if not base64_image and isinstance(job_input, str) and len(job_input) > 100:
+            base64_image = job_input
+            print(f"[{VERSION}] Input was direct base64 string")
+        
         if not base64_image:
-            print(f"[{VERSION}] No base64 image found in input")
-            return {
+            error_result = {
                 "output": {
-                    "error": "No image data found",
+                    "enhanced_image": None,
+                    "error": "No image data found in input",
+                    "success": False,
                     "version": VERSION,
-                    "success": False
+                    "debug_info": {
+                        "input_type": str(type(job_input)),
+                        "input_keys": list(job_input.keys()) if isinstance(job_input, dict) else [],
+                        "input_sample": str(job_input)[:200] if job_input else "Empty"
+                    }
                 }
             }
+            print(f"[{VERSION}] ERROR: No image found, returning: {error_result}")
+            return error_result
         
-        # 이미지 디코드
-        image = decode_base64_image(base64_image)
-        print(f"[{VERSION}] Image decoded: {image.size}")
+        # Process the image
+        print(f"[{VERSION}] Base64 length: {len(base64_image)}")
         
-        # 간단한 색감 보정
-        enhancer = get_enhancer()
-        enhanced = enhancer.apply_simple_enhancement(image)
+        # Handle data URL format
+        if ',' in base64_image and base64_image.startswith('data:'):
+            base64_image = base64_image.split(',')[1]
+            print(f"[{VERSION}] Removed data URL prefix")
+        
+        # Remove any whitespace
+        base64_image = base64_image.strip()
+        
+        # Add padding if needed for decoding
+        padding = 4 - len(base64_image) % 4
+        if padding != 4:
+            base64_image += '=' * padding
+        
+        # Decode base64 to image
+        try:
+            img_data = base64.b64decode(base64_image)
+            image = Image.open(io.BytesIO(img_data))
+            
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+                
+            print(f"[{VERSION}] Image decoded successfully: {image.size}")
+        except Exception as e:
+            error_result = {
+                "output": {
+                    "enhanced_image": None,
+                    "error": f"Failed to decode base64: {str(e)}",
+                    "success": False,
+                    "version": VERSION
+                }
+            }
+            print(f"[{VERSION}] ERROR decoding: {e}")
+            return error_result
+        
+        # Apply enhancement
+        enhancer = WeddingRingEnhancerV22()
+        enhanced_image = enhancer.apply_simple_enhancement(image)
         print(f"[{VERSION}] Enhancement applied")
         
-        # 결과 인코딩
-        enhanced_base64 = encode_image_to_base64(enhanced)
-        print(f"[{VERSION}] Image encoded, length: {len(enhanced_base64)}")
+        # Convert back to base64
+        buffer = io.BytesIO()
+        enhanced_image.save(buffer, format='PNG', quality=95)
+        buffer.seek(0)
         
-        # 처리 시간
-        processing_time = time.time() - start_time
-        print(f"[{VERSION}] Processing completed in {processing_time:.2f}s")
+        # Encode to base64
+        enhanced_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
-        # Return 구조 - Make.com이 {{4.data.output.output.enhanced_image}}로 접근
+        # CRITICAL: Remove padding for Make.com
+        enhanced_base64 = enhanced_base64.rstrip('=')
+        
+        print(f"[{VERSION}] Enhanced base64 length: {len(enhanced_base64)}")
+        
+        # Create output structure that Make.com expects
+        # RunPod wraps this in {"data": {"output": ...}}
+        # So Make.com path will be: {{4.data.output.output.enhanced_image}}
         result = {
             "output": {
                 "enhanced_image": enhanced_base64,
                 "success": True,
                 "version": VERSION,
-                "processing_time": round(processing_time, 2),
                 "original_size": list(image.size),
-                "enhanced_size": list(enhanced.size)
+                "enhanced_size": list(enhanced_image.size),
+                "processing_time": time.time() - job.get('start_time', time.time())
             }
         }
         
-        print(f"[{VERSION}] Returning result with output structure")
+        print(f"[{VERSION}] ====== Success - Returning Result ======")
+        print(f"[{VERSION}] Output structure: {list(result.keys())}")
+        print(f"[{VERSION}] Output.output keys: {list(result['output'].keys())}")
+        
         return result
         
     except Exception as e:
-        error_msg = f"Error: {str(e)}"
-        print(f"[{VERSION}] {error_msg}")
+        error_msg = f"Unexpected error: {str(e)}"
+        print(f"[{VERSION}] CRITICAL ERROR: {error_msg}")
         traceback.print_exc()
         
         return {
             "output": {
+                "enhanced_image": None,
                 "error": error_msg,
                 "success": False,
-                "version": VERSION
+                "version": VERSION,
+                "traceback": traceback.format_exc()
             }
         }
 
-# RunPod 시작
+# RunPod serverless start
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("Simple Enhancement Handler (a_파일)")
-    print("IMPORTANT: Google Apps Script must add padding back:")
-    print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
+    print("Enhanced Handler with Fixed Output Structure")
+    print("Make.com path: {{4.data.output.output.enhanced_image}}")
     print("="*70)
     
     runpod.serverless.start({"handler": handler})
