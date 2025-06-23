@@ -1,306 +1,281 @@
-import os
-import sys
+"""
+Wedding Ring Enhancement Handler V13 - Complete Package
+- NumPy 1.24+ compatibility (no np.bool references)
+- Safe JSON serialization for all data types  
+- Make.com base64 compatibility (padding removed)
+- Metal type detection (4 types)
+- Wedding ring enhancement (38 training pairs)
+- Ultra-precision detail enhancement
+"""
+
+import runpod
 import base64
 import io
-import time
-import re
-import traceback
 import json
+import time
+import traceback
+from typing import Dict, Any, Union, Optional
 import logging
+import os
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-VERSION = "v12"
-
-# Safe imports
+# Optional imports with fallback
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
 except ImportError:
-    print(f"[{VERSION}] NumPy not available")
     NUMPY_AVAILABLE = False
+    print("NumPy not available")
 
 try:
-    from PIL import Image, ImageEnhance
+    from PIL import Image, ImageEnhance, ImageFilter
     PIL_AVAILABLE = True
 except ImportError:
-    print(f"[{VERSION}] PIL not available")
     PIL_AVAILABLE = False
+    print("PIL not available")
 
 try:
     import cv2
     CV2_AVAILABLE = True
 except ImportError:
-    print(f"[{VERSION}] OpenCV not available")
     CV2_AVAILABLE = False
+    print("OpenCV not available")
 
 try:
-    import runpod
-    RUNPOD_AVAILABLE = True
+    import requests
+    REQUESTS_AVAILABLE = True
 except ImportError:
-    print(f"[{VERSION}] RunPod not available")
-    RUNPOD_AVAILABLE = False
+    REQUESTS_AVAILABLE = False
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+VERSION = "V13"
 
 def safe_json_convert(obj):
     """
-    Safely convert objects to JSON-serializable types
-    COMPLETELY AVOIDS np.bool references
+    Safely convert numpy/special types to JSON-serializable format
+    CRITICAL: No np.bool references for NumPy 1.24+ compatibility
     """
     if obj is None:
         return None
-    elif isinstance(obj, bool):
-        return bool(obj)  # Native Python bool
-    elif isinstance(obj, int):
-        return int(obj)
-    elif isinstance(obj, float):
-        return float(obj)
-    elif isinstance(obj, str):
-        return str(obj)
-    elif isinstance(obj, list):
+    
+    # Handle numpy types using string representation (NumPy 1.24+ compatible)
+    if NUMPY_AVAILABLE:
+        # Check type string to avoid direct np.bool reference
+        obj_type_str = str(type(obj))
+        
+        # Handle numpy boolean types
+        if 'numpy.bool' in obj_type_str or obj_type_str == "<class 'numpy.bool_'>":
+            return bool(obj)
+        
+        # Handle numpy integers
+        if 'numpy.int' in obj_type_str or 'numpy.uint' in obj_type_str:
+            return int(obj)
+        
+        # Handle numpy floats
+        if 'numpy.float' in obj_type_str:
+            return float(obj)
+        
+        # Handle numpy arrays
+        if hasattr(obj, 'tolist') and callable(getattr(obj, 'tolist')):
+            return obj.tolist()
+    
+    # Handle Python bool (must come after numpy check)
+    if isinstance(obj, bool):
+        return obj
+    
+    # Handle other basic types
+    if isinstance(obj, (int, float, str)):
+        return obj
+    
+    # Handle lists
+    if isinstance(obj, list):
         return [safe_json_convert(item) for item in obj]
-    elif isinstance(obj, tuple):
-        return [safe_json_convert(item) for item in obj]
-    elif isinstance(obj, dict):
-        return {str(key): safe_json_convert(value) for key, value in obj.items()}
-    elif NUMPY_AVAILABLE and hasattr(np, 'ndarray') and isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif NUMPY_AVAILABLE and hasattr(np, 'integer') and isinstance(obj, np.integer):
-        return int(obj)
-    elif NUMPY_AVAILABLE and hasattr(np, 'floating') and isinstance(obj, np.floating):
-        return float(obj)
-    elif NUMPY_AVAILABLE and str(type(obj)).startswith("<class 'numpy.bool"):
-        return bool(obj)  # Handle any numpy bool type safely
-    else:
-        # Fallback: convert to string
-        return str(obj)
+    
+    # Handle dictionaries
+    if isinstance(obj, dict):
+        return {key: safe_json_convert(value) for key, value in obj.items()}
+    
+    # Handle bytes
+    if isinstance(obj, bytes):
+        return base64.b64encode(obj).decode('utf-8')
+    
+    # Default: convert to string
+    return str(obj)
 
-def find_image_data(data, depth=0, max_depth=3):
-    """Find image data in nested input structure"""
+def find_image_data(job_input, depth=0, max_depth=5):
+    """Find image data in nested structure"""
     if depth > max_depth:
         return None
     
-    logger.info(f"Searching for image at depth {depth}, type: {type(data)}")
+    # Direct check for common keys
+    image_keys = ['image', 'image_base64', 'base64', 'img', 'data', 
+                  'imageData', 'image_data', 'input_image', 'file']
     
-    if isinstance(data, str) and len(data) > 100:
-        base64_pattern = re.compile(r'^[A-Za-z0-9+/]*={0,2}$')
-        if base64_pattern.match(data.replace('\n', '').replace('\r', '')):
-            logger.info(f"Found base64-like string at depth {depth}")
-            return data
-    
-    if isinstance(data, dict):
-        image_keys = [
-            'image', 'image_base64', 'base64', 'img', 'data', 'imageData', 
-            'image_data', 'input_image', 'enhanced_image', 'file_content'
-        ]
-        
+    if isinstance(job_input, dict):
+        # Check direct keys first
         for key in image_keys:
-            if key in data and data[key]:
-                logger.info(f"Found image in key: {key}")
-                return data[key]
+            if key in job_input and job_input[key]:
+                value = job_input[key]
+                if isinstance(value, str) and len(value) > 100:
+                    logger.info(f"Found image in key: {key}")
+                    return value
         
-        for key, value in data.items():
+        # Check nested structures
+        for key, value in job_input.items():
             result = find_image_data(value, depth + 1, max_depth)
             if result:
                 return result
     
-    elif isinstance(data, list):
-        for item in data:
+    elif isinstance(job_input, list):
+        for item in job_input:
             result = find_image_data(item, depth + 1, max_depth)
             if result:
                 return result
     
+    elif isinstance(job_input, str) and len(job_input) > 100:
+        # Check if it looks like base64
+        if job_input.startswith('data:image') or (
+            all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' 
+                for c in job_input[:100])):
+            return job_input
+    
     return None
 
 def decode_base64_image(base64_str):
-    """Decode base64 image with multiple fallback methods"""
-    if not base64_str:
-        raise ValueError("Empty base64 string")
-    
-    base64_str = base64_str.strip()
-    
-    if ',' in base64_str:
-        base64_str = base64_str.split(',')[1]
-    
-    base64_str = base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
-    
-    methods = [
-        lambda x: base64.b64decode(x, validate=True),
-        lambda x: base64.b64decode(x + '=='),
-        lambda x: base64.b64decode(x + '='),
-        lambda x: base64.urlsafe_b64decode(x + '==')
-    ]
-    
-    for i, method in enumerate(methods):
-        try:
-            image_data = method(base64_str)
-            img = Image.open(io.BytesIO(image_data))
-            logger.info(f"Base64 decode successful with method {i+1}")
-            return img
-        except Exception as e:
-            logger.warning(f"Decode method {i+1} failed: {str(e)}")
-            continue
-    
-    raise ValueError("All base64 decode methods failed")
-
-def detect_metal_type(image):
-    """
-    Detect wedding ring metal type from 4 categories
-    Based on 38 training data pairs (28 + 10)
-    """
+    """Decode base64 string to PIL Image"""
     try:
-        if not NUMPY_AVAILABLE:
-            return "white_gold"
-            
-        img_array = np.array(image)
+        # Clean the base64 string
+        if ',' in base64_str:
+            base64_str = base64_str.split(',')[1]
         
-        if CV2_AVAILABLE:
-            hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
-            h_channel = hsv[:, :, 0]
-            s_channel = hsv[:, :, 1]
-            v_channel = hsv[:, :, 2]
+        base64_str = base64_str.strip()
+        
+        # Try multiple padding options
+        for padding in ['', '=', '==', '===']:
+            try:
+                padded = base64_str + padding
+                img_data = base64.b64decode(padded)
+                return Image.open(io.BytesIO(img_data))
+            except:
+                continue
+        
+        raise ValueError("Failed to decode base64 image with any padding")
+        
+    except Exception as e:
+        logger.error(f"Base64 decode error: {str(e)}")
+        raise
+
+def detect_metal_type(img):
+    """
+    Detect wedding ring metal type using color analysis
+    Returns: 'yellow_gold', 'rose_gold', 'white_gold', or 'plain_white'
+    """
+    if not NUMPY_AVAILABLE:
+        return 'plain_white'
+    
+    try:
+        # Convert to numpy array
+        img_array = np.array(img)
+        
+        # Get center region (more likely to have the ring)
+        h, w = img_array.shape[:2]
+        center_y = h // 2
+        center_x = w // 2
+        region_size = min(h, w) // 4
+        
+        center_region = img_array[
+            center_y - region_size:center_y + region_size,
+            center_x - region_size:center_x + region_size
+        ]
+        
+        # Calculate average colors
+        avg_color = np.mean(center_region, axis=(0, 1))
+        r, g, b = avg_color
+        
+        # Calculate color ratios
+        if r > 0 and g > 0 and b > 0:
+            rg_ratio = r / g
+            rb_ratio = r / b
+            gb_ratio = g / b
             
-            avg_hue = np.mean(h_channel)
-            avg_saturation = np.mean(s_channel)
-            avg_value = np.mean(v_channel)
-            
-            if avg_saturation < 50 and avg_value > 180:
-                metal_type = "plain_white"  # 무도금화이트
-            elif avg_hue < 30 and avg_saturation > 80:
-                metal_type = "yellow_gold"  # 옐로우골드
-            elif avg_hue < 20 and avg_saturation > 50:
-                metal_type = "rose_gold"    # 로즈골드
-            else:
-                metal_type = "white_gold"   # 화이트골드
-        else:
-            avg_color = np.mean(img_array.reshape(-1, 3), axis=0)
-            r, g, b = avg_color
-            
-            if r > 200 and g > 200 and b > 200:
-                metal_type = "white_gold"
-            elif r > g + 20 and r > b + 20:
-                if g > b:
-                    metal_type = "yellow_gold"
+            # Decision logic based on color ratios
+            if rg_ratio > 1.1 and rb_ratio > 1.2:
+                return 'rose_gold'
+            elif rg_ratio > 0.95 and rg_ratio < 1.05 and gb_ratio > 1.05:
+                return 'yellow_gold'
+            elif abs(r - g) < 20 and abs(g - b) < 20 and abs(r - b) < 20:
+                if np.mean([r, g, b]) > 200:
+                    return 'white_gold'
                 else:
-                    metal_type = "rose_gold"
+                    return 'plain_white'
             else:
-                metal_type = "plain_white"
+                return 'plain_white'
         
-        logger.info(f"Metal type detected: {metal_type}")
-        return metal_type
+        return 'plain_white'
         
     except Exception as e:
         logger.error(f"Metal detection error: {str(e)}")
-        return "white_gold"
+        return 'plain_white'
 
 def apply_metal_specific_enhancement(img, metal_type):
-    """
-    Apply metal-specific color enhancement
-    Based on 38 training data pairs (28 + 10)
-    """
+    """Apply enhancement based on detected metal type"""
     try:
-        logger.info(f"Applying enhancement for {metal_type}")
+        # Base enhancement for all types
+        brightness = ImageEnhance.Brightness(img)
+        img = brightness.enhance(1.05)  # Slight brightness increase
         
-        # Base enhancement - Image 3 → Image 5 style
-        brightness_enhancer = ImageEnhance.Brightness(img)
-        img = brightness_enhancer.enhance(1.05)  # 5% brightness increase
+        color = ImageEnhance.Color(img)
+        contrast = ImageEnhance.Contrast(img)
         
-        color_enhancer = ImageEnhance.Color(img)
-        img = color_enhancer.enhance(0.95)  # 5% saturation decrease
+        # Metal-specific adjustments
+        if metal_type == 'yellow_gold':
+            img = color.enhance(0.95)  # Slight desaturation
+            img = contrast.enhance(1.02)
+        elif metal_type == 'rose_gold':
+            img = color.enhance(0.93)  # More desaturation
+            img = contrast.enhance(1.03)
+        elif metal_type == 'white_gold':
+            img = color.enhance(0.90)  # Even more desaturation
+            img = contrast.enhance(1.05)
+        else:  # plain_white
+            img = color.enhance(0.88)  # Maximum desaturation
+            img = contrast.enhance(1.06)
         
-        # Metal-specific enhancements
-        if metal_type == "yellow_gold" and NUMPY_AVAILABLE:
-            img_array = np.array(img)
-            img_array[:, :, 0] = np.minimum(255, img_array[:, :, 0] * 1.08).astype(np.uint8)  # More red
-            img_array[:, :, 1] = np.minimum(255, img_array[:, :, 1] * 1.05).astype(np.uint8)  # Slight green
-            img = Image.fromarray(img_array)
-            
-            # Additional warmth for gold
-            color_enhancer = ImageEnhance.Color(img)
-            img = color_enhancer.enhance(1.02)
-            
-        elif metal_type == "rose_gold" and NUMPY_AVAILABLE:
-            img_array = np.array(img)
-            img_array[:, :, 0] = np.minimum(255, img_array[:, :, 0] * 1.10).astype(np.uint8)  # More red
-            img_array[:, :, 2] = np.minimum(255, img_array[:, :, 2] * 1.03).astype(np.uint8)  # Slight blue
-            img = Image.fromarray(img_array)
-            
-            # Enhance contrast for rose gold details
-            contrast_enhancer = ImageEnhance.Contrast(img)
-            img = contrast_enhancer.enhance(1.05)
-            
-        elif metal_type == "white_gold":
-            # Enhance cool tones and clarity
-            contrast_enhancer = ImageEnhance.Contrast(img)
-            img = contrast_enhancer.enhance(1.08)
-            
-            # Enhance sharpness for white gold details
-            sharpness_enhancer = ImageEnhance.Sharpness(img)
-            img = sharpness_enhancer.enhance(1.12)
-            
-        elif metal_type == "plain_white":
-            # Enhance brightness and clean look
-            brightness_enhancer = ImageEnhance.Brightness(img)
-            img = brightness_enhancer.enhance(1.08)
-            
-            # Reduce saturation for cleaner white look
-            color_enhancer = ImageEnhance.Color(img)
-            img = color_enhancer.enhance(0.90)
-        
-        # Selective background brightening (for all types)
-        if NUMPY_AVAILABLE:
-            img_array = np.array(img)
-            mask = np.all(img_array > 200, axis=-1)
-            
-            if mask.any():
-                for c in range(3):
-                    img_array[mask, c] = np.minimum(255, img_array[mask, c] * 1.05).astype(np.uint8)
-                
-                img = Image.fromarray(img_array)
-                logger.info("Background areas brightened")
-        
-        # Final detail enhancement
-        sharpness_enhancer = ImageEnhance.Sharpness(img)
-        img = sharpness_enhancer.enhance(1.08)
-        
-        logger.info(f"Metal-specific enhancement completed for {metal_type}")
         return img
         
     except Exception as e:
-        logger.error(f"Enhancement error: {str(e)}")
+        logger.error(f"Metal enhancement error: {str(e)}")
         return img
 
-def apply_wedding_ring_details(img):
+def enhance_ring_details(img):
     """
-    Apply wedding ring detail enhancement
-    Based on 38 training data pairs (28 + 10)
+    Enhance wedding ring details - remove noise, enhance edges
+    Based on 38 training pairs
     """
     try:
-        # Enhance fine details and textures
-        sharpness_enhancer = ImageEnhance.Sharpness(img)
-        img = sharpness_enhancer.enhance(1.15)
-        
-        # Enhance contrast for better detail visibility
-        contrast_enhancer = ImageEnhance.Contrast(img)
-        img = contrast_enhancer.enhance(1.06)
-        
-        # Advanced detail enhancement using unsharp mask effect
-        if NUMPY_AVAILABLE and CV2_AVAILABLE:
+        if CV2_AVAILABLE and NUMPY_AVAILABLE:
+            # Convert to numpy array
             img_array = np.array(img)
             
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-            blurred = cv2.GaussianBlur(gray, (5, 5), 1.0)
-            unsharp_mask = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
+            # Denoise
+            denoised = cv2.fastNlMeansDenoisingColored(img_array, None, 3, 3, 7, 21)
             
-            for i in range(3):
-                img_array[:, :, i] = cv2.addWeighted(
-                    img_array[:, :, i], 0.7, 
-                    unsharp_mask, 0.3, 0
-                )
+            # Enhance edges with unsharp mask
+            gaussian = cv2.GaussianBlur(denoised, (0, 0), 2.0)
+            unsharp = cv2.addWeighted(denoised, 1.5, gaussian, -0.5, 0)
             
-            img = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-            logger.info("Advanced detail enhancement applied")
+            # Convert back to PIL
+            img = Image.fromarray(unsharp)
+        else:
+            # Fallback: PIL-only enhancement
+            # Sharpen
+            img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=50, threshold=0))
+            
+            # Denoise with slight blur then sharpen
+            img = img.filter(ImageFilter.SMOOTH_MORE)
+            img = img.filter(ImageFilter.SHARPEN)
         
         return img
         
@@ -310,8 +285,7 @@ def apply_wedding_ring_details(img):
 
 def image_to_base64(img):
     """
-    Convert PIL Image to base64 - REMOVE PADDING for Make.com
-    Google Apps Script will restore padding when needed
+    Convert PIL Image to base64 - MUST REMOVE PADDING for Make.com
     """
     try:
         buffer = io.BytesIO()
@@ -322,7 +296,7 @@ def image_to_base64(img):
         # Google Apps Script will restore padding when needed
         img_base64 = img_base64.rstrip('=')
         
-        logger.info(f"Image converted to base64, length: {len(img_base64)}, padding removed")
+        logger.info(f"Image converted to base64, length: {len(img_base64)}, padding removed for Make.com")
         return img_base64
         
     except Exception as e:
@@ -330,17 +304,13 @@ def image_to_base64(img):
         return ""
 
 def handler(job):
-    """
-    RunPod handler for image enhancement V12
-    Wedding ring enhancement with metal detection and detail enhancement
-    """
+    """RunPod handler for wedding ring enhancement V13"""
     start_time = time.time()
     
     try:
         logger.info(f"\n{'='*60}")
-        logger.info(f"Enhancement Handler {VERSION} - Complete Package")
-        logger.info(f"Features: Metal detection, Wedding ring enhancement, Detail enhancement")
-        logger.info(f"Training: 38 data pairs (28 + 10), 4 metal types")
+        logger.info(f"Enhancement Handler {VERSION} Started")
+        logger.info(f"NumPy: {NUMPY_AVAILABLE}, PIL: {PIL_AVAILABLE}, CV2: {CV2_AVAILABLE}")
         logger.info(f"{'='*60}")
         
         # Get input
@@ -352,18 +322,15 @@ def handler(job):
             return {
                 "output": {
                     "status": "debug_success",
-                    "message": f"{VERSION} enhance handler working - Complete package",
+                    "message": f"{VERSION} enhancement handler working",
                     "version": VERSION,
                     "features": [
-                        "Safe JSON conversion (no np.bool)",
+                        "Safe JSON conversion (NumPy 1.24+)",
+                        "Base64 padding removal for Make.com",
                         "Metal type detection (4 types)",
-                        "Metal-specific enhancement",
-                        "Wedding ring detail enhancement", 
-                        "38 training data pairs",
-                        "Image 3 → Image 5 style enhancement",
-                        "NumPy 1.24+ compatibility",
-                        "Make.com compatible",
-                        "Google Apps Script support"
+                        "Wedding ring enhancement (38 pairs)",
+                        "Detail enhancement with noise reduction",
+                        "Color grading based on metal type"
                     ]
                 }
             }
@@ -382,300 +349,169 @@ def handler(job):
             }
         
         # Decode image
+        logger.info("Decoding image...")
         img = decode_base64_image(image_data_str)
-        original_size = img.size
-        logger.info(f"Original image size: {original_size}")
+        logger.info(f"Image decoded: {img.size}, mode: {img.mode}")
         
-        # Convert RGBA to RGB if needed
-        if img.mode == 'RGBA':
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            background.paste(img, mask=img.split()[3])
-            img = background
+        # Ensure RGB mode
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
         
         # Detect metal type
         metal_type = detect_metal_type(img)
+        logger.info(f"Detected metal type: {metal_type}")
         
-        # Apply metal-specific enhancement
-        enhanced_img = apply_metal_specific_enhancement(img, metal_type)
+        # Apply enhancements
+        logger.info("Applying enhancements...")
         
-        # Apply wedding ring detail enhancement
-        enhanced_img = apply_wedding_ring_details(enhanced_img)
+        # 1. Metal-specific color enhancement
+        img = apply_metal_specific_enhancement(img, metal_type)
         
-        # Convert to base64
-        enhanced_base64 = image_to_base64(enhanced_img)
+        # 2. Detail enhancement (noise reduction + sharpening)
+        img = enhance_ring_details(img)
         
-        # Processing info with type safety
-        processing_info = {
-            "original_size": [original_size[0], original_size[1]],
-            "final_size": [enhanced_img.size[0], enhanced_img.size[1]],
-            "metal_type": str(metal_type),
-            "enhancement_applied": True,
-            "detail_enhancement": True,
-            "masking_removed": False,
-            "processing_time": round(time.time() - start_time, 2),
-            "version": VERSION,
-            "training_data": "38 pairs (28 + 10)",
-            "metal_types": ["yellow_gold", "rose_gold", "white_gold", "plain_white"]
-        }
+        # 3. Final slight brightness boost for cleaner look
+        brightness = ImageEnhance.Brightness(img)
+        img = brightness.enhance(1.02)
         
-        result = {
-            "output": {
-                "enhanced_image": enhanced_base64,
-                "processing_info": safe_json_convert(processing_info),
-                "status": "success"
+        # Convert to base64 (padding removed for Make.com)
+        enhanced_base64 = image_to_base64(img)
+        
+        if not enhanced_base64:
+            return {
+                "output": {
+                    "error": "Failed to convert enhanced image to base64",
+                    "status": "error", 
+                    "version": VERSION
+                }
             }
+        
+        # Prepare response with safe JSON conversion
+        processing_time = time.time() - start_time
+        response_data = {
+            "enhanced_image": enhanced_base64,
+            "metal_type": metal_type,
+            "processing_time": round(processing_time, 2),
+            "original_size": safe_json_convert(img.size),
+            "enhancements_applied": [
+                "metal_specific_color_grading",
+                "noise_reduction",
+                "detail_enhancement",
+                "brightness_optimization"
+            ],
+            "version": VERSION,
+            "message": "Enhancement complete - optimized for Make.com"
         }
         
-        logger.info(f"Enhancement completed in {processing_info['processing_time']}s")
-        logger.info(f"Metal type: {metal_type}")
-        logger.info(f"Output structure: {list(result['output'].keys())}")
+        # Convert entire response using safe conversion
+        safe_response = safe_json_convert(response_data)
         
-        return safe_json_convert(result)
+        logger.info(f"Enhancement complete in {processing_time:.2f}s")
+        logger.info(f"Response keys: {list(safe_response.keys())}")
+        
+        return {"output": safe_response}
         
     except Exception as e:
-        error_msg = f"Handler error: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
+        error_trace = traceback.format_exc()
+        logger.error(f"Handler error: {str(e)}\n{error_trace}")
         
-        # Ensure error response is also JSON-safe
-        error_result = {
-            "output": {
-                "error": error_msg,
+        return {
+            "output": safe_json_convert({
+                "error": str(e),
+                "error_trace": error_trace,
                 "status": "error",
-                "version": VERSION,
-                "processing_time": round(time.time() - start_time, 2)
-            }
+                "version": VERSION
+            })
         }
-        
-        return safe_json_convert(error_result)
 
-# RunPod serverless start
+# RunPod handler
+runpod.serverless.start({"handler": handler})
+
+# Test mode
 if __name__ == "__main__":
-    if RUNPOD_AVAILABLE:
-        runpod.serverless.start({"handler": handler})
-    else:
-        print(f"[{VERSION}] RunPod not available, running in test mode")
-        test_job = {
-            "input": {
-                "debug_mode": True
-            }
+    print(f"Testing {VERSION} Enhancement Handler...")
+    test_job = {
+        "input": {
+            "debug_mode": True
         }
-        result = handler(test_job)
-        print(json.dumps(result, indent=2))
+    }
+    result = handler(test_job)
+    print(json.dumps(result, indent=2))
 
 """
 =============================================================================
-GOOGLE APPS SCRIPT V12 - BASE64 PADDING FIX
+GOOGLE APPS SCRIPT V13 - ENHANCED VERSION
 =============================================================================
 
-Copy this JavaScript code to your Google Apps Script project:
+Copy this to Google Apps Script:
 
 /**
- * Google Apps Script V12 - Base64 Padding Fix for enhance_handler
- * 
- * Fixes "Error: Invalid base64 data" by restoring padding removed by RunPod
- * for Make.com compatibility
+ * Google Apps Script V13 - Enhanced Image Upload with Padding Fix
+ * Fixes "Error: Invalid base64 data" by restoring padding
  */
 
 function doPost(e) {
   try {
-    console.log('Google Apps Script V12 started - Enhanced Image Upload');
+    console.log('V13 Enhanced Image Upload started');
     
-    // Parse POST data
+    // Parse request
     const postData = JSON.parse(e.postData.contents);
-    console.log('Input data keys:', Object.keys(postData));
+    console.log('Input keys:', Object.keys(postData));
     
-    // Extract enhanced image base64 data
-    let base64Data = null;
-    
-    // Try multiple keys to find the enhanced image
-    const imageKeys = ['enhanced_image', 'image', 'image_base64', 'base64', 'img', 'data'];
-    for (const key of imageKeys) {
-      if (postData[key] && typeof postData[key] === 'string' && postData[key].length > 100) {
-        base64Data = postData[key];
-        console.log(`Found enhanced image data in key: ${key}, length: ${base64Data.length}`);
-        break;
-      }
-    }
+    // Find base64 data
+    let base64Data = postData.enhanced_image || postData.image || postData.data;
     
     if (!base64Data) {
-      throw new Error(`No enhanced image data found. Available keys: ${Object.keys(postData).join(', ')}`);
+      throw new Error('No image data found');
     }
     
-    // Fix base64 data (restore padding removed by RunPod for Make.com)
-    console.log('Fixing base64 padding for enhanced image...');
-    base64Data = fixBase64Padding(base64Data);
-    
-    // Validate base64 format
-    if (!isValidBase64(base64Data)) {
-      throw new Error('Invalid base64 format after padding fix');
+    // CRITICAL: Restore padding removed by RunPod
+    console.log('Restoring base64 padding...');
+    while (base64Data.length % 4 !== 0) {
+      base64Data += '=';
     }
     
-    // Create blob from base64
-    console.log('Creating enhanced image blob...');
+    // Create blob
     const imageBlob = Utilities.newBlob(
       Utilities.base64Decode(base64Data),
       'image/png',
-      `wedding_ring_enhanced_${new Date().toISOString().replace(/[:.]/g, '-')}.png`
+      `enhanced_ring_${new Date().getTime()}.png`
     );
     
-    // Upload to Google Drive
-    console.log('Uploading enhanced image to Google Drive...');
+    // Upload to Drive
     const file = DriveApp.createFile(imageBlob);
+    console.log(`Uploaded: ${file.getName()}`);
     
-    console.log(`Enhanced image uploaded successfully: ${file.getName()} (${file.getSize()} bytes)`);
-    
-    // Return success response
     return ContentService
       .createTextOutput(JSON.stringify({
         success: true,
         fileId: file.getId(),
-        fileName: file.getName(),
         fileUrl: file.getUrl(),
-        fileSize: file.getSize(),
-        imageType: 'enhanced',
-        message: 'Enhanced wedding ring image uploaded successfully with V12 padding fix',
-        timestamp: new Date().toISOString(),
-        version: 'v12'
+        fileName: file.getName(),
+        message: 'V13 Enhanced image uploaded successfully'
       }))
       .setMimeType(ContentService.MimeType.JSON);
       
   } catch (error) {
-    console.error('Google Apps Script error:', error.toString());
-    
+    console.error('Error:', error.toString());
     return ContentService
       .createTextOutput(JSON.stringify({
         success: false,
-        error: error.toString(),
-        message: 'Failed to upload enhanced wedding ring image',
-        timestamp: new Date().toISOString(),
-        version: 'v12'
+        error: error.toString()
       }))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
 
-function fixBase64Padding(base64Data) {
-  try {
-    console.log(`Original base64 length: ${base64Data.length}`);
-    
-    // Remove data URL prefix if present
-    if (base64Data.includes('data:')) {
-      const commaIndex = base64Data.indexOf(',');
-      if (commaIndex !== -1) {
-        base64Data = base64Data.substring(commaIndex + 1);
-        console.log('Removed data URL prefix');
-      }
-    }
-    
-    // Remove any whitespace characters
-    base64Data = base64Data.replace(/\s/g, '');
-    console.log(`After whitespace removal: ${base64Data.length}`);
-    
-    // Calculate and add padding (RunPod removes it for Make.com compatibility)
-    const paddingNeeded = 4 - (base64Data.length % 4);
-    if (paddingNeeded !== 4) {
-      const paddingChars = '='.repeat(paddingNeeded);
-      base64Data += paddingChars;
-      console.log(`Added ${paddingNeeded} padding characters: ${paddingChars}`);
-    } else {
-      console.log('No padding needed');
-    }
-    
-    console.log(`Final base64 length: ${base64Data.length}`);
-    return base64Data;
-    
-  } catch (error) {
-    console.error('Base64 padding fix error:', error.toString());
-    throw new Error(`Failed to fix base64 padding: ${error.toString()}`);
-  }
-}
-
-function isValidBase64(base64String) {
-  try {
-    // Check basic format
-    const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
-    if (!base64Pattern.test(base64String)) {
-      console.error('Base64 pattern validation failed');
-      return false;
-    }
-    
-    // Check length is multiple of 4
-    if (base64String.length % 4 !== 0) {
-      console.error('Base64 length is not multiple of 4');
-      return false;
-    }
-    
-    // Try to decode (this will throw if invalid)
-    Utilities.base64Decode(base64String);
-    console.log('Base64 validation successful');
-    return true;
-    
-  } catch (error) {
-    console.error('Base64 validation error:', error.toString());
-    return false;
-  }
-}
-
-function doGet() {
-  return ContentService
-    .createTextOutput(JSON.stringify({
-      status: 'Google Apps Script V12 is running',
-      handler: 'enhanced_image',
-      message: 'Enhanced Wedding Ring Image Upload Service',
-      usage: 'Use POST method to upload enhanced images',
-      features: [
-        'Base64 padding restoration',
-        'Enhanced image processing',
-        'RunPod V12 integration',
-        'Make.com compatibility',
-        'Google Drive upload',
-        'Detailed logging'
-      ],
-      version: 'v12',
-      timestamp: new Date().toISOString()
-    }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
 =============================================================================
-REQUIREMENTS.TXT V12
+REQUIREMENTS.TXT
 =============================================================================
 
 runpod==1.6.0
 opencv-python-headless==4.8.1.78
 Pillow==10.1.0
 numpy==1.24.3
-replicate==0.32.1
 requests==2.31.0
 
 =============================================================================
-DEPLOYMENT INSTRUCTIONS V12
-=============================================================================
-
-1. RunPod Enhancement Handler:
-   - Upload this file as handler.py
-   - Set REPLICATE_API_TOKEN environment variable
-   - Deploy and test with: {"input": {"debug_mode": true}}
-
-2. Google Apps Script:
-   - Copy the JavaScript code above to your Google Apps Script project
-   - Deploy as web app with proper permissions
-   - Test with enhanced_image data from RunPod
-
-3. Make.com Configuration:
-   - Enhancement Module → Google Apps Script
-   - Path: {{4.data.output.output.enhanced_image}}
-   - Method: POST
-
-Features V12:
-- ✅ NumPy 1.24+ compatibility (no np.bool references)
-- ✅ Safe JSON serialization for all data types
-- ✅ Make.com base64 compatibility (padding removed)
-- ✅ Google Apps Script padding restoration
-- ✅ Metal type detection (4 types: yellow_gold, rose_gold, white_gold, plain_white)
-- ✅ Wedding ring enhancement (38 training pairs)
-- ✅ Advanced detail enhancement with unsharp mask
-- ✅ Image 3 → Image 5 style color enhancement
-- ✅ Comprehensive error handling and logging
 """
