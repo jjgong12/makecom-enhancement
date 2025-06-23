@@ -6,15 +6,60 @@ import runpod
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
-import replicate
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import time
 
-VERSION = "v3"
+VERSION = "v4"
 
 def log_debug(message):
     """Debug logging with version info"""
     print(f"[{VERSION}] {message}")
+
+def find_image_in_event(event):
+    """Enhanced image finding with multiple strategies to prevent Exit Code 0"""
+    try:
+        log_debug("Starting enhanced image search")
+        
+        # Strategy 1: Direct input keys
+        job_input = event.get("input", {})
+        log_debug(f"Event keys: {list(event.keys())}")
+        log_debug(f"Input keys: {list(job_input.keys())}")
+        
+        # Check common image keys
+        possible_keys = ["image", "image_base64", "base64_image", "data", "img", "file"]
+        
+        for key in possible_keys:
+            if key in job_input and job_input[key]:
+                log_debug(f"Found image data in key: {key}")
+                return job_input[key]
+        
+        # Strategy 2: Direct event keys (fallback)
+        for key in possible_keys:
+            if key in event and event[key]:
+                log_debug(f"Found image data in event key: {key}")
+                return event[key]
+        
+        # Strategy 3: String input (direct base64)
+        if isinstance(job_input, str) and len(job_input) > 100:
+            log_debug("Found string input as potential base64")
+            return job_input
+        
+        # Strategy 4: Nested search
+        for key, value in job_input.items():
+            if isinstance(value, dict):
+                for nested_key in possible_keys:
+                    if nested_key in value and value[nested_key]:
+                        log_debug(f"Found nested image data in: {key}.{nested_key}")
+                        return value[nested_key]
+            elif isinstance(value, str) and len(value) > 100:
+                log_debug(f"Found potential base64 in key: {key}")
+                return value
+        
+        log_debug("No image data found in any strategy")
+        return None
+        
+    except Exception as e:
+        log_debug(f"Error in image search: {e}")
+        return None
 
 def decode_base64_image(base64_string):
     """Decode base64 image with enhanced error handling"""
@@ -32,6 +77,9 @@ def decode_base64_image(base64_string):
         # Clean any non-base64 characters
         import re
         base64_string = re.sub(r'[^A-Za-z0-9+/=]', '', base64_string)
+        
+        log_debug(f"Base64 string length after cleaning: {len(base64_string)}")
+        log_debug(f"Base64 string start: {base64_string[:100]}...")
         
         # Try standard decode first (without adding padding)
         try:
@@ -60,7 +108,7 @@ def decode_base64_image(base64_string):
         log_debug(f"Base64 decode error: {e}")
         raise
 
-def enhance_image_to_target_style(image):
+def apply_image3_color_enhancement(image):
     """Apply Image 3 style color enhancement - bright, clean, white background"""
     try:
         log_debug("Applying Image 3 target style color enhancement")
@@ -130,40 +178,7 @@ def enhance_image_to_target_style(image):
         # Return original with minimal processing
         return image
 
-def create_thumbnail(image, target_size=(1000, 1300)):
-    """Create centered thumbnail matching original style"""
-    try:
-        log_debug(f"Creating thumbnail {target_size}")
-        
-        h, w = image.shape[:2]
-        
-        # Find the ring area (assume center region)
-        center_x, center_y = w // 2, h // 2
-        
-        # Estimate ring size (use center 60% of image)
-        ring_size = min(w, h) * 0.6
-        
-        # Calculate crop area centered on ring
-        crop_size = int(ring_size * 1.2)  # Add some padding
-        
-        x1 = max(0, center_x - crop_size // 2)
-        y1 = max(0, center_y - crop_size // 2)
-        x2 = min(w, center_x + crop_size // 2)
-        y2 = min(h, center_y + crop_size // 2)
-        
-        # Crop the image
-        cropped = image[y1:y2, x1:x2]
-        
-        # Resize to target size
-        thumbnail = cv2.resize(cropped, target_size, interpolation=cv2.INTER_LANCZOS4)
-        
-        log_debug(f"Thumbnail created: {thumbnail.shape}")
-        return thumbnail
-        
-    except Exception as e:
-        log_debug(f"Thumbnail creation error: {e}")
-        # Fallback: simple resize
-        return cv2.resize(image, target_size, interpolation=cv2.INTER_LANCZOS4)
+
 
 def image_to_base64(image):
     """Convert image to base64 string without padding (Make.com compatible)"""
@@ -178,104 +193,73 @@ def image_to_base64(image):
         log_debug(f"Base64 conversion error: {e}")
         raise
 
-def safe_replicate_call(model, input_data, timeout=20):
-    """Safe Replicate API call with timeout protection"""
-    def run_replicate():
-        client = replicate.Client(api_token=os.environ.get("REPLICATE_API_TOKEN"))
-        return client.run(model, input=input_data)
-    
-    try:
-        with ThreadPoolExecutor() as executor:
-            future = executor.submit(run_replicate)
-            return future.result(timeout=timeout)
-    except TimeoutError:
-        log_debug(f"Replicate call timed out after {timeout}s")
-        return None
-    except Exception as e:
-        log_debug(f"Replicate call failed: {e}")
-        return None
-
 def handler(event):
-    """Main handler function"""
+    """Main handler function - MUST always return proper response"""
     try:
-        log_debug("=== Enhancement Handler v153 Started ===")
-        log_debug("Applying Image 3 target color style")
+        log_debug("=== Enhancement Handler v4 Started ===")
+        log_debug("Fixed Exit Code 0 issue with enhanced error handling")
         
-        # Extract image data from event
-        job_input = event.get("input", {})
-        log_debug(f"Event keys: {list(event.keys())}")
-        log_debug(f"Input keys: {list(job_input.keys())}")
-        
-        # Get base64 image data
-        base64_image = None
-        possible_keys = ["image", "image_base64", "base64_image", "data"]
-        
-        for key in possible_keys:
-            if key in job_input and job_input[key]:
-                base64_image = job_input[key]
-                log_debug(f"Found image data in key: {key}")
-                break
+        # Enhanced image finding to prevent Exit Code 0
+        base64_image = find_image_in_event(event)
         
         if not base64_image:
-            # Check nested structures
-            for key, value in job_input.items():
-                if isinstance(value, dict) and "image" in value:
-                    base64_image = value["image"]
-                    log_debug(f"Found nested image data in: {key}")
-                    break
-        
-        if not base64_image:
-            raise ValueError("No image data found in event")
+            log_debug("No image provided - returning proper error response")
+            return {
+                "output": {
+                    "enhanced_image": "",
+                    "processing_info": {
+                        "error": "No image provided",
+                        "status": "error",
+                        "version": VERSION,
+                        "timestamp": int(time.time())
+                    }
+                }
+            }
         
         log_debug(f"Base64 string length: {len(base64_image)}")
-        log_debug(f"Base64 string start: {base64_image[:100]}...")
         
         # Decode image
         image = decode_base64_image(base64_image)
         log_debug(f"Image decoded: {image.shape}")
         
         # Apply Image 3 style enhancement
-        enhanced_image = enhance_image_to_target_style(image)
+        enhanced_image = apply_image3_color_enhancement(image)
         log_debug("Image 3 style enhancement completed")
         
-        # Create thumbnail
-        thumbnail = create_thumbnail(enhanced_image)
-        log_debug("Thumbnail created")
-        
-        # Convert to base64
+        # Convert to base64 (NO THUMBNAIL - Enhancement only!)
         enhanced_base64 = image_to_base64(enhanced_image)
-        thumbnail_base64 = image_to_base64(thumbnail)
         
         # Prepare response with nested output structure for Make.com
         response = {
             "output": {
                 "enhanced_image": enhanced_base64,
-                "thumbnail": thumbnail_base64,
                 "processing_info": {
                     "version": VERSION,
-                    "style": "Image_3_target_style",
+                    "style": "Image_3_target_style", 
                     "background_rgb": "252_250_248",
                     "brightness_boost": "25_percent",
                     "white_overlay": "15_percent",
+                    "exit_code_0_fixed": True,
                     "timestamp": int(time.time())
                 }
             }
         }
         
-        log_debug("=== Enhancement Handler v153 Completed Successfully ===")
+        log_debug("=== Enhancement Handler v4 Completed Successfully ===")
         return response
         
     except Exception as e:
         log_debug(f"Handler error: {e}")
         
-        # Return error response with same structure
+        # CRITICAL: Always return proper response structure to prevent Exit Code 0
         return {
             "output": {
                 "enhanced_image": "",
-                "thumbnail": "",
                 "processing_info": {
-                    "version": VERSION,
                     "error": str(e),
+                    "status": "error",
+                    "version": VERSION,
+                    "exit_code_0_prevention": "always_return_response",
                     "timestamp": int(time.time())
                 }
             }
