@@ -11,6 +11,7 @@ import time
 # Version info
 VERSION = "v24-enhancement"
 
+
 class WeddingRingEnhancerV24:
     """v24 Wedding Ring Enhancement - Simple Color Enhancement"""
     
