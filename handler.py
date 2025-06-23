@@ -1,439 +1,428 @@
-"""
-Wedding Ring Enhancement Handler V13 - Complete Package
-- NumPy 1.24+ compatibility (no np.bool references)
-- Safe JSON serialization for all data types  
-- Make.com base64 compatibility (padding removed)
-- Metal type detection (4 types)
-- Wedding ring enhancement (38 training pairs)
-- Ultra-precision detail enhancement
-"""
-
 import runpod
 import base64
+import numpy as np
+from PIL import Image, ImageEnhance, ImageFilter, ImageDraw
+import cv2
 import io
-import json
-import time
-import traceback
-from typing import Dict, Any, Union, Optional
-import logging
 import os
+import json
+import traceback
+import time
+from typing import Dict, Any, Tuple, Optional, List
 
-# Optional imports with fallback
+# Version info
+VERSION = "v14-enhancement"
+
+# Import Replicate only when available
 try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
+    import replicate
+    REPLICATE_AVAILABLE = True
 except ImportError:
-    NUMPY_AVAILABLE = False
-    print("NumPy not available")
+    REPLICATE_AVAILABLE = False
+    print(f"[{VERSION}] Replicate not available")
 
-try:
-    from PIL import Image, ImageEnhance, ImageFilter
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-    print("PIL not available")
-
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except ImportError:
-    CV2_AVAILABLE = False
-    print("OpenCV not available")
-
-try:
-    import requests
-    REQUESTS_AVAILABLE = True
-except ImportError:
-    REQUESTS_AVAILABLE = False
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-VERSION = "V13"
-
-def safe_json_convert(obj):
-    """
-    Safely convert numpy/special types to JSON-serializable format
-    CRITICAL: No np.bool references for NumPy 1.24+ compatibility
-    """
-    if obj is None:
-        return None
+class WeddingRingEnhancerV14:
+    """v14 Wedding Ring Enhancement System - Ultra Detection"""
     
-    # Handle numpy types using string representation (NumPy 1.24+ compatible)
-    if NUMPY_AVAILABLE:
-        # Check type string to avoid direct np.bool reference
-        obj_type_str = str(type(obj))
+    def __init__(self):
+        print(f"[{VERSION}] Initializing - Ultra Detection & Make.com Fix")
+        self.replicate_client = None
         
-        # Handle numpy boolean types
-        if 'numpy.bool' in obj_type_str or obj_type_str == "<class 'numpy.bool_'>":
-            return bool(obj)
+        # 38 pairs learning data parameters (28 + 10)
+        self.enhancement_params = {
+            'yellow_gold': {
+                'natural': {
+                    'brightness': 1.25, 'saturation': 1.15, 'contrast': 1.05,
+                    'sharpness': 1.35, 'noise_reduction': 8,
+                    'highlight_boost': 0.12, 'shadow_lift': 0.08,
+                    'white_overlay': 0.15, 's_mult': 0.85, 'v_mult': 1.10
+                },
+                'warm': {
+                    'brightness': 1.30, 'saturation': 1.20, 'contrast': 1.08,
+                    'sharpness': 1.40, 'noise_reduction': 10,
+                    'highlight_boost': 0.15, 'shadow_lift': 0.10,
+                    'white_overlay': 0.18, 's_mult': 0.88, 'v_mult': 1.12
+                },
+                'cool': {
+                    'brightness': 1.20, 'saturation': 1.10, 'contrast': 1.02,
+                    'sharpness': 1.30, 'noise_reduction': 7,
+                    'highlight_boost': 0.10, 'shadow_lift': 0.06,
+                    'white_overlay': 0.12, 's_mult': 0.82, 'v_mult': 1.08
+                }
+            },
+            'rose_gold': {
+                'natural': {
+                    'brightness': 1.22, 'saturation': 1.12, 'contrast': 1.04,
+                    'sharpness': 1.32, 'noise_reduction': 9,
+                    'highlight_boost': 0.11, 'shadow_lift': 0.07,
+                    'white_overlay': 0.13, 's_mult': 0.83, 'v_mult': 1.09
+                },
+                'warm': {
+                    'brightness': 1.28, 'saturation': 1.18, 'contrast': 1.07,
+                    'sharpness': 1.38, 'noise_reduction': 11,
+                    'highlight_boost': 0.14, 'shadow_lift': 0.09,
+                    'white_overlay': 0.16, 's_mult': 0.86, 'v_mult': 1.11
+                },
+                'cool': {
+                    'brightness': 1.18, 'saturation': 1.08, 'contrast': 1.01,
+                    'sharpness': 1.28, 'noise_reduction': 8,
+                    'highlight_boost': 0.09, 'shadow_lift': 0.05,
+                    'white_overlay': 0.10, 's_mult': 0.80, 'v_mult': 1.07
+                }
+            },
+            'white_gold': {
+                'natural': {
+                    'brightness': 1.18, 'saturation': 0.98, 'contrast': 1.12,
+                    'sharpness': 1.15, 'noise_reduction': 6,
+                    'highlight_boost': 0.18, 'shadow_lift': 0.03,
+                    'white_overlay': 0.09, 'color_temp_a': -3, 'color_temp_b': -3
+                },
+                'warm': {
+                    'brightness': 1.20, 'saturation': 1.00, 'contrast': 1.14,
+                    'sharpness': 1.18, 'noise_reduction': 7,
+                    'highlight_boost': 0.20, 'shadow_lift': 0.04,
+                    'white_overlay': 0.11, 'color_temp_a': -2, 'color_temp_b': -2
+                },
+                'cool': {
+                    'brightness': 1.16, 'saturation': 0.96, 'contrast': 1.10,
+                    'sharpness': 1.12, 'noise_reduction': 5,
+                    'highlight_boost': 0.16, 'shadow_lift': 0.02,
+                    'white_overlay': 0.08, 'color_temp_a': -4, 'color_temp_b': -4
+                }
+            },
+            'plain_white': {  # 무도금화이트
+                'natural': {
+                    'brightness': 1.35, 'saturation': 0.90, 'contrast': 1.02,
+                    'sharpness': 1.05, 'noise_reduction': 3,
+                    'highlight_boost': 0.22, 'shadow_lift': 0.12,
+                    'white_overlay': 0.20, 's_mult': 0.75, 'v_mult': 1.15
+                }
+            }
+        }
         
-        # Handle numpy integers
-        if 'numpy.int' in obj_type_str or 'numpy.uint' in obj_type_str:
-            return int(obj)
+        # AFTER background colors
+        self.after_bg_colors = {
+            'yellow_gold': (244, 242, 236),
+            'rose_gold': (243, 241, 238),
+            'white_gold': (246, 246, 246),
+            'plain_white': (247, 247, 247)
+        }
+    
+    def detect_metal_type(self, image_np):
+        """웨딩링 금속 타입 감지"""
+        # 중앙 영역 샘플링
+        h, w = image_np.shape[:2]
+        center_region = image_np[h//3:2*h//3, w//3:2*w//3]
         
-        # Handle numpy floats
-        if 'numpy.float' in obj_type_str:
-            return float(obj)
+        # HSV 변환
+        hsv = cv2.cvtColor(center_region, cv2.COLOR_RGB2HSV)
+        avg_hue = np.mean(hsv[:, :, 0])
+        avg_sat = np.mean(hsv[:, :, 1])
+        avg_val = np.mean(hsv[:, :, 2])
         
-        # Handle numpy arrays
-        if hasattr(obj, 'tolist') and callable(getattr(obj, 'tolist')):
-            return obj.tolist()
+        # 평균 RGB
+        avg_color = np.mean(center_region.reshape(-1, 3), axis=0)
+        r, g, b = avg_color
+        
+        # 금속 타입 판별
+        if avg_sat < 30 and avg_val > 180:  # 낮은 채도, 높은 명도
+            if r > 240 and g > 240 and b > 235:
+                return 'plain_white'
+            else:
+                return 'white_gold'
+        elif 15 < avg_hue < 35 and avg_sat > 50:  # 노란색 계열
+            return 'yellow_gold'
+        elif avg_hue < 15 and r > g and avg_sat > 40:  # 붉은색 계열
+            return 'rose_gold'
+        else:
+            return 'white_gold'  # 기본값
     
-    # Handle Python bool (must come after numpy check)
-    if isinstance(obj, bool):
-        return obj
+    def apply_v13_enhancement(self, image, metal_type, lighting='natural'):
+        """v13.3 파라미터 기반 향상"""
+        params = self.enhancement_params.get(metal_type, {}).get(lighting, {})
+        if not params:
+            params = self.enhancement_params['white_gold']['natural']
+        
+        # 1. 밝기 조정
+        if 'brightness' in params:
+            enhancer = ImageEnhance.Brightness(image)
+            image = enhancer.enhance(params['brightness'])
+        
+        # 2. 대비 조정
+        if 'contrast' in params:
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(params['contrast'])
+        
+        # 3. 채도 조정
+        if 'saturation' in params:
+            enhancer = ImageEnhance.Color(image)
+            image = enhancer.enhance(params['saturation'])
+        
+        # 4. 선명도 조정
+        if 'sharpness' in params:
+            enhancer = ImageEnhance.Sharpness(image)
+            image = enhancer.enhance(params['sharpness'])
+        
+        # 5. 색상 조정 (HSV)
+        if any(k in params for k in ['s_mult', 'v_mult']):
+            img_np = np.array(image)
+            hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV).astype(np.float32)
+            
+            if 's_mult' in params:
+                hsv[:, :, 1] = np.clip(hsv[:, :, 1] * params['s_mult'], 0, 255)
+            if 'v_mult' in params:
+                hsv[:, :, 2] = np.clip(hsv[:, :, 2] * params['v_mult'], 0, 255)
+            
+            img_np = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+            image = Image.fromarray(img_np)
+        
+        # 6. 하이라이트/그림자 조정
+        if 'highlight_boost' in params or 'shadow_lift' in params:
+            img_np = np.array(image).astype(np.float32) / 255.0
+            
+            if 'highlight_boost' in params:
+                highlights = img_np > 0.7
+                img_np[highlights] = np.clip(img_np[highlights] * (1 + params['highlight_boost']), 0, 1)
+            
+            if 'shadow_lift' in params:
+                shadows = img_np < 0.3
+                img_np[shadows] = np.clip(img_np[shadows] + params['shadow_lift'], 0, 1)
+            
+            image = Image.fromarray((img_np * 255).astype(np.uint8))
+        
+        # 7. 화이트 오버레이
+        if 'white_overlay' in params and params['white_overlay'] > 0:
+            white = Image.new('RGB', image.size, (255, 255, 255))
+            image = Image.blend(image, white, params['white_overlay'])
+        
+        # 8. 색온도 조정 (LAB)
+        if 'color_temp_a' in params or 'color_temp_b' in params:
+            img_np = np.array(image)
+            lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB).astype(np.float32)
+            
+            if 'color_temp_a' in params:
+                lab[:, :, 1] = np.clip(lab[:, :, 1] + params['color_temp_a'], 0, 255)
+            if 'color_temp_b' in params:
+                lab[:, :, 2] = np.clip(lab[:, :, 2] + params['color_temp_b'], 0, 255)
+            
+            img_np = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
+            image = Image.fromarray(img_np)
+        
+        # 9. 노이즈 감소
+        if 'noise_reduction' in params and params['noise_reduction'] > 0:
+            img_np = np.array(image)
+            denoised = cv2.fastNlMeansDenoisingColored(img_np, None, 
+                                                       params['noise_reduction'], 
+                                                       params['noise_reduction'], 7, 21)
+            image = Image.fromarray(denoised)
+        
+        # 10. CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        img_np = np.array(image)
+        lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+        img_np = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        
+        return Image.fromarray(img_np)
     
-    # Handle other basic types
-    if isinstance(obj, (int, float, str)):
-        return obj
-    
-    # Handle lists
-    if isinstance(obj, list):
-        return [safe_json_convert(item) for item in obj]
-    
-    # Handle dictionaries
-    if isinstance(obj, dict):
-        return {key: safe_json_convert(value) for key, value in obj.items()}
-    
-    # Handle bytes
-    if isinstance(obj, bytes):
-        return base64.b64encode(obj).decode('utf-8')
-    
-    # Default: convert to string
-    return str(obj)
+    def process_image(self, image_np):
+        """메인 처리 파이프라인"""
+        try:
+            # PIL Image로 변환
+            image = Image.fromarray(image_np)
+            
+            # 1. 금속 타입 감지
+            metal_type = self.detect_metal_type(image_np)
+            print(f"[{VERSION}] Detected metal type: {metal_type}")
+            
+            # 2. v13.3 보정 적용 (10단계)
+            enhanced = self.apply_v13_enhancement(image, metal_type)
+            
+            # 3. AFTER 배경색 적용
+            if metal_type in self.after_bg_colors:
+                bg_color = self.after_bg_colors[metal_type]
+                enhanced_np = np.array(enhanced)
+                
+                # 가장자리 블렌딩
+                mask = np.zeros((enhanced_np.shape[0], enhanced_np.shape[1]), dtype=np.float32)
+                cv2.rectangle(mask, (30, 30), (enhanced_np.shape[1]-30, enhanced_np.shape[0]-30), 1.0, -1)
+                mask = cv2.GaussianBlur(mask, (31, 31), 15)
+                
+                for i in range(3):
+                    enhanced_np[:, :, i] = enhanced_np[:, :, i] * mask + bg_color[i] * (1 - mask)
+                
+                enhanced = Image.fromarray(enhanced_np.astype(np.uint8))
+            
+            return enhanced, {
+                'metal_type': metal_type,
+                'lighting': 'natural',
+                'version': VERSION
+            }
+            
+        except Exception as e:
+            print(f"[{VERSION}] Processing error: {e}")
+            traceback.print_exc()
+            raise
 
-def find_image_data(job_input, depth=0, max_depth=5):
-    """Find image data in nested structure"""
+# 전역 인스턴스
+enhancer_instance = None
+
+def get_enhancer():
+    """싱글톤 enhancer 인스턴스"""
+    global enhancer_instance
+    if enhancer_instance is None:
+        enhancer_instance = WeddingRingEnhancerV14()
+    return enhancer_instance
+
+def find_base64_in_dict(data, depth=0, max_depth=10):
+    """중첩된 딕셔너리에서 base64 이미지 찾기"""
     if depth > max_depth:
         return None
     
-    # Direct check for common keys
-    image_keys = ['image', 'image_base64', 'base64', 'img', 'data', 
-                  'imageData', 'image_data', 'input_image', 'file']
+    if isinstance(data, str) and len(data) > 100:
+        return data
     
-    if isinstance(job_input, dict):
-        # Check direct keys first
-        for key in image_keys:
-            if key in job_input and job_input[key]:
-                value = job_input[key]
-                if isinstance(value, str) and len(value) > 100:
-                    logger.info(f"Found image in key: {key}")
-                    return value
+    if isinstance(data, dict):
+        # 일반적인 키들 먼저 확인
+        for key in ['image', 'base64', 'data', 'input', 'file']:
+            if key in data and isinstance(data[key], str) and len(data[key]) > 100:
+                return data[key]
         
-        # Check nested structures
-        for key, value in job_input.items():
-            result = find_image_data(value, depth + 1, max_depth)
+        # 모든 값 확인
+        for value in data.values():
+            result = find_base64_in_dict(value, depth + 1, max_depth)
             if result:
                 return result
     
-    elif isinstance(job_input, list):
-        for item in job_input:
-            result = find_image_data(item, depth + 1, max_depth)
+    elif isinstance(data, list):
+        for item in data:
+            result = find_base64_in_dict(item, depth + 1, max_depth)
             if result:
                 return result
-    
-    elif isinstance(job_input, str) and len(job_input) > 100:
-        # Check if it looks like base64
-        if job_input.startswith('data:image') or (
-            all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' 
-                for c in job_input[:100])):
-            return job_input
     
     return None
 
 def decode_base64_image(base64_str):
-    """Decode base64 string to PIL Image"""
+    """Base64 문자열을 numpy 배열로 디코드"""
     try:
-        # Clean the base64 string
+        # Data URL 형식 처리
         if ',' in base64_str:
             base64_str = base64_str.split(',')[1]
         
-        base64_str = base64_str.strip()
+        # Padding 추가 시도
+        padding = 4 - len(base64_str) % 4
+        if padding != 4:
+            base64_str += '=' * padding
         
-        # Try multiple padding options
-        for padding in ['', '=', '==', '===']:
-            try:
-                padded = base64_str + padding
-                img_data = base64.b64decode(padded)
-                return Image.open(io.BytesIO(img_data))
-            except:
-                continue
+        # 디코드
+        img_data = base64.b64decode(base64_str)
+        img = Image.open(io.BytesIO(img_data))
         
-        raise ValueError("Failed to decode base64 image with any padding")
-        
-    except Exception as e:
-        logger.error(f"Base64 decode error: {str(e)}")
-        raise
-
-def detect_metal_type(img):
-    """
-    Detect wedding ring metal type using color analysis
-    Returns: 'yellow_gold', 'rose_gold', 'white_gold', or 'plain_white'
-    """
-    if not NUMPY_AVAILABLE:
-        return 'plain_white'
-    
-    try:
-        # Convert to numpy array
-        img_array = np.array(img)
-        
-        # Get center region (more likely to have the ring)
-        h, w = img_array.shape[:2]
-        center_y = h // 2
-        center_x = w // 2
-        region_size = min(h, w) // 4
-        
-        center_region = img_array[
-            center_y - region_size:center_y + region_size,
-            center_x - region_size:center_x + region_size
-        ]
-        
-        # Calculate average colors
-        avg_color = np.mean(center_region, axis=(0, 1))
-        r, g, b = avg_color
-        
-        # Calculate color ratios
-        if r > 0 and g > 0 and b > 0:
-            rg_ratio = r / g
-            rb_ratio = r / b
-            gb_ratio = g / b
-            
-            # Decision logic based on color ratios
-            if rg_ratio > 1.1 and rb_ratio > 1.2:
-                return 'rose_gold'
-            elif rg_ratio > 0.95 and rg_ratio < 1.05 and gb_ratio > 1.05:
-                return 'yellow_gold'
-            elif abs(r - g) < 20 and abs(g - b) < 20 and abs(r - b) < 20:
-                if np.mean([r, g, b]) > 200:
-                    return 'white_gold'
-                else:
-                    return 'plain_white'
-            else:
-                return 'plain_white'
-        
-        return 'plain_white'
-        
-    except Exception as e:
-        logger.error(f"Metal detection error: {str(e)}")
-        return 'plain_white'
-
-def apply_metal_specific_enhancement(img, metal_type):
-    """Apply enhancement based on detected metal type"""
-    try:
-        # Base enhancement for all types
-        brightness = ImageEnhance.Brightness(img)
-        img = brightness.enhance(1.05)  # Slight brightness increase
-        
-        color = ImageEnhance.Color(img)
-        contrast = ImageEnhance.Contrast(img)
-        
-        # Metal-specific adjustments
-        if metal_type == 'yellow_gold':
-            img = color.enhance(0.95)  # Slight desaturation
-            img = contrast.enhance(1.02)
-        elif metal_type == 'rose_gold':
-            img = color.enhance(0.93)  # More desaturation
-            img = contrast.enhance(1.03)
-        elif metal_type == 'white_gold':
-            img = color.enhance(0.90)  # Even more desaturation
-            img = contrast.enhance(1.05)
-        else:  # plain_white
-            img = color.enhance(0.88)  # Maximum desaturation
-            img = contrast.enhance(1.06)
-        
-        return img
-        
-    except Exception as e:
-        logger.error(f"Metal enhancement error: {str(e)}")
-        return img
-
-def enhance_ring_details(img):
-    """
-    Enhance wedding ring details - remove noise, enhance edges
-    Based on 38 training pairs
-    """
-    try:
-        if CV2_AVAILABLE and NUMPY_AVAILABLE:
-            # Convert to numpy array
-            img_array = np.array(img)
-            
-            # Denoise
-            denoised = cv2.fastNlMeansDenoisingColored(img_array, None, 3, 3, 7, 21)
-            
-            # Enhance edges with unsharp mask
-            gaussian = cv2.GaussianBlur(denoised, (0, 0), 2.0)
-            unsharp = cv2.addWeighted(denoised, 1.5, gaussian, -0.5, 0)
-            
-            # Convert back to PIL
-            img = Image.fromarray(unsharp)
-        else:
-            # Fallback: PIL-only enhancement
-            # Sharpen
-            img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=50, threshold=0))
-            
-            # Denoise with slight blur then sharpen
-            img = img.filter(ImageFilter.SMOOTH_MORE)
-            img = img.filter(ImageFilter.SHARPEN)
-        
-        return img
-        
-    except Exception as e:
-        logger.error(f"Detail enhancement error: {str(e)}")
-        return img
-
-def image_to_base64(img):
-    """
-    Convert PIL Image to base64 - MUST REMOVE PADDING for Make.com
-    """
-    try:
-        buffer = io.BytesIO()
-        img.save(buffer, format='PNG', quality=95, optimize=True)
-        img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        # CRITICAL: Remove padding for Make.com compatibility
-        # Google Apps Script will restore padding when needed
-        img_base64 = img_base64.rstrip('=')
-        
-        logger.info(f"Image converted to base64, length: {len(img_base64)}, padding removed for Make.com")
-        return img_base64
-        
-    except Exception as e:
-        logger.error(f"Base64 conversion error: {str(e)}")
-        return ""
-
-def handler(job):
-    """RunPod handler for wedding ring enhancement V13"""
-    start_time = time.time()
-    
-    try:
-        logger.info(f"\n{'='*60}")
-        logger.info(f"Enhancement Handler {VERSION} Started")
-        logger.info(f"NumPy: {NUMPY_AVAILABLE}, PIL: {PIL_AVAILABLE}, CV2: {CV2_AVAILABLE}")
-        logger.info(f"{'='*60}")
-        
-        # Get input
-        job_input = job.get('input', {})
-        logger.info(f"Input keys: {list(job_input.keys())}")
-        
-        # Debug mode
-        if job_input.get('debug_mode', False):
-            return {
-                "output": {
-                    "status": "debug_success",
-                    "message": f"{VERSION} enhancement handler working",
-                    "version": VERSION,
-                    "features": [
-                        "Safe JSON conversion (NumPy 1.24+)",
-                        "Base64 padding removal for Make.com",
-                        "Metal type detection (4 types)",
-                        "Wedding ring enhancement (38 pairs)",
-                        "Detail enhancement with noise reduction",
-                        "Color grading based on metal type"
-                    ]
-                }
-            }
-        
-        # Find image data
-        image_data_str = find_image_data(job_input)
-        if not image_data_str:
-            error_msg = f"No image found. Available keys: {list(job_input.keys())}"
-            logger.error(error_msg)
-            return {
-                "output": {
-                    "error": error_msg,
-                    "status": "error",
-                    "version": VERSION
-                }
-            }
-        
-        # Decode image
-        logger.info("Decoding image...")
-        img = decode_base64_image(image_data_str)
-        logger.info(f"Image decoded: {img.size}, mode: {img.mode}")
-        
-        # Ensure RGB mode
+        # RGB로 변환
         if img.mode != 'RGB':
             img = img.convert('RGB')
         
-        # Detect metal type
-        metal_type = detect_metal_type(img)
-        logger.info(f"Detected metal type: {metal_type}")
+        return np.array(img)
         
-        # Apply enhancements
-        logger.info("Applying enhancements...")
+    except Exception as e:
+        print(f"[{VERSION}] Error decoding base64: {e}")
+        raise
+
+def encode_image_to_base64(image, format='PNG'):
+    """이미지를 base64로 인코딩 (Make.com 호환 - padding 제거!)"""
+    try:
+        # numpy 배열인 경우 PIL Image로 변환
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
         
-        # 1. Metal-specific color enhancement
-        img = apply_metal_specific_enhancement(img, metal_type)
+        # 버퍼에 저장
+        buffer = io.BytesIO()
+        image.save(buffer, format=format, quality=95 if format == 'JPEG' else None)
+        buffer.seek(0)
         
-        # 2. Detail enhancement (noise reduction + sharpening)
-        img = enhance_ring_details(img)
+        # Base64 인코딩 후 padding 제거!
+        base64_str = base64.b64encode(buffer.getvalue()).decode('utf-8').rstrip('=')
         
-        # 3. Final slight brightness boost for cleaner look
-        brightness = ImageEnhance.Brightness(img)
-        img = brightness.enhance(1.02)
+        return base64_str
         
-        # Convert to base64 (padding removed for Make.com)
-        enhanced_base64 = image_to_base64(img)
+    except Exception as e:
+        print(f"[{VERSION}] Error encoding image: {e}")
+        raise
+
+def handler(job):
+    """RunPod 핸들러 함수"""
+    try:
+        start_time = time.time()
+        job_input = job["input"]
         
-        if not enhanced_base64:
+        print(f"[{VERSION}] Processing started")
+        print(f"[{VERSION}] Input type: {type(job_input)}")
+        
+        # Base64 이미지 찾기
+        base64_image = find_base64_in_dict(job_input)
+        if not base64_image:
+            print(f"[{VERSION}] No image data found in input")
             return {
                 "output": {
-                    "error": "Failed to convert enhanced image to base64",
-                    "status": "error", 
-                    "version": VERSION
+                    "error": "No image data found",
+                    "version": VERSION,
+                    "success": False
                 }
             }
         
-        # Prepare response with safe JSON conversion
+        print(f"[{VERSION}] Found image data, length: {len(base64_image)}")
+        
+        # 이미지 디코드
+        image_np = decode_base64_image(base64_image)
+        print(f"[{VERSION}] Image decoded: {image_np.shape}")
+        
+        # 처리
+        enhancer = get_enhancer()
+        enhanced, metadata = enhancer.process_image(image_np)
+        
+        # 결과 인코딩 (padding 제거!)
+        enhanced_base64 = encode_image_to_base64(enhanced)
+        
+        print(f"[{VERSION}] Enhanced image encoded, length: {len(enhanced_base64)}")
+        
+        # 처리 시간
         processing_time = time.time() - start_time
-        response_data = {
-            "enhanced_image": enhanced_base64,
-            "metal_type": metal_type,
-            "processing_time": round(processing_time, 2),
-            "original_size": safe_json_convert(img.size),
-            "enhancements_applied": [
-                "metal_specific_color_grading",
-                "noise_reduction",
-                "detail_enhancement",
-                "brightness_optimization"
-            ],
-            "version": VERSION,
-            "message": "Enhancement complete - optimized for Make.com"
+        print(f"[{VERSION}] Processing completed in {processing_time:.2f}s")
+        
+        # Make.com 호환 return 구조!
+        return {
+            "output": {
+                "enhanced_image": enhanced_base64,
+                "processing_info": metadata,
+                "success": True,
+                "version": VERSION,
+                "processing_time": round(processing_time, 2)
+            }
         }
-        
-        # Convert entire response using safe conversion
-        safe_response = safe_json_convert(response_data)
-        
-        logger.info(f"Enhancement complete in {processing_time:.2f}s")
-        logger.info(f"Response keys: {list(safe_response.keys())}")
-        
-        return {"output": safe_response}
         
     except Exception as e:
-        error_trace = traceback.format_exc()
-        logger.error(f"Handler error: {str(e)}\n{error_trace}")
+        error_msg = f"Error processing image: {str(e)}"
+        print(f"[{VERSION}] {error_msg}")
+        traceback.print_exc()
         
         return {
-            "output": safe_json_convert({
-                "error": str(e),
-                "error_trace": error_trace,
-                "status": "error",
+            "output": {
+                "error": error_msg,
+                "traceback": traceback.format_exc(),
+                "success": False,
                 "version": VERSION
-            })
+            }
         }
 
-# RunPod handler
-runpod.serverless.start({"handler": handler})
-
-# Test mode
+# RunPod 시작
 if __name__ == "__main__":
-    print(f"Testing {VERSION} Enhancement Handler...")
-    test_job = {
-        "input": {
-            "debug_mode": True
-        }
-    }
-    result = handler(test_job)
-    print(json.dumps(result, indent=2))
+    print("="*70)
+    print(f"Wedding Ring Enhancement {VERSION}")
+    print("Enhancement Handler (a_파일)")
+    print(f"Replicate Available: {REPLICATE_AVAILABLE}")
+    print(f"OpenCV Available: {cv2 is not None}")
+    print(f"NumPy Available: {np is not None}")
+    print(f"Replicate Token Set: {bool(os.environ.get('REPLICATE_API_TOKEN'))}")
+    print("="*70)
+    
+    runpod.serverless.start({"handler": handler})
