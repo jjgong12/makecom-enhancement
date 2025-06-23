@@ -11,7 +11,6 @@ import time
 # Version info
 VERSION = "v24-enhancement"
 
-
 class WeddingRingEnhancerV24:
     """v24 Wedding Ring Enhancement - Simple Color Enhancement"""
     
@@ -97,15 +96,13 @@ def handler(job):
         
         if not base64_image:
             return {
-                "output": {
-                    "enhanced_image": None,
-                    "error": "No image data found in input",
-                    "success": False,
-                    "version": VERSION,
-                    "debug_info": {
-                        "input_keys": list(job_input.keys()) if isinstance(job_input, dict) else [],
-                        "first_key": list(job_input.keys())[0] if isinstance(job_input, dict) and job_input else None
-                    }
+                "enhanced_image": None,
+                "error": "No image data found in input",
+                "success": False,
+                "version": VERSION,
+                "debug_info": {
+                    "input_keys": list(job_input.keys()) if isinstance(job_input, dict) else [],
+                    "first_key": list(job_input.keys())[0] if isinstance(job_input, dict) and job_input else None
                 }
             }
         
@@ -136,12 +133,10 @@ def handler(job):
             print(f"[{VERSION}] Image decoded successfully: {image.size}")
         except Exception as e:
             return {
-                "output": {
-                    "enhanced_image": None,
-                    "error": f"Failed to decode base64: {str(e)}",
-                    "success": False,
-                    "version": VERSION
-                }
+                "enhanced_image": None,
+                "error": f"Failed to decode base64: {str(e)}",
+                "success": False,
+                "version": VERSION
             }
         
         # Apply enhancement
@@ -163,15 +158,14 @@ def handler(job):
         print(f"[{VERSION}] Enhanced base64 length: {len(enhanced_base64)}")
         
         # Return proper structure for Make.com
+        # RunPod already wraps in data/output, so we just return the inner content
         result = {
-            "output": {
-                "enhanced_image": enhanced_base64,
-                "success": True,
-                "version": VERSION,
-                "original_size": list(image.size),
-                "enhanced_size": list(enhanced_image.size),
-                "processing_time": time.time() - job.get('start_time', time.time())
-            }
+            "enhanced_image": enhanced_base64,
+            "success": True,
+            "version": VERSION,
+            "original_size": list(image.size),
+            "enhanced_size": list(enhanced_image.size),
+            "processing_time": time.time() - job.get('start_time', time.time())
         }
         
         print(f"[{VERSION}] ====== Success - Returning Result ======")
@@ -183,13 +177,11 @@ def handler(job):
         traceback.print_exc()
         
         return {
-            "output": {
-                "enhanced_image": None,
-                "error": error_msg,
-                "success": False,
-                "version": VERSION,
-                "traceback": traceback.format_exc()
-            }
+            "enhanced_image": None,
+            "error": error_msg,
+            "success": False,
+            "version": VERSION,
+            "traceback": traceback.format_exc()
         }
 
 # RunPod serverless start
@@ -197,7 +189,7 @@ if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
     print("V24 - Fixed Input Key Detection")
-    print("Make.com path: {{4.data.output.output.enhanced_image}}")
+    print("Make.com path: {{4.data.output.enhanced_image}}")
     print("="*70)
     
     runpod.serverless.start({"handler": handler})
