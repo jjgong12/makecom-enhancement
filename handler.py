@@ -1,332 +1,287 @@
 import os
-import sys
-import runpod
+import io
+import json
 import base64
+import runpod
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance
-import io
-import traceback
+from PIL import Image, ImageEnhance, ImageFilter
+import replicate
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import time
 
-print("[v2] Starting Wedding Ring Enhancement Handler")
-print(f"[v2] Python version: {sys.version}")
-print(f"[v2] OpenCV version: {cv2.__version__}")
-print("="*70)
+VERSION = "v3"
 
-def remove_padding_safe(base64_string):
-    """Remove padding from base64 string for Make.com compatibility"""
-    return base64_string.rstrip('=')
+def log_debug(message):
+    """Debug logging with version info"""
+    print(f"[{VERSION}] {message}")
 
 def decode_base64_image(base64_string):
     """Decode base64 image with enhanced error handling"""
     try:
-        # Clean the base64 string
-        base64_string = base64_string.strip()
+        log_debug("Starting base64 decode process")
+        
+        # Remove whitespace and newlines
+        base64_string = base64_string.strip().replace('\n', '').replace('\r', '').replace(' ', '')
         
         # Remove data URL prefix if present
         if 'base64,' in base64_string:
             base64_string = base64_string.split('base64,')[1]
+            log_debug("Removed data URL prefix")
         
-        # Try direct decode first
+        # Clean any non-base64 characters
+        import re
+        base64_string = re.sub(r'[^A-Za-z0-9+/=]', '', base64_string)
+        
+        # Try standard decode first (without adding padding)
         try:
-            image_data = base64.b64decode(base64_string)
-        except:
+            image_data = base64.b64decode(base64_string, validate=True)
+            log_debug("Standard decode successful")
+        except Exception as e:
+            log_debug(f"Standard decode failed: {e}, trying with padding")
             # Add padding if needed
             missing_padding = len(base64_string) % 4
             if missing_padding:
                 base64_string += '=' * (4 - missing_padding)
-            image_data = base64.b64decode(base64_string)
+            image_data = base64.b64decode(base64_string, validate=True)
+            log_debug("Decode with padding successful")
         
         # Convert to numpy array
         nparr = np.frombuffer(image_data, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if image is None:
-            raise ValueError("Failed to decode image")
-        
+            raise ValueError("Failed to decode image data")
+            
+        log_debug(f"Image decoded successfully: {image.shape}")
         return image
+        
     except Exception as e:
-        print(f"[v2] Error decoding image: {str(e)}")
+        log_debug(f"Base64 decode error: {e}")
         raise
 
-def find_image_in_event(event):
-    """Enhanced image finding with multiple fallback strategies"""
-    print("[v2] Starting image search...")
-    print(f"[v2] Event type: {type(event)}")
-    print(f"[v2] Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
-    
-    # Strategy 1: Direct input
-    input_data = event.get("input", {})
-    print(f"[v2] Input type: {type(input_data)}")
-    
-    if isinstance(input_data, dict):
-        print(f"[v2] Input keys: {list(input_data.keys())}")
-        # Common keys
-        for key in ['image', 'image_base64', 'base64', 'img', 'data']:
-            if key in input_data and input_data[key]:
-                print(f"[v2] Found image in input.{key}")
-                return input_data[key]
-    
-    # Strategy 2: Direct event keys
-    for key in ['image', 'image_base64', 'base64']:
-        if key in event and event[key]:
-            print(f"[v2] Found image in event.{key}")
-            return event[key]
-    
-    # Strategy 3: String input
-    if isinstance(input_data, str) and len(input_data) > 100:
-        print("[v2] Input is string, assuming base64")
-        return input_data
-    
-    # Strategy 4: Nested search
-    if isinstance(input_data, dict):
-        for key, value in input_data.items():
-            if isinstance(value, str) and len(value) > 100:
-                print(f"[v2] Found potential image in input.{key}")
-                return value
-    
-    print("[v2] No image found in event")
-    return None
+def enhance_image_to_target_style(image):
+    """Apply Image 3 style color enhancement - bright, clean, white background"""
+    try:
+        log_debug("Applying Image 3 target style color enhancement")
+        
+        # Convert to RGB for PIL processing
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(image_rgb)
+        
+        # Step 1: Brightness boost (25% increase like Image 3)
+        brightness_enhancer = ImageEnhance.Brightness(pil_image)
+        enhanced = brightness_enhancer.enhance(1.25)
+        log_debug("Applied 25% brightness boost")
+        
+        # Step 2: Slight contrast increase for clarity
+        contrast_enhancer = ImageEnhance.Contrast(enhanced)
+        enhanced = contrast_enhancer.enhance(1.1)
+        log_debug("Applied contrast enhancement")
+        
+        # Step 3: Reduce saturation slightly for clean look
+        color_enhancer = ImageEnhance.Color(enhanced)
+        enhanced = color_enhancer.enhance(0.95)
+        log_debug("Applied saturation reduction for clean look")
+        
+        # Convert back to numpy for further processing
+        enhanced_array = np.array(enhanced)
+        enhanced_bgr = cv2.cvtColor(enhanced_array, cv2.COLOR_RGB2BGR)
+        
+        # Step 4: Apply white overlay (15% like Image 3)
+        white_overlay = np.full_like(enhanced_bgr, 255, dtype=np.uint8)
+        enhanced_bgr = cv2.addWeighted(enhanced_bgr, 0.85, white_overlay, 0.15, 0)
+        log_debug("Applied 15% white overlay")
+        
+        # Step 5: Replace background with Image 3 style background
+        # Target background: RGB(252, 250, 248) - very bright cream white
+        target_bg_bgr = (248, 250, 252)  # BGR format for OpenCV
+        
+        # Create background mask (detect darker areas that should be background)
+        gray = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2GRAY)
+        
+        # Multiple threshold approach for better background detection
+        bg_mask = np.zeros_like(gray, dtype=np.uint8)
+        
+        # Detect very dark areas (likely background/shadows)
+        dark_mask = gray < 50
+        bg_mask[dark_mask] = 255
+        
+        # Detect edges to refine mask
+        edges = cv2.Canny(gray, 30, 100)
+        kernel = np.ones((5,5), np.uint8)
+        edges_dilated = cv2.dilate(edges, kernel, iterations=2)
+        
+        # Combine masks
+        combined_mask = cv2.bitwise_or(bg_mask, edges_dilated)
+        
+        # Apply background replacement
+        enhanced_bgr[combined_mask > 0] = target_bg_bgr
+        log_debug("Applied Image 3 style background (252, 250, 248)")
+        
+        # Step 6: Final brightness adjustment to match Image 3
+        enhanced_bgr = np.clip(enhanced_bgr.astype(float) * 1.05, 0, 255).astype(np.uint8)
+        log_debug("Applied final brightness adjustment")
+        
+        return enhanced_bgr
+        
+    except Exception as e:
+        log_debug(f"Enhancement error: {e}")
+        # Return original with minimal processing
+        return image
 
-def detect_metal_type(image):
-    """Detect metal type based on color analysis"""
-    # Convert to LAB color space for better color analysis
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    
-    # Get center region
-    h, w = image.shape[:2]
-    center_y, center_x = h // 2, w // 2
-    roi_size = min(h, w) // 4
-    roi = lab[center_y-roi_size:center_y+roi_size, 
-              center_x-roi_size:center_x+roi_size]
-    
-    # Calculate average LAB values
-    avg_lab = np.mean(roi.reshape(-1, 3), axis=0)
-    l, a, b = avg_lab
-    
-    # Detect metal type based on LAB values
-    if b > 15:  # Yellow tones
-        return "yellow_gold"
-    elif a > 5:  # Red/pink tones
-        return "rose_gold"
-    elif l > 180:  # Very bright
-        return "plain_white"
-    else:
-        return "white_gold"
-
-def enhance_with_backlight_effect(image):
-    """Apply enhancement to mimic backlight effect (like photos 4,5,6)"""
-    # Step 1: Brighten overall image
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    
-    # Increase brightness significantly
-    l = cv2.add(l, 35)  # Stronger brightening for backlight effect
-    
-    # Apply CLAHE for better contrast
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    l = clahe.apply(l)
-    
-    enhanced = cv2.merge([l, a, b])
-    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-    
-    # Step 2: Add soft glow effect
-    # Create a blurred version
-    blurred = cv2.GaussianBlur(enhanced, (31, 31), 15)
-    
-    # Blend for soft glow
-    enhanced = cv2.addWeighted(enhanced, 0.65, blurred, 0.35, 0)
-    
-    # Step 3: Enhance colors
-    # Increase saturation slightly
-    hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV).astype(np.float32)
-    hsv[:,:,1] = hsv[:,:,1] * 1.2  # 20% saturation increase
-    hsv[:,:,1][hsv[:,:,1] > 255] = 255
-    hsv[:,:,2] = hsv[:,:,2] * 1.15  # 15% value increase
-    hsv[:,:,2][hsv[:,:,2] > 255] = 255
-    enhanced = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
-    
-    # Step 4: Final brightness adjustment
-    enhanced = cv2.convertScaleAbs(enhanced, alpha=1.15, beta=20)
-    
-    return enhanced
-
-def apply_ring_enhancement(image, metal_type):
-    """Apply ring-specific enhancements"""
-    # Denoise
-    denoised = cv2.bilateralFilter(image, 9, 75, 75)
-    
-    # Sharpen details
-    kernel = np.array([[-1,-1,-1],
-                      [-1, 9,-1],
-                      [-1,-1,-1]])
-    sharpened = cv2.filter2D(denoised, -1, kernel)
-    
-    # Blend
-    enhanced = cv2.addWeighted(denoised, 0.6, sharpened, 0.4, 0)
-    
-    # Metal-specific color correction
-    if metal_type == "yellow_gold":
-        # Enhance yellow tones
-        enhanced[:,:,0] = np.clip(enhanced[:,:,0] * 0.92, 0, 255).astype(np.uint8)  # Reduce blue
-        enhanced[:,:,2] = np.clip(enhanced[:,:,2] * 1.08, 0, 255).astype(np.uint8)  # Increase red
-    elif metal_type == "rose_gold":
-        # Enhance pink tones
-        enhanced[:,:,2] = np.clip(enhanced[:,:,2] * 1.1, 0, 255).astype(np.uint8)  # Increase red
-        enhanced[:,:,1] = np.clip(enhanced[:,:,1] * 1.02, 0, 255).astype(np.uint8)  # Slight green
-    elif metal_type == "white_gold":
-        # Cool white tones
-        enhanced[:,:,0] = np.clip(enhanced[:,:,0] * 1.03, 0, 255).astype(np.uint8)  # Slight blue
-    
-    return enhanced
-
-def create_thumbnail(image):
-    """Create a thumbnail with ring detection and cropping"""
-    target_w, target_h = 1000, 1300
-    
-    # Try to detect ring
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # Apply threshold to find ring
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    
-    # Find contours
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if contours:
-        # Find largest contour (likely the ring)
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
+def create_thumbnail(image, target_size=(1000, 1300)):
+    """Create centered thumbnail matching original style"""
+    try:
+        log_debug(f"Creating thumbnail {target_size}")
         
-        # Add padding
-        pad = 60
-        x1 = max(0, x - pad)
-        y1 = max(0, y - pad)
-        x2 = min(image.shape[1], x + w + pad)
-        y2 = min(image.shape[0], y + h + pad)
-        
-        # Crop ring region
-        ring_crop = image[y1:y2, x1:x2]
-        
-        # Resize to fit thumbnail maintaining aspect ratio
-        crop_h, crop_w = ring_crop.shape[:2]
-        scale = min(target_w/crop_w, target_h/crop_h) * 0.85
-        new_w = int(crop_w * scale)
-        new_h = int(crop_h * scale)
-        
-        resized = cv2.resize(ring_crop, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-        
-        # Create white background
-        thumbnail = np.ones((target_h, target_w, 3), dtype=np.uint8) * 255
-        
-        # Center the ring (slightly higher for better composition)
-        y_offset = int((target_h - new_h) * 0.35)  # Top 35%
-        x_offset = (target_w - new_w) // 2
-        
-        thumbnail[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
-    else:
-        # Fallback: resize entire image
         h, w = image.shape[:2]
-        scale = min(target_w/w, target_h/h) * 0.8
-        new_w = int(w * scale)
-        new_h = int(h * scale)
         
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        # Find the ring area (assume center region)
+        center_x, center_y = w // 2, h // 2
         
-        # Create white background
-        thumbnail = np.ones((target_h, target_w, 3), dtype=np.uint8) * 255
+        # Estimate ring size (use center 60% of image)
+        ring_size = min(w, h) * 0.6
         
-        # Center the image
-        y_offset = (target_h - new_h) // 2
-        x_offset = (target_w - new_w) // 2
+        # Calculate crop area centered on ring
+        crop_size = int(ring_size * 1.2)  # Add some padding
         
-        thumbnail[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
-    
-    return thumbnail
+        x1 = max(0, center_x - crop_size // 2)
+        y1 = max(0, center_y - crop_size // 2)
+        x2 = min(w, center_x + crop_size // 2)
+        y2 = min(h, center_y + crop_size // 2)
+        
+        # Crop the image
+        cropped = image[y1:y2, x1:x2]
+        
+        # Resize to target size
+        thumbnail = cv2.resize(cropped, target_size, interpolation=cv2.INTER_LANCZOS4)
+        
+        log_debug(f"Thumbnail created: {thumbnail.shape}")
+        return thumbnail
+        
+    except Exception as e:
+        log_debug(f"Thumbnail creation error: {e}")
+        # Fallback: simple resize
+        return cv2.resize(image, target_size, interpolation=cv2.INTER_LANCZOS4)
 
-def handler(event):
-    """RunPod handler function for enhancement"""
-    start_time = time.time()
+def image_to_base64(image):
+    """Convert image to base64 string without padding (Make.com compatible)"""
+    try:
+        _, buffer = cv2.imencode('.png', image)
+        img_base64 = base64.b64encode(buffer).decode('utf-8')
+        # CRITICAL: Remove padding for Make.com compatibility
+        img_base64 = img_base64.rstrip('=')
+        log_debug("Image converted to base64 (padding removed)")
+        return img_base64
+    except Exception as e:
+        log_debug(f"Base64 conversion error: {e}")
+        raise
+
+def safe_replicate_call(model, input_data, timeout=20):
+    """Safe Replicate API call with timeout protection"""
+    def run_replicate():
+        client = replicate.Client(api_token=os.environ.get("REPLICATE_API_TOKEN"))
+        return client.run(model, input=input_data)
     
     try:
-        print("\n" + "="*70)
-        print("[v2] Handler started - Complete Fix Version")
-        print("[v2] Event received, processing...")
+        with ThreadPoolExecutor() as executor:
+            future = executor.submit(run_replicate)
+            return future.result(timeout=timeout)
+    except TimeoutError:
+        log_debug(f"Replicate call timed out after {timeout}s")
+        return None
+    except Exception as e:
+        log_debug(f"Replicate call failed: {e}")
+        return None
+
+def handler(event):
+    """Main handler function"""
+    try:
+        log_debug("=== Enhancement Handler v153 Started ===")
+        log_debug("Applying Image 3 target color style")
         
-        # Find image in event
-        base64_image = find_image_in_event(event)
+        # Extract image data from event
+        job_input = event.get("input", {})
+        log_debug(f"Event keys: {list(event.keys())}")
+        log_debug(f"Input keys: {list(job_input.keys())}")
+        
+        # Get base64 image data
+        base64_image = None
+        possible_keys = ["image", "image_base64", "base64_image", "data"]
+        
+        for key in possible_keys:
+            if key in job_input and job_input[key]:
+                base64_image = job_input[key]
+                log_debug(f"Found image data in key: {key}")
+                break
         
         if not base64_image:
-            print("[v2] ERROR: No image found")
-            return {
-                "output": {
-                    "error": "No image provided",
-                    "status": "error",
-                    "version": "v2"
-                }
-            }
+            # Check nested structures
+            for key, value in job_input.items():
+                if isinstance(value, dict) and "image" in value:
+                    base64_image = value["image"]
+                    log_debug(f"Found nested image data in: {key}")
+                    break
         
-        print(f"[v2] Image found, length: {len(base64_image)}")
+        if not base64_image:
+            raise ValueError("No image data found in event")
+        
+        log_debug(f"Base64 string length: {len(base64_image)}")
+        log_debug(f"Base64 string start: {base64_image[:100]}...")
         
         # Decode image
         image = decode_base64_image(base64_image)
-        print(f"[v2] Image decoded: {image.shape}")
+        log_debug(f"Image decoded: {image.shape}")
         
-        # Detect metal type
-        metal_type = detect_metal_type(image)
-        print(f"[v2] Metal type detected: {metal_type}")
-        
-        # Apply backlight effect enhancement
-        enhanced = enhance_with_backlight_effect(image)
-        
-        # Apply ring-specific enhancements
-        enhanced = apply_ring_enhancement(enhanced, metal_type)
+        # Apply Image 3 style enhancement
+        enhanced_image = enhance_image_to_target_style(image)
+        log_debug("Image 3 style enhancement completed")
         
         # Create thumbnail
-        thumbnail = create_thumbnail(enhanced)
+        thumbnail = create_thumbnail(enhanced_image)
+        log_debug("Thumbnail created")
         
         # Convert to base64
-        # Main image
-        _, buffer = cv2.imencode('.jpg', enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        main_base64 = remove_padding_safe(base64.b64encode(buffer).decode('utf-8'))
+        enhanced_base64 = image_to_base64(enhanced_image)
+        thumbnail_base64 = image_to_base64(thumbnail)
         
-        # Thumbnail
-        _, buffer = cv2.imencode('.jpg', thumbnail, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        thumb_base64 = remove_padding_safe(base64.b64encode(buffer).decode('utf-8'))
-        
-        processing_time = time.time() - start_time
-        
-        print(f"[v2] Processing complete in {processing_time:.2f}s")
-        print("[v2] Returning results...")
-        
-        return {
+        # Prepare response with nested output structure for Make.com
+        response = {
             "output": {
-                "enhanced_image": main_base64,
-                "thumbnail": thumb_base64,
+                "enhanced_image": enhanced_base64,
+                "thumbnail": thumbnail_base64,
                 "processing_info": {
-                    "metal_type": metal_type,
-                    "status": "success",
-                    "version": "v2",
-                    "processing_time": f"{processing_time:.2f}s"
+                    "version": VERSION,
+                    "style": "Image_3_target_style",
+                    "background_rgb": "252_250_248",
+                    "brightness_boost": "25_percent",
+                    "white_overlay": "15_percent",
+                    "timestamp": int(time.time())
                 }
             }
         }
         
-    except Exception as e:
-        print(f"[v2] ERROR in handler: {str(e)}")
-        print(traceback.format_exc())
+        log_debug("=== Enhancement Handler v153 Completed Successfully ===")
+        return response
         
+    except Exception as e:
+        log_debug(f"Handler error: {e}")
+        
+        # Return error response with same structure
         return {
             "output": {
-                "error": str(e),
-                "status": "error",
-                "version": "v2",
-                "traceback": traceback.format_exc()
+                "enhanced_image": "",
+                "thumbnail": "",
+                "processing_info": {
+                    "version": VERSION,
+                    "error": str(e),
+                    "timestamp": int(time.time())
+                }
             }
         }
 
-# RunPod serverless entrypoint
+# RunPod serverless handler
 if __name__ == "__main__":
-    print("[v2] Starting RunPod serverless...")
+    log_debug("Starting RunPod serverless handler")
     runpod.serverless.start({"handler": handler})
