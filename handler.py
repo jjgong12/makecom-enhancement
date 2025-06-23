@@ -9,10 +9,10 @@ import traceback
 import time
 
 # Version info
-VERSION = "v20-enhancement"
+VERSION = "v21-enhancement"
 
-class WeddingRingEnhancerV20:
-    """v20 Wedding Ring Enhancement - Simple Color Enhancement"""
+class WeddingRingEnhancerV21:
+    """v21 Wedding Ring Enhancement - Simple Color Enhancement"""
     
     def __init__(self):
         print(f"[{VERSION}] Initializing - Simple Enhancement")
@@ -61,7 +61,7 @@ def get_enhancer():
     """싱글톤 enhancer 인스턴스"""
     global enhancer_instance
     if enhancer_instance is None:
-        enhancer_instance = WeddingRingEnhancerV20()
+        enhancer_instance = WeddingRingEnhancerV21()
     return enhancer_instance
 
 def find_base64_in_dict(data, depth=0, max_depth=10):
@@ -132,6 +132,8 @@ def encode_image_to_base64(image, format='PNG'):
         base64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
         # CRITICAL: Make.com을 위해 padding 제거
+        # Google Apps Script에서는 padding을 다시 추가해야 함:
+        # while (base64Data.length % 4 !== 0) { base64Data += '='; }
         base64_str = base64_str.rstrip('=')
         
         return base64_str
@@ -147,10 +149,12 @@ def handler(job):
         job_input = job["input"]
         
         print(f"[{VERSION}] Processing started")
+        print(f"[{VERSION}] Input structure: {type(job_input)}")
         
         # Base64 이미지 찾기
         base64_image = find_base64_in_dict(job_input)
         if not base64_image:
+            print(f"[{VERSION}] No base64 image found in input")
             return {
                 "output": {
                     "error": "No image data found",
@@ -166,23 +170,30 @@ def handler(job):
         # 간단한 색감 보정
         enhancer = get_enhancer()
         enhanced = enhancer.apply_simple_enhancement(image)
+        print(f"[{VERSION}] Enhancement applied")
         
         # 결과 인코딩
         enhanced_base64 = encode_image_to_base64(enhanced)
+        print(f"[{VERSION}] Image encoded, length: {len(enhanced_base64)}")
         
         # 처리 시간
         processing_time = time.time() - start_time
         print(f"[{VERSION}] Processing completed in {processing_time:.2f}s")
         
         # Return 구조 - Make.com이 {{4.data.output.output.enhanced_image}}로 접근
-        return {
+        result = {
             "output": {
                 "enhanced_image": enhanced_base64,
                 "success": True,
                 "version": VERSION,
-                "processing_time": round(processing_time, 2)
+                "processing_time": round(processing_time, 2),
+                "original_size": list(image.size),
+                "enhanced_size": list(enhanced.size)
             }
         }
+        
+        print(f"[{VERSION}] Returning result with output structure")
+        return result
         
     except Exception as e:
         error_msg = f"Error: {str(e)}"
@@ -202,6 +213,8 @@ if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
     print("Simple Enhancement Handler (a_파일)")
+    print("IMPORTANT: Google Apps Script must add padding back:")
+    print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
     print("="*70)
     
     runpod.serverless.start({"handler": handler})
