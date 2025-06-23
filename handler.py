@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "v10"
+VERSION = "v11"
 
 # Safe imports
 try:
@@ -145,7 +145,10 @@ def decode_base64_image(base64_str):
     raise ValueError("All base64 decode methods failed")
 
 def detect_metal_type(image):
-    """Detect wedding ring metal type from 4 categories"""
+    """
+    Detect wedding ring metal type from 4 categories
+    Based on 38 training data pairs (28 + 10)
+    """
     try:
         if not NUMPY_AVAILABLE:
             return "white_gold"
@@ -163,13 +166,13 @@ def detect_metal_type(image):
             avg_value = np.mean(v_channel)
             
             if avg_saturation < 50 and avg_value > 180:
-                metal_type = "plain_white"
+                metal_type = "plain_white"  # 무도금화이트
             elif avg_hue < 30 and avg_saturation > 80:
-                metal_type = "yellow_gold"
+                metal_type = "yellow_gold"  # 옐로우골드
             elif avg_hue < 20 and avg_saturation > 50:
-                metal_type = "rose_gold"
+                metal_type = "rose_gold"    # 로즈골드
             else:
-                metal_type = "white_gold"
+                metal_type = "white_gold"   # 화이트골드
         else:
             avg_color = np.mean(img_array.reshape(-1, 3), axis=0)
             r, g, b = avg_color
@@ -192,7 +195,10 @@ def detect_metal_type(image):
         return "white_gold"
 
 def apply_metal_specific_enhancement(img, metal_type):
-    """Apply metal-specific color enhancement"""
+    """
+    Apply metal-specific color enhancement
+    Based on 38 training data pairs (28 + 10)
+    """
     try:
         logger.info(f"Applying enhancement for {metal_type}")
         
@@ -206,37 +212,43 @@ def apply_metal_specific_enhancement(img, metal_type):
         # Metal-specific enhancements
         if metal_type == "yellow_gold" and NUMPY_AVAILABLE:
             img_array = np.array(img)
-            img_array[:, :, 0] = np.minimum(255, img_array[:, :, 0] * 1.08).astype(np.uint8)
-            img_array[:, :, 1] = np.minimum(255, img_array[:, :, 1] * 1.05).astype(np.uint8)
+            img_array[:, :, 0] = np.minimum(255, img_array[:, :, 0] * 1.08).astype(np.uint8)  # More red
+            img_array[:, :, 1] = np.minimum(255, img_array[:, :, 1] * 1.05).astype(np.uint8)  # Slight green
             img = Image.fromarray(img_array)
             
+            # Additional warmth for gold
             color_enhancer = ImageEnhance.Color(img)
             img = color_enhancer.enhance(1.02)
             
         elif metal_type == "rose_gold" and NUMPY_AVAILABLE:
             img_array = np.array(img)
-            img_array[:, :, 0] = np.minimum(255, img_array[:, :, 0] * 1.10).astype(np.uint8)
-            img_array[:, :, 2] = np.minimum(255, img_array[:, :, 2] * 1.03).astype(np.uint8)
+            img_array[:, :, 0] = np.minimum(255, img_array[:, :, 0] * 1.10).astype(np.uint8)  # More red
+            img_array[:, :, 2] = np.minimum(255, img_array[:, :, 2] * 1.03).astype(np.uint8)  # Slight blue
             img = Image.fromarray(img_array)
             
+            # Enhance contrast for rose gold details
             contrast_enhancer = ImageEnhance.Contrast(img)
             img = contrast_enhancer.enhance(1.05)
             
         elif metal_type == "white_gold":
+            # Enhance cool tones and clarity
             contrast_enhancer = ImageEnhance.Contrast(img)
             img = contrast_enhancer.enhance(1.08)
             
+            # Enhance sharpness for white gold details
             sharpness_enhancer = ImageEnhance.Sharpness(img)
             img = sharpness_enhancer.enhance(1.12)
             
         elif metal_type == "plain_white":
+            # Enhance brightness and clean look
             brightness_enhancer = ImageEnhance.Brightness(img)
             img = brightness_enhancer.enhance(1.08)
             
+            # Reduce saturation for cleaner white look
             color_enhancer = ImageEnhance.Color(img)
             img = color_enhancer.enhance(0.90)
         
-        # Selective background brightening
+        # Selective background brightening (for all types)
         if NUMPY_AVAILABLE:
             img_array = np.array(img)
             mask = np.all(img_array > 200, axis=-1)
@@ -260,7 +272,10 @@ def apply_metal_specific_enhancement(img, metal_type):
         return img
 
 def apply_wedding_ring_details(img):
-    """Apply wedding ring detail enhancement"""
+    """
+    Apply wedding ring detail enhancement
+    Based on 38 training data pairs (28 + 10)
+    """
     try:
         # Enhance fine details and textures
         sharpness_enhancer = ImageEnhance.Sharpness(img)
@@ -294,7 +309,10 @@ def apply_wedding_ring_details(img):
         return img
 
 def image_to_base64(img):
-    """Convert PIL Image to base64 - REMOVE PADDING for Make.com"""
+    """
+    Convert PIL Image to base64 - REMOVE PADDING for Make.com
+    Google Apps Script will restore padding when needed
+    """
     try:
         buffer = io.BytesIO()
         img.save(buffer, format='PNG', quality=95, optimize=True)
@@ -312,35 +330,45 @@ def image_to_base64(img):
         return ""
 
 def handler(job):
-    """RunPod handler for image enhancement V10"""
+    """
+    RunPod handler for image enhancement V11
+    Wedding ring enhancement with metal detection and detail enhancement
+    """
     start_time = time.time()
     
     try:
         logger.info(f"\n{'='*60}")
-        logger.info(f"Enhancement Handler {VERSION} - Safe JSON & NumPy Fix")
+        logger.info(f"Enhancement Handler {VERSION} - Complete Standalone")
+        logger.info(f"Features: Metal detection, Wedding ring enhancement, Detail enhancement")
+        logger.info(f"Training: 38 data pairs (28 + 10), 4 metal types")
         logger.info(f"{'='*60}")
         
+        # Get input
         job_input = job.get('input', {})
         logger.info(f"Input keys: {list(job_input.keys())}")
         
+        # Debug mode
         if job_input.get('debug_mode', False):
             return {
                 "output": {
                     "status": "debug_success",
-                    "message": f"{VERSION} handler working - Safe JSON conversion",
+                    "message": f"{VERSION} enhance handler working - Complete standalone",
                     "version": VERSION,
                     "features": [
                         "Safe JSON conversion (no np.bool)",
                         "Metal type detection (4 types)",
                         "Metal-specific enhancement",
                         "Wedding ring detail enhancement", 
+                        "38 training data pairs",
                         "Image 3 → Image 5 style enhancement",
+                        "NumPy 1.24+ compatibility",
                         "Make.com compatible",
-                        "Google Apps Script compatible"
+                        "Google Apps Script support"
                     ]
                 }
             }
         
+        # Find image data
         image_data_str = find_image_data(job_input)
         if not image_data_str:
             error_msg = f"No image found. Available keys: {list(job_input.keys())}"
@@ -353,21 +381,30 @@ def handler(job):
                 }
             }
         
+        # Decode image
         img = decode_base64_image(image_data_str)
         original_size = img.size
         logger.info(f"Original image size: {original_size}")
         
+        # Convert RGBA to RGB if needed
         if img.mode == 'RGBA':
             background = Image.new('RGB', img.size, (255, 255, 255))
             background.paste(img, mask=img.split()[3])
             img = background
         
+        # Detect metal type
         metal_type = detect_metal_type(img)
+        
+        # Apply metal-specific enhancement
         enhanced_img = apply_metal_specific_enhancement(img, metal_type)
+        
+        # Apply wedding ring detail enhancement
         enhanced_img = apply_wedding_ring_details(enhanced_img)
+        
+        # Convert to base64
         enhanced_base64 = image_to_base64(enhanced_img)
         
-        # Use safe JSON conversion
+        # Processing info with type safety
         processing_info = {
             "original_size": [original_size[0], original_size[1]],
             "final_size": [enhanced_img.size[0], enhanced_img.size[1]],
@@ -391,6 +428,7 @@ def handler(job):
         
         logger.info(f"Enhancement completed in {processing_info['processing_time']}s")
         logger.info(f"Metal type: {metal_type}")
+        logger.info(f"Output structure: {list(result['output'].keys())}")
         
         return safe_json_convert(result)
         
@@ -399,6 +437,7 @@ def handler(job):
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         
+        # Ensure error response is also JSON-safe
         error_result = {
             "output": {
                 "error": error_msg,
