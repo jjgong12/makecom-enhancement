@@ -9,42 +9,42 @@ import traceback
 import time
 
 # Version info
-VERSION = "v19-enhancement"
+VERSION = "v20-enhancement"
 
-class WeddingRingEnhancerV19:
-    """v19 Wedding Ring Enhancement - Simple Color Enhancement with Input Fix"""
+class WeddingRingEnhancerV20:
+    """v20 Wedding Ring Enhancement - Simple Color Enhancement"""
     
     def __init__(self):
-        print(f"[{VERSION}] Initializing - Simple Enhancement with correct input handling")
+        print(f"[{VERSION}] Initializing - Simple Enhancement")
     
     def apply_simple_enhancement(self, image):
-        """Simple color enhancement only - based on v16/v18"""
+        """간단한 색감 보정만 적용"""
         try:
-            # 1. Brightness slight increase
+            # 1. 밝기 살짝 증가
             enhancer = ImageEnhance.Brightness(image)
             image = enhancer.enhance(1.1)
             
-            # 2. Contrast slight increase
+            # 2. 대비 약간 증가
             enhancer = ImageEnhance.Contrast(image)
             image = enhancer.enhance(1.05)
             
-            # 3. Color saturation fine tuning
+            # 3. 색상 채도 미세 조정
             enhancer = ImageEnhance.Color(image)
             image = enhancer.enhance(1.02)
             
-            # 4. Soft beige background blending
+            # 4. 배경색 부드럽게 조정
             img_np = np.array(image)
             h, w = img_np.shape[:2]
             
-            # Beige background color
-            background_color = (245, 243, 240)
+            # 전체적으로 밝은 톤 적용
+            background_color = (245, 243, 240)  # 부드러운 베이지
             
-            # Create edge blending mask
+            # 가장자리만 살짝 블렌딩
             mask = np.zeros((h, w), dtype=np.float32)
             cv2.rectangle(mask, (50, 50), (w-50, h-50), 1.0, -1)
             mask = cv2.GaussianBlur(mask, (101, 101), 50)
             
-            # Blend background color (30% only)
+            # 배경색 블렌딩
             for i in range(3):
                 img_np[:, :, i] = img_np[:, :, i] * mask + background_color[i] * (1 - mask) * 0.3
             
@@ -54,18 +54,18 @@ class WeddingRingEnhancerV19:
             print(f"[{VERSION}] Enhancement error: {e}")
             return image
 
-# Global instance
+# 전역 인스턴스
 enhancer_instance = None
 
 def get_enhancer():
-    """Singleton enhancer instance"""
+    """싱글톤 enhancer 인스턴스"""
     global enhancer_instance
     if enhancer_instance is None:
-        enhancer_instance = WeddingRingEnhancerV19()
+        enhancer_instance = WeddingRingEnhancerV20()
     return enhancer_instance
 
 def find_base64_in_dict(data, depth=0, max_depth=10):
-    """Find base64 image in nested dictionary - from v16"""
+    """중첩된 딕셔너리에서 base64 이미지 찾기"""
     if depth > max_depth:
         return None
     
@@ -91,21 +91,21 @@ def find_base64_in_dict(data, depth=0, max_depth=10):
     return None
 
 def decode_base64_image(base64_str):
-    """Decode base64 string to PIL Image"""
+    """Base64 문자열을 PIL Image로 디코드"""
     try:
-        # Handle Data URL format
+        # Data URL 형식 처리
         if ',' in base64_str:
             base64_str = base64_str.split(',')[1]
         
-        # Remove whitespace
+        # 공백 제거
         base64_str = base64_str.strip()
         
-        # Add padding if needed
+        # Padding 추가
         padding = 4 - len(base64_str) % 4
         if padding != 4:
             base64_str += '=' * padding
         
-        # Decode
+        # 디코드
         img_data = base64.b64decode(base64_str)
         img = Image.open(io.BytesIO(img_data))
         
@@ -119,7 +119,7 @@ def decode_base64_image(base64_str):
         raise
 
 def encode_image_to_base64(image, format='PNG'):
-    """Encode image to base64 (Make.com compatible)"""
+    """이미지를 base64로 인코딩 (Make.com 호환)"""
     try:
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
@@ -128,10 +128,10 @@ def encode_image_to_base64(image, format='PNG'):
         image.save(buffer, format=format, quality=95 if format == 'JPEG' else None)
         buffer.seek(0)
         
-        # Base64 encoding - MUST remove padding for Make.com
+        # Base64 인코딩
         base64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
-        # CRITICAL: Remove padding for Make.com compatibility
+        # CRITICAL: Make.com을 위해 padding 제거
         base64_str = base64_str.rstrip('=')
         
         return base64_str
@@ -141,42 +141,40 @@ def encode_image_to_base64(image, format='PNG'):
         raise
 
 def handler(job):
-    """RunPod handler function"""
+    """RunPod 핸들러"""
     try:
         start_time = time.time()
         job_input = job["input"]
         
         print(f"[{VERSION}] Processing started")
-        print(f"[{VERSION}] Input keys: {list(job_input.keys())}")
         
-        # Find base64 image in nested structure
+        # Base64 이미지 찾기
         base64_image = find_base64_in_dict(job_input)
         if not base64_image:
             return {
                 "output": {
-                    "error": "No image data found in input",
+                    "error": "No image data found",
                     "version": VERSION,
                     "success": False
                 }
             }
         
-        # Decode image
+        # 이미지 디코드
         image = decode_base64_image(base64_image)
         print(f"[{VERSION}] Image decoded: {image.size}")
         
-        # Apply simple color enhancement
+        # 간단한 색감 보정
         enhancer = get_enhancer()
         enhanced = enhancer.apply_simple_enhancement(image)
         
-        # Encode result
+        # 결과 인코딩
         enhanced_base64 = encode_image_to_base64(enhanced)
         
-        # Processing time
+        # 처리 시간
         processing_time = time.time() - start_time
         print(f"[{VERSION}] Processing completed in {processing_time:.2f}s")
         
-        # Return structure for Make.com
-        # Make.com path: {{4.data.output.output.enhanced_image}}
+        # Return 구조 - Make.com이 {{4.data.output.output.enhanced_image}}로 접근
         return {
             "output": {
                 "enhanced_image": enhanced_base64,
@@ -199,11 +197,11 @@ def handler(job):
             }
         }
 
-# RunPod start
+# RunPod 시작
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("Simple Enhancement Handler (a_file)")
+    print("Simple Enhancement Handler (a_파일)")
     print("="*70)
     
     runpod.serverless.start({"handler": handler})
