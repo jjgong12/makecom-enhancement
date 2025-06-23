@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "v11"
+VERSION = "v12"
 
 # Safe imports
 try:
@@ -331,14 +331,14 @@ def image_to_base64(img):
 
 def handler(job):
     """
-    RunPod handler for image enhancement V11
+    RunPod handler for image enhancement V12
     Wedding ring enhancement with metal detection and detail enhancement
     """
     start_time = time.time()
     
     try:
         logger.info(f"\n{'='*60}")
-        logger.info(f"Enhancement Handler {VERSION} - Complete Standalone")
+        logger.info(f"Enhancement Handler {VERSION} - Complete Package")
         logger.info(f"Features: Metal detection, Wedding ring enhancement, Detail enhancement")
         logger.info(f"Training: 38 data pairs (28 + 10), 4 metal types")
         logger.info(f"{'='*60}")
@@ -352,7 +352,7 @@ def handler(job):
             return {
                 "output": {
                     "status": "debug_success",
-                    "message": f"{VERSION} enhance handler working - Complete standalone",
+                    "message": f"{VERSION} enhance handler working - Complete package",
                     "version": VERSION,
                     "features": [
                         "Safe JSON conversion (no np.bool)",
@@ -462,3 +462,220 @@ if __name__ == "__main__":
         }
         result = handler(test_job)
         print(json.dumps(result, indent=2))
+
+"""
+=============================================================================
+GOOGLE APPS SCRIPT V12 - BASE64 PADDING FIX
+=============================================================================
+
+Copy this JavaScript code to your Google Apps Script project:
+
+/**
+ * Google Apps Script V12 - Base64 Padding Fix for enhance_handler
+ * 
+ * Fixes "Error: Invalid base64 data" by restoring padding removed by RunPod
+ * for Make.com compatibility
+ */
+
+function doPost(e) {
+  try {
+    console.log('Google Apps Script V12 started - Enhanced Image Upload');
+    
+    // Parse POST data
+    const postData = JSON.parse(e.postData.contents);
+    console.log('Input data keys:', Object.keys(postData));
+    
+    // Extract enhanced image base64 data
+    let base64Data = null;
+    
+    // Try multiple keys to find the enhanced image
+    const imageKeys = ['enhanced_image', 'image', 'image_base64', 'base64', 'img', 'data'];
+    for (const key of imageKeys) {
+      if (postData[key] && typeof postData[key] === 'string' && postData[key].length > 100) {
+        base64Data = postData[key];
+        console.log(`Found enhanced image data in key: ${key}, length: ${base64Data.length}`);
+        break;
+      }
+    }
+    
+    if (!base64Data) {
+      throw new Error(`No enhanced image data found. Available keys: ${Object.keys(postData).join(', ')}`);
+    }
+    
+    // Fix base64 data (restore padding removed by RunPod for Make.com)
+    console.log('Fixing base64 padding for enhanced image...');
+    base64Data = fixBase64Padding(base64Data);
+    
+    // Validate base64 format
+    if (!isValidBase64(base64Data)) {
+      throw new Error('Invalid base64 format after padding fix');
+    }
+    
+    // Create blob from base64
+    console.log('Creating enhanced image blob...');
+    const imageBlob = Utilities.newBlob(
+      Utilities.base64Decode(base64Data),
+      'image/png',
+      `wedding_ring_enhanced_${new Date().toISOString().replace(/[:.]/g, '-')}.png`
+    );
+    
+    // Upload to Google Drive
+    console.log('Uploading enhanced image to Google Drive...');
+    const file = DriveApp.createFile(imageBlob);
+    
+    console.log(`Enhanced image uploaded successfully: ${file.getName()} (${file.getSize()} bytes)`);
+    
+    // Return success response
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        success: true,
+        fileId: file.getId(),
+        fileName: file.getName(),
+        fileUrl: file.getUrl(),
+        fileSize: file.getSize(),
+        imageType: 'enhanced',
+        message: 'Enhanced wedding ring image uploaded successfully with V12 padding fix',
+        timestamp: new Date().toISOString(),
+        version: 'v12'
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+      
+  } catch (error) {
+    console.error('Google Apps Script error:', error.toString());
+    
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        success: false,
+        error: error.toString(),
+        message: 'Failed to upload enhanced wedding ring image',
+        timestamp: new Date().toISOString(),
+        version: 'v12'
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function fixBase64Padding(base64Data) {
+  try {
+    console.log(`Original base64 length: ${base64Data.length}`);
+    
+    // Remove data URL prefix if present
+    if (base64Data.includes('data:')) {
+      const commaIndex = base64Data.indexOf(',');
+      if (commaIndex !== -1) {
+        base64Data = base64Data.substring(commaIndex + 1);
+        console.log('Removed data URL prefix');
+      }
+    }
+    
+    // Remove any whitespace characters
+    base64Data = base64Data.replace(/\s/g, '');
+    console.log(`After whitespace removal: ${base64Data.length}`);
+    
+    // Calculate and add padding (RunPod removes it for Make.com compatibility)
+    const paddingNeeded = 4 - (base64Data.length % 4);
+    if (paddingNeeded !== 4) {
+      const paddingChars = '='.repeat(paddingNeeded);
+      base64Data += paddingChars;
+      console.log(`Added ${paddingNeeded} padding characters: ${paddingChars}`);
+    } else {
+      console.log('No padding needed');
+    }
+    
+    console.log(`Final base64 length: ${base64Data.length}`);
+    return base64Data;
+    
+  } catch (error) {
+    console.error('Base64 padding fix error:', error.toString());
+    throw new Error(`Failed to fix base64 padding: ${error.toString()}`);
+  }
+}
+
+function isValidBase64(base64String) {
+  try {
+    // Check basic format
+    const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
+    if (!base64Pattern.test(base64String)) {
+      console.error('Base64 pattern validation failed');
+      return false;
+    }
+    
+    // Check length is multiple of 4
+    if (base64String.length % 4 !== 0) {
+      console.error('Base64 length is not multiple of 4');
+      return false;
+    }
+    
+    // Try to decode (this will throw if invalid)
+    Utilities.base64Decode(base64String);
+    console.log('Base64 validation successful');
+    return true;
+    
+  } catch (error) {
+    console.error('Base64 validation error:', error.toString());
+    return false;
+  }
+}
+
+function doGet() {
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      status: 'Google Apps Script V12 is running',
+      handler: 'enhanced_image',
+      message: 'Enhanced Wedding Ring Image Upload Service',
+      usage: 'Use POST method to upload enhanced images',
+      features: [
+        'Base64 padding restoration',
+        'Enhanced image processing',
+        'RunPod V12 integration',
+        'Make.com compatibility',
+        'Google Drive upload',
+        'Detailed logging'
+      ],
+      version: 'v12',
+      timestamp: new Date().toISOString()
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+=============================================================================
+REQUIREMENTS.TXT V12
+=============================================================================
+
+runpod==1.6.0
+opencv-python-headless==4.8.1.78
+Pillow==10.1.0
+numpy==1.24.3
+replicate==0.32.1
+requests==2.31.0
+
+=============================================================================
+DEPLOYMENT INSTRUCTIONS V12
+=============================================================================
+
+1. RunPod Enhancement Handler:
+   - Upload this file as handler.py
+   - Set REPLICATE_API_TOKEN environment variable
+   - Deploy and test with: {"input": {"debug_mode": true}}
+
+2. Google Apps Script:
+   - Copy the JavaScript code above to your Google Apps Script project
+   - Deploy as web app with proper permissions
+   - Test with enhanced_image data from RunPod
+
+3. Make.com Configuration:
+   - Enhancement Module → Google Apps Script
+   - Path: {{4.data.output.output.enhanced_image}}
+   - Method: POST
+
+Features V12:
+- ✅ NumPy 1.24+ compatibility (no np.bool references)
+- ✅ Safe JSON serialization for all data types
+- ✅ Make.com base64 compatibility (padding removed)
+- ✅ Google Apps Script padding restoration
+- ✅ Metal type detection (4 types: yellow_gold, rose_gold, white_gold, plain_white)
+- ✅ Wedding ring enhancement (38 training pairs)
+- ✅ Advanced detail enhancement with unsharp mask
+- ✅ Image 3 → Image 5 style color enhancement
+- ✅ Comprehensive error handling and logging
+"""
