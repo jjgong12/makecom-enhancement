@@ -8,7 +8,7 @@ import traceback
 import base64
 from io import BytesIO
 import requests
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Union
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,7 +16,87 @@ logger = logging.getLogger(__name__)
 class EnhancementHandler:
     def __init__(self):
         """Initialize the Enhancement Handler"""
-        logger.info("Enhancement Handler v39 initialized - with padding fix")
+        logger.info("Enhancement Handler v40 initialized - Stable Version")
+        
+    def find_input_data(self, event: Dict[str, Any]) -> Optional[str]:
+        """Find image data from various possible paths in the event"""
+        logger.info("Searching for input data in event structure...")
+        
+        # Direct input paths
+        input_data = event.get('input', {})
+        
+        # Try direct image key
+        if 'enhanced_image' in input_data:
+            logger.info("Found enhanced_image in direct input")
+            return input_data['enhanced_image']
+        
+        if 'image_base64' in input_data:
+            logger.info("Found image_base64 in direct input")
+            return input_data['image_base64']
+            
+        if 'image' in input_data:
+            logger.info("Found image in direct input")
+            return input_data['image']
+        
+        # Try Make.com nested structures
+        # Pattern: data.output.output
+        if 'data' in input_data and isinstance(input_data['data'], dict):
+            data = input_data['data']
+            if 'output' in data and isinstance(data['output'], dict):
+                output = data['output']
+                if 'output' in output and isinstance(output['output'], dict):
+                    nested_output = output['output']
+                    if 'enhanced_image' in nested_output:
+                        logger.info("Found enhanced_image in data.output.output")
+                        return nested_output['enhanced_image']
+                elif 'enhanced_image' in output:
+                    logger.info("Found enhanced_image in data.output")
+                    return output['enhanced_image']
+        
+        # Try numbered keys (like '4')
+        for key in input_data:
+            if key.isdigit() and isinstance(input_data[key], dict):
+                numbered_data = input_data[key]
+                if 'data' in numbered_data and isinstance(numbered_data['data'], dict):
+                    data = numbered_data['data']
+                    if 'output' in data and isinstance(data['output'], dict):
+                        output = data['output']
+                        if 'output' in output and isinstance(output['output'], dict):
+                            nested_output = output['output']
+                            if 'enhanced_image' in nested_output:
+                                logger.info(f"Found enhanced_image in {key}.data.output.output")
+                                return nested_output['enhanced_image']
+        
+        # Log what we found for debugging
+        logger.warning(f"Could not find image data. Event keys: {list(event.keys())}")
+        if input_data:
+            logger.warning(f"Input keys: {list(input_data.keys())}")
+        
+        return None
+    
+    def decode_base64_safe(self, base64_str: str) -> bytes:
+        """Safely decode base64 with automatic padding correction"""
+        try:
+            # Remove data URL prefix if present
+            if base64_str.startswith('data:'):
+                base64_str = base64_str.split(',')[1]
+            
+            # Clean the string
+            base64_str = base64_str.strip()
+            
+            # Fix padding if needed
+            padding = 4 - len(base64_str) % 4
+            if padding != 4:
+                base64_str += '=' * padding
+            
+            return base64.b64decode(base64_str)
+        except Exception as e:
+            logger.error(f"Error decoding base64: {str(e)}")
+            raise
+    
+    def encode_base64_no_padding(self, data: bytes) -> str:
+        """Encode to base64 without padding for Make.com"""
+        return base64.b64encode(data).decode('utf-8').rstrip('=')
         
     def detect_ring_regions(self, image: np.ndarray) -> Dict[str, Any]:
         """Detect ring regions using simple but effective methods"""
@@ -273,91 +353,25 @@ class EnhancementHandler:
         final_enhanced = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         
         return final_enhanced
-    
-    def decode_base64_with_padding_fix(self, base64_str: str) -> bytes:
-        """Decode base64 string with automatic padding correction"""
-        # Remove data URL prefix if present
-        if base64_str.startswith('data:'):
-            base64_str = base64_str.split(',')[1]
-        
-        # Fix padding if needed
-        padding = 4 - len(base64_str) % 4
-        if padding != 4:
-            base64_str += '=' * padding
-            
-        return base64.b64decode(base64_str)
-    
-    def encode_base64_without_padding(self, data: bytes) -> str:
-        """Encode to base64 and remove padding for Make.com"""
-        return base64.b64encode(data).decode('utf-8').rstrip('=')
-    
-    def process_image(self, input_path: str) -> Tuple[np.ndarray, str, Dict[str, Any]]:
-        """Main processing function"""
-        logger.info("Starting enhancement processing...")
-        
-        # Load image
-        if input_path.startswith('http'):
-            response = requests.get(input_path)
-            image = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
-        else:
-            image = cv2.imread(input_path)
-        
-        if image is None:
-            raise ValueError("Failed to load image")
-        
-        original_shape = image.shape
-        logger.info(f"Original image shape: {original_shape}")
-        
-        # Detect ring regions
-        ring_regions = self.detect_ring_regions(image)
-        logger.info(f"Detected {len(ring_regions['candidates'])} ring candidates")
-        
-        # Detect color using ring regions
-        detected_color = self.detect_ring_color_enhanced(image, ring_regions)
-        
-        # Apply professional enhancement
-        enhanced = self.apply_professional_enhancement(image, detected_color, ring_regions)
-        
-        processing_info = {
-            'original_shape': original_shape,
-            'detected_color': detected_color,
-            'ring_regions_found': len(ring_regions['candidates']),
-            'primary_ring_bbox': ring_regions['primary_region']['bbox'] if ring_regions['primary_region'] else None,
-            'enhancement_version': 'v39_padding_fixed'
-        }
-        
-        return enhanced, detected_color, processing_info
 
 def handler(event):
     """RunPod handler function"""
-    logger.info("=== Enhancement Handler v39 Started ===")
+    logger.info("=== Enhancement Handler v40 Started ===")
     
     try:
         handler_instance = EnhancementHandler()
         
-        # Get input from event
-        input_data = event.get('input', {})
-        
-        # Handle Make.com webhook structure
-        if 'data' in input_data and 'output' in input_data['data']:
-            if 'output' in input_data['data']['output']:
-                enhanced_image_data = input_data['data']['output']['output'].get('enhanced_image', '')
-            else:
-                enhanced_image_data = input_data['data']['output'].get('enhanced_image', '')
-        else:
-            enhanced_image_data = input_data.get('enhanced_image', '')
+        # Find input data from various possible paths
+        enhanced_image_data = handler_instance.find_input_data(event)
         
         if not enhanced_image_data:
-            # Try alternative path for Make.com
-            if '4' in input_data and 'data' in input_data['4']:
-                enhanced_image_data = input_data['4']['data']['output']['output'].get('enhanced_image', '')
+            raise ValueError("No image data found in input. Please check the input structure.")
         
-        if not enhanced_image_data:
-            raise ValueError("No enhanced_image data found in input")
+        logger.info(f"Found image data, length: {len(enhanced_image_data[:100])}...")
         
         # Decode base64 image with padding fix
-        logger.info("Decoding base64 image with padding correction...")
-        image_bytes = handler_instance.decode_base64_with_padding_fix(enhanced_image_data)
+        logger.info("Decoding base64 image...")
+        image_bytes = handler_instance.decode_base64_safe(enhanced_image_data)
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
@@ -366,13 +380,9 @@ def handler(event):
         
         logger.info(f"Successfully decoded image: {image.shape}")
         
-        # Process image (using dummy path since we have the image directly)
-        handler_instance.detect_ring_regions = lambda img: handler_instance.detect_ring_regions(image)
-        handler_instance.detect_ring_color_enhanced = lambda img, regions: handler_instance.detect_ring_color_enhanced(image, regions)
-        handler_instance.apply_professional_enhancement = lambda img, color, regions: handler_instance.apply_professional_enhancement(image, color, regions)
-        
         # Detect ring regions
         ring_regions = handler_instance.detect_ring_regions(image)
+        logger.info(f"Detected {len(ring_regions['candidates'])} ring candidates")
         
         # Detect color
         detected_color = handler_instance.detect_ring_color_enhanced(image, ring_regions)
@@ -385,13 +395,13 @@ def handler(event):
             'detected_color': detected_color,
             'ring_regions_found': len(ring_regions['candidates']),
             'primary_ring_bbox': ring_regions['primary_region']['bbox'] if ring_regions['primary_region'] else None,
-            'enhancement_version': 'v39_padding_fixed'
+            'enhancement_version': 'v40_stable'
         }
         
         # Convert result to base64 without padding
         _, buffer = cv2.imencode('.jpg', enhanced_image, 
                                 [cv2.IMWRITE_JPEG_QUALITY, 95])
-        result_base64 = handler_instance.encode_base64_without_padding(buffer.tobytes())
+        result_base64 = handler_instance.encode_base64_no_padding(buffer.tobytes())
         result_data_url = f"data:image/jpeg;base64,{result_base64}"
         
         # Return in nested structure for Make.com
@@ -422,14 +432,7 @@ def handler(event):
             }
         }
 
-# For local testing
+# For RunPod
 if __name__ == "__main__":
-    # Test with base64 encoded image
-    test_event = {
-        "input": {
-            "enhanced_image": "base64_encoded_image_data_here"
-        }
-    }
-    
-    result = handler(test_event)
-    print(json.dumps(result, indent=2))
+    import runpod
+    runpod.serverless.start({"handler": handler})
