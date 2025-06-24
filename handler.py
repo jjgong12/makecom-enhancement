@@ -9,7 +9,7 @@ import time
 import traceback
 
 # Version
-VERSION = "v36-enhancement"
+VERSION = "v37-enhancement"
 
 def find_base64_in_dict(data, depth=0, max_depth=10):
     """Find base64 image in nested dictionary"""
@@ -88,14 +88,141 @@ def encode_image_to_base64(image, format='JPEG'):
         print(f"[{VERSION}] Error encoding image: {e}")
         raise
 
-def detect_metal_color(image):
-    """Detect metal color with priority: Plain White > Rose Gold > White Gold > Yellow Gold"""
+def detect_ring_regions(image):
+    """Detect potential ring regions using edge detection and circular features"""
     try:
-        # Convert to numpy array
         img_np = np.array(image)
         h, w = img_np.shape[:2]
         
-        # Get center region (where ring is likely to be)
+        # Convert to grayscale
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        
+        # Apply edge detection
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filter contours that might be rings
+        ring_candidates = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
+            
+            # Skip too small or too large contours
+            if area < 100 or area > (w * h * 0.5):
+                continue
+            
+            # Check circularity
+            if perimeter > 0:
+                circularity = 4 * np.pi * area / (perimeter * perimeter)
+                if circularity > 0.3:  # Rings are somewhat circular
+                    x, y, cw, ch = cv2.boundingRect(contour)
+                    aspect_ratio = float(cw) / ch if ch > 0 else 0
+                    
+                    # Rings typically have aspect ratio close to 1
+                    if 0.5 < aspect_ratio < 2.0:
+                        ring_candidates.append({
+                            'bbox': (x, y, x+cw, y+ch),
+                            'center': (x + cw//2, y + ch//2),
+                            'area': area,
+                            'circularity': circularity
+                        })
+        
+        # Sort by area (larger rings first)
+        ring_candidates.sort(key=lambda x: x['area'], reverse=True)
+        
+        # If we found candidates, return the top ones
+        if ring_candidates:
+            print(f"[{VERSION}] Found {len(ring_candidates)} potential ring regions")
+            return ring_candidates[:3]  # Return top 3 candidates
+        
+        # If no rings found, return center region as fallback
+        print(f"[{VERSION}] No rings detected, using center region")
+        cx, cy = w//2, h//2
+        size = min(w, h) // 3
+        return [{
+            'bbox': (cx-size//2, cy-size//2, cx+size//2, cy+size//2),
+            'center': (cx, cy),
+            'area': size * size,
+            'circularity': 0
+        }]
+        
+    except Exception as e:
+        print(f"[{VERSION}] Error in ring detection: {e}")
+        # Return center region as fallback
+        h, w = image.size[1], image.size[0]
+        cx, cy = w//2, h//2
+        size = min(w, h) // 3
+        return [{
+            'bbox': (cx-size//2, cy-size//2, cx+size//2, cy+size//2),
+            'center': (cx, cy),
+            'area': size * size,
+            'circularity': 0
+        }]
+
+def detect_metal_color_v37(image, ring_regions=None):
+    """v37: Much stricter color detection - yellow gold only for TRUE yellow"""
+    try:
+        img_np = np.array(image)
+        h, w = img_np.shape[:2]
+        
+        # If ring regions provided, analyze those
+        if ring_regions and len(ring_regions) > 0:
+            color_votes = []
+            
+            for region in ring_regions:
+                x1, y1, x2, y2 = region['bbox']
+                # Ensure bounds are valid
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+                
+                if x2 > x1 and y2 > y1:
+                    roi = img_np[y1:y2, x1:x2]
+                    
+                    # Calculate color statistics for this region
+                    r_mean = np.mean(roi[:, :, 0])
+                    g_mean = np.mean(roi[:, :, 1])
+                    b_mean = np.mean(roi[:, :, 2])
+                    
+                    brightness = (r_mean + g_mean + b_mean) / 3
+                    max_channel = max(r_mean, g_mean, b_mean)
+                    min_channel = min(r_mean, g_mean, b_mean)
+                    saturation = max_channel - min_channel
+                    
+                    # Calculate yellowness (how much yellow vs other colors)
+                    yellowness = (r_mean + g_mean) / 2 - b_mean
+                    
+                    print(f"[{VERSION}] Region analysis - R:{r_mean:.1f} G:{g_mean:.1f} B:{b_mean:.1f}")
+                    print(f"[{VERSION}] Brightness:{brightness:.1f} Saturation:{saturation:.1f} Yellowness:{yellowness:.1f}")
+                    
+                    # Determine color for this region
+                    # 1. Rose Gold - clear pinkish tone
+                    if r_mean - b_mean > 25 and r_mean > g_mean > b_mean and r_mean - g_mean > 10:
+                        color_votes.append("rose_gold")
+                    # 2. Yellow Gold - ONLY if clearly yellow
+                    elif yellowness > 40 and g_mean > 180 and saturation > 30:
+                        color_votes.append("yellow_gold")
+                    # 3. Plain White - very bright and no color
+                    elif brightness > 235 and saturation < 8:
+                        color_votes.append("plain_white")
+                    # 4. White Gold - bright metallic
+                    elif brightness > 190 and saturation < 25:
+                        color_votes.append("white_gold")
+                    # 5. Default to plain white if uncertain
+                    else:
+                        color_votes.append("plain_white")
+            
+            # Vote on final color
+            if color_votes:
+                from collections import Counter
+                color_count = Counter(color_votes)
+                detected_color = color_count.most_common(1)[0][0]
+                print(f"[{VERSION}] Color votes: {dict(color_count)}")
+                print(f"[{VERSION}] Final detection: {detected_color}")
+                return detected_color
+        
+        # Fallback: analyze center region
         center_y, center_x = h//2, w//2
         crop_size = min(h, w) // 3
         
@@ -111,78 +238,72 @@ def detect_metal_color(image):
         g_mean = np.mean(center_region[:, :, 1])
         b_mean = np.mean(center_region[:, :, 2])
         
-        # Calculate brightness and saturation
         brightness = (r_mean + g_mean + b_mean) / 3
         max_channel = max(r_mean, g_mean, b_mean)
         min_channel = min(r_mean, g_mean, b_mean)
         saturation = max_channel - min_channel
+        yellowness = (r_mean + g_mean) / 2 - b_mean
         
-        print(f"[{VERSION}] Color analysis - R:{r_mean:.1f} G:{g_mean:.1f} B:{b_mean:.1f}")
-        print(f"[{VERSION}] Brightness:{brightness:.1f} Saturation:{saturation:.1f}")
+        print(f"[{VERSION}] Center region - R:{r_mean:.1f} G:{g_mean:.1f} B:{b_mean:.1f}")
+        print(f"[{VERSION}] Yellowness:{yellowness:.1f}")
         
-        # Detection priority
-        # 1. Rose Gold - pinkish tone
-        if r_mean - b_mean > 30 and r_mean > g_mean > b_mean:
-            print(f"[{VERSION}] Detected: Rose Gold")
+        # Very strict detection
+        if r_mean - b_mean > 25 and r_mean > g_mean > b_mean and r_mean - g_mean > 10:
             return "rose_gold"
-        
-        # 2. Plain White - very bright and low saturation
-        elif brightness > 230 and saturation < 10:
-            print(f"[{VERSION}] Detected: Plain White")
-            return "plain_white"
-        
-        # 3. White Gold - bright but slightly less than plain white
-        elif brightness > 180 and saturation < 30:
-            print(f"[{VERSION}] Detected: White Gold")
-            return "white_gold"
-        
-        # 4. Everything else is Yellow Gold
-        else:
-            print(f"[{VERSION}] Detected: Yellow Gold (default)")
+        elif yellowness > 40 and g_mean > 180 and saturation > 30:
             return "yellow_gold"
+        elif brightness > 235 and saturation < 8:
+            return "plain_white"
+        elif brightness > 190 and saturation < 25:
+            return "white_gold"
+        else:
+            return "plain_white"  # Default to plain white instead of yellow gold
             
     except Exception as e:
         print(f"[{VERSION}] Error in metal detection: {e}")
-        return "white_gold"  # Default fallback
+        return "plain_white"  # Safer default
 
-def enhance_wedding_ring_v36(image, metal_type=None):
-    """v36 Enhancement - Color-aware brightness enhancement"""
+def enhance_wedding_ring_v37(image, metal_type=None):
+    """v37 Enhancement - Color-aware brightness enhancement"""
     try:
-        # Detect metal type if not provided
-        if metal_type is None:
-            metal_type = detect_metal_color(image)
-        
         print(f"[{VERSION}] Enhancing {metal_type} ring")
         
         # Metal-specific enhancement parameters
-        if metal_type == "plain_white":
+        if metal_type == "yellow_gold":
+            # True yellow gold - warm enhancement
+            brightness_factor = 1.14
+            contrast_factor = 1.10
+            saturation_factor = 1.05  # Keep yellow tones
+            gamma = 0.93
+            background_blend = 0.12
+        elif metal_type == "plain_white":
             # Extra bright for plain white
-            brightness_factor = 1.22
+            brightness_factor = 1.25
             contrast_factor = 1.08
-            saturation_factor = 0.90  # More desaturated
-            gamma = 0.85  # Brighter
-            background_blend = 0.20
+            saturation_factor = 0.88  # More desaturated
+            gamma = 0.83  # Brighter
+            background_blend = 0.22
         elif metal_type == "rose_gold":
             # Warm enhancement for rose gold
-            brightness_factor = 1.15
+            brightness_factor = 1.16
             contrast_factor = 1.10
-            saturation_factor = 1.02  # Keep warm tones
-            gamma = 0.92
-            background_blend = 0.12
+            saturation_factor = 1.03  # Keep warm tones
+            gamma = 0.91
+            background_blend = 0.14
         elif metal_type == "white_gold":
             # Cool enhancement for white gold
-            brightness_factor = 1.18
+            brightness_factor = 1.20
             contrast_factor = 1.10
-            saturation_factor = 0.94
-            gamma = 0.88
-            background_blend = 0.18
-        else:  # yellow_gold
-            # Warm but controlled for yellow gold
-            brightness_factor = 1.12
+            saturation_factor = 0.92
+            gamma = 0.86
+            background_blend = 0.20
+        else:
+            # Default to plain white settings
+            brightness_factor = 1.25
             contrast_factor = 1.08
-            saturation_factor = 0.98
-            gamma = 0.95
-            background_blend = 0.10
+            saturation_factor = 0.88
+            gamma = 0.83
+            background_blend = 0.22
         
         # 1. Apply brightness
         enhancer = ImageEnhance.Brightness(image)
@@ -234,9 +355,9 @@ def enhance_wedding_ring_v36(image, metal_type=None):
         return image
 
 def handler(job):
-    """RunPod handler - v36 Color-Aware Enhancement"""
+    """RunPod handler - v37 Ring Detection + Stricter Color"""
     print(f"[{VERSION}] ====== Enhancement Handler Started ======")
-    print(f"[{VERSION}] Color-aware processing with metal detection")
+    print(f"[{VERSION}] Ring detection + stricter color classification")
     
     start_time = time.time()
     
@@ -291,10 +412,18 @@ def handler(job):
             image = image.resize(new_size, Image.Resampling.LANCZOS)
             print(f"[{VERSION}] Resized to: {image.size}")
         
-        # Apply color-aware enhancement
+        # Detect ring regions first
         try:
-            metal_type = detect_metal_color(image)
-            enhanced_image = enhance_wedding_ring_v36(image, metal_type)
+            ring_regions = detect_ring_regions(image)
+            print(f"[{VERSION}] Ring detection complete")
+        except Exception as e:
+            print(f"[{VERSION}] Ring detection failed: {e}")
+            ring_regions = None
+        
+        # Apply color-aware enhancement with ring regions
+        try:
+            metal_type = detect_metal_color_v37(image, ring_regions)
+            enhanced_image = enhance_wedding_ring_v37(image, metal_type)
             print(f"[{VERSION}] Enhancement applied successfully")
         except Exception as e:
             print(f"[{VERSION}] Error during enhancement: {e}")
@@ -328,11 +457,12 @@ def handler(job):
                 "processing_time": round(processing_time, 2),
                 "original_size": list(image.size),
                 "detected_metal": metal_type,
+                "ring_regions_found": len(ring_regions) if ring_regions else 0,
                 "enhancements_applied": {
-                    "plain_white": "brightness_1.22_contrast_1.08_desat_0.90",
-                    "rose_gold": "brightness_1.15_contrast_1.10_sat_1.02",
-                    "white_gold": "brightness_1.18_contrast_1.10_desat_0.94",
-                    "yellow_gold": "brightness_1.12_contrast_1.08_desat_0.98"
+                    "yellow_gold": "brightness_1.14_contrast_1.10_sat_1.05",
+                    "plain_white": "brightness_1.25_contrast_1.08_desat_0.88",
+                    "rose_gold": "brightness_1.16_contrast_1.10_sat_1.03",
+                    "white_gold": "brightness_1.20_contrast_1.10_desat_0.92"
                 }.get(metal_type, "default"),
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
                 "warning": "Google Script must add padding: while (base64Data.length % 4 !== 0) { base64Data += '='; }"
@@ -364,12 +494,13 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V36 - Color-Aware Enhancement with Metal Detection")
+    print("V37 - Ring Detection + Stricter Color Classification")
     print("Features:")
-    print("- Automatic metal color detection")
-    print("- Priority: Plain White > Rose Gold > White Gold > Yellow Gold")
-    print("- Metal-specific enhancement parameters")
-    print("- Plain white: Extra bright (22% boost)")
+    print("- Ring region detection using edge detection")
+    print("- Much stricter yellow gold detection (only true yellow)")
+    print("- Default to plain white instead of yellow gold")
+    print("- Analyze multiple ring regions and vote")
+    print("- Plain white: Extra bright (25% boost)")
     print("- Max dimension limit: 4000px")
     print("CRITICAL: Padding is removed for Make.com")
     print("Google Apps Script MUST add padding back:")
