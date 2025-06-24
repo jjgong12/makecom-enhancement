@@ -9,44 +9,49 @@ import traceback
 import time
 
 # Version info
-VERSION = "v24-enhancement"
+VERSION = "v25-enhancement"
 
-class WeddingRingEnhancerV24:
-    """v24 Wedding Ring Enhancement - Simple Color Enhancement"""
+class WeddingRingEnhancerV25:
+    """v25 Wedding Ring Enhancement - Fixed Shadow Issues & Better Enhancement"""
     
     def __init__(self):
-        print(f"[{VERSION}] Initializing - Simple Enhancement")
+        print(f"[{VERSION}] Initializing - Fixed Shadow & Enhanced Color")
     
     def apply_simple_enhancement(self, image):
-        """간단한 색감 보정만 적용"""
+        """Simple but effective color enhancement - v25 improved"""
         try:
-            # 1. 밝기 살짝 증가
+            # 1. Brightness - more increase for whiter look
             enhancer = ImageEnhance.Brightness(image)
-            image = enhancer.enhance(1.1)
+            image = enhancer.enhance(1.15)  # Increased from 1.1
             
-            # 2. 대비 약간 증가
+            # 2. Contrast - slightly more
             enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.05)
+            image = enhancer.enhance(1.08)  # Increased from 1.05
             
-            # 3. 색상 채도 미세 조정
+            # 3. Color saturation - keep subtle
             enhancer = ImageEnhance.Color(image)
-            image = enhancer.enhance(1.02)
+            image = enhancer.enhance(1.03)  # Slightly increased from 1.02
             
-            # 4. 배경색 부드럽게 조정
+            # 4. Background color adjustment WITHOUT shadow
             img_np = np.array(image)
             h, w = img_np.shape[:2]
             
-            # 전체적으로 밝은 톤 적용
-            background_color = (245, 243, 240)  # 부드러운 베이지
+            # Brighter background color
+            background_color = (250, 248, 245)  # Even brighter beige
             
-            # 가장자리만 살짝 블렌딩
-            mask = np.zeros((h, w), dtype=np.float32)
-            cv2.rectangle(mask, (50, 50), (w-50, h-50), 1.0, -1)
-            mask = cv2.GaussianBlur(mask, (101, 101), 50)
+            # FIX: Create mask without edge darkening
+            # Instead of blending edges, we'll brighten the whole image uniformly
+            # This prevents the shadow effect at edges
             
-            # 배경색 블렌딩
+            # Simple brightness overlay instead of edge blending
+            brightness_overlay = np.full((h, w, 3), background_color, dtype=np.float32)
+            
+            # Very subtle uniform blending (10% only)
             for i in range(3):
-                img_np[:, :, i] = img_np[:, :, i] * mask + background_color[i] * (1 - mask) * 0.3
+                img_np[:, :, i] = img_np[:, :, i] * 0.9 + brightness_overlay[:, :, i] * 0.1
+            
+            # Additional overall brightness boost to match desired result
+            img_np = np.clip(img_np * 1.02, 0, 255)
             
             return Image.fromarray(img_np.astype(np.uint8))
             
@@ -55,7 +60,7 @@ class WeddingRingEnhancerV24:
             return image
 
 def handler(job):
-    """RunPod handler function - V24 FIXED"""
+    """RunPod handler function - V25 FIXED"""
     print(f"[{VERSION}] ====== Handler Started ======")
     
     try:
@@ -63,12 +68,12 @@ def handler(job):
         print(f"[{VERSION}] Input type: {type(job_input)}")
         print(f"[{VERSION}] Input keys: {list(job_input.keys()) if isinstance(job_input, dict) else 'Not a dict'}")
         
-        # Find base64 image - FIXED to include 'image_base64'
+        # Find base64 image - with 'image_base64' as priority
         base64_image = None
         
-        # Direct access attempts - CRITICAL FIX: Added 'image_base64'
+        # Direct access attempts
         if isinstance(job_input, dict):
-            # Try common keys INCLUDING 'image_base64'
+            # Priority order including 'image_base64'
             for key in ['image_base64', 'image', 'base64', 'data', 'input', 'file', 'imageData']:
                 if key in job_input:
                     value = job_input[key]
@@ -144,7 +149,7 @@ def handler(job):
             }
         
         # Apply enhancement
-        enhancer = WeddingRingEnhancerV24()
+        enhancer = WeddingRingEnhancerV25()
         enhanced_image = enhancer.apply_simple_enhancement(image)
         print(f"[{VERSION}] Enhancement applied")
         
@@ -156,14 +161,16 @@ def handler(job):
         # Encode to base64
         enhanced_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
-        # CRITICAL: Remove padding for Make.com
+        # CRITICAL: Remove padding for Make.com compatibility
+        # Google Apps Script must add padding back:
+        # while (base64Data.length % 4 !== 0) { base64Data += '='; }
         enhanced_base64 = enhanced_base64.rstrip('=')
         
         print(f"[{VERSION}] Enhanced base64 length: {len(enhanced_base64)}")
         
         # Return proper structure for Make.com
-        # RunPod wraps in {"data": {"output": ...}}, so we need {"output": {...}}
-        # to make {{4.data.output.output.enhanced_image}} work
+        # RunPod wraps this in {"data": {"output": ...}}
+        # Make.com path: {{4.data.output.output.enhanced_image}}
         result = {
             "output": {
                 "enhanced_image": enhanced_base64,
@@ -176,7 +183,6 @@ def handler(job):
         }
         
         print(f"[{VERSION}] ====== Success - Returning Result ======")
-        print(f"[{VERSION}] Return structure: output.enhanced_image")
         return result
         
     except Exception as e:
@@ -198,8 +204,9 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V24 - Fixed Input Key Detection")
-    print("Make.com path: {{4.data.output.output.enhanced_image}}")
+    print("V25 - Fixed Shadow Issues & Better Enhancement")
+    print("IMPORTANT: Google Apps Script must add padding back!")
+    print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
     print("="*70)
     
     runpod.serverless.start({"handler": handler})
