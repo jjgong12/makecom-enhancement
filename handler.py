@@ -108,6 +108,7 @@ class WeddingRingEnhancerV30:
             
         except Exception as e:
             print(f"[{VERSION}] Enhancement error: {e}")
+            traceback.print_exc()
             return image
 
 def handler(job):
@@ -179,6 +180,7 @@ def handler(job):
         padding = 4 - len(base64_image) % 4
         if padding != 4:
             base64_image += '=' * padding
+            print(f"[{VERSION}] Added {padding} padding for decoding")
         
         # Decode base64 to image
         try:
@@ -190,6 +192,8 @@ def handler(job):
                 
             print(f"[{VERSION}] Image decoded successfully: {image.size}")
         except Exception as e:
+            print(f"[{VERSION}] Decode error: {e}")
+            traceback.print_exc()
             return {
                 "output": {
                     "enhanced_image": None,
@@ -200,24 +204,48 @@ def handler(job):
             }
         
         # Apply enhancement
-        enhancer = WeddingRingEnhancerV30()
-        enhanced_image = enhancer.apply_simple_enhancement(image)
-        print(f"[{VERSION}] Enhancement applied with clear & sharp settings")
+        try:
+            enhancer = WeddingRingEnhancerV30()
+            enhanced_image = enhancer.apply_simple_enhancement(image)
+            print(f"[{VERSION}] Enhancement applied with clear & sharp settings")
+        except Exception as e:
+            print(f"[{VERSION}] Enhancement error: {e}")
+            traceback.print_exc()
+            return {
+                "output": {
+                    "enhanced_image": None,
+                    "error": f"Enhancement failed: {str(e)}",
+                    "success": False,
+                    "version": VERSION
+                }
+            }
         
         # Convert back to base64
-        buffer = io.BytesIO()
-        enhanced_image.save(buffer, format='PNG', quality=95)
-        buffer.seek(0)
-        
-        # Encode to base64
-        enhanced_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        # CRITICAL: Remove padding for Make.com compatibility
-        # Google Apps Script must add padding back:
-        # while (base64Data.length % 4 !== 0) { base64Data += '='; }
-        enhanced_base64 = enhanced_base64.rstrip('=')
-        
-        print(f"[{VERSION}] Enhanced base64 length: {len(enhanced_base64)}")
+        try:
+            buffer = io.BytesIO()
+            enhanced_image.save(buffer, format='PNG', quality=95)
+            buffer.seek(0)
+            
+            # Encode to base64
+            enhanced_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            # CRITICAL: Remove padding for Make.com compatibility
+            # Google Apps Script must add padding back:
+            # while (base64Data.length % 4 !== 0) { base64Data += '='; }
+            enhanced_base64 = enhanced_base64.rstrip('=')
+            
+            print(f"[{VERSION}] Enhanced base64 length: {len(enhanced_base64)}")
+        except Exception as e:
+            print(f"[{VERSION}] Encoding error: {e}")
+            traceback.print_exc()
+            return {
+                "output": {
+                    "enhanced_image": None,
+                    "error": f"Failed to encode image: {str(e)}",
+                    "success": False,
+                    "version": VERSION
+                }
+            }
         
         # Return proper structure for Make.com
         # RunPod wraps this in {"data": {"output": ...}}
@@ -234,10 +262,8 @@ def handler(job):
         }
         
         print(f"[{VERSION}] ====== Success - Returning Result ======")
-        print(f"[{VERSION}] Result structure check:")
-        print(f"[{VERSION}] - output exists: {'output' in result}")
-        print(f"[{VERSION}] - enhanced_image exists: {'enhanced_image' in result.get('output', {})}")
-        print(f"[{VERSION}] - enhanced_image length: {len(result['output']['enhanced_image'])}")
+        print(f"[{VERSION}] Result structure check - has 'output' key: {'output' in result}")
+        print(f"[{VERSION}] Result['output'] keys: {list(result['output'].keys())}")
         
         return result
         
