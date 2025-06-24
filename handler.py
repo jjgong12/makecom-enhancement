@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class EnhancementHandler:
     def __init__(self):
         """Initialize the Enhancement Handler"""
-        logger.info("Enhancement Handler v38 initialized")
+        logger.info("Enhancement Handler v39 initialized - with padding fix")
         
     def detect_ring_regions(self, image: np.ndarray) -> Dict[str, Any]:
         """Detect ring regions using simple but effective methods"""
@@ -274,6 +274,23 @@ class EnhancementHandler:
         
         return final_enhanced
     
+    def decode_base64_with_padding_fix(self, base64_str: str) -> bytes:
+        """Decode base64 string with automatic padding correction"""
+        # Remove data URL prefix if present
+        if base64_str.startswith('data:'):
+            base64_str = base64_str.split(',')[1]
+        
+        # Fix padding if needed
+        padding = 4 - len(base64_str) % 4
+        if padding != 4:
+            base64_str += '=' * padding
+            
+        return base64.b64decode(base64_str)
+    
+    def encode_base64_without_padding(self, data: bytes) -> str:
+        """Encode to base64 and remove padding for Make.com"""
+        return base64.b64encode(data).decode('utf-8').rstrip('=')
+    
     def process_image(self, input_path: str) -> Tuple[np.ndarray, str, Dict[str, Any]]:
         """Main processing function"""
         logger.info("Starting enhancement processing...")
@@ -306,14 +323,14 @@ class EnhancementHandler:
             'detected_color': detected_color,
             'ring_regions_found': len(ring_regions['candidates']),
             'primary_ring_bbox': ring_regions['primary_region']['bbox'] if ring_regions['primary_region'] else None,
-            'enhancement_version': 'v38_professional'
+            'enhancement_version': 'v39_padding_fixed'
         }
         
         return enhanced, detected_color, processing_info
 
 def handler(event):
     """RunPod handler function"""
-    logger.info("=== Enhancement Handler v38 Started ===")
+    logger.info("=== Enhancement Handler v39 Started ===")
     
     try:
         handler_instance = EnhancementHandler()
@@ -338,25 +355,43 @@ def handler(event):
         if not enhanced_image_data:
             raise ValueError("No enhanced_image data found in input")
         
-        # Remove data URL prefix if present
-        if enhanced_image_data.startswith('data:'):
-            enhanced_image_data = enhanced_image_data.split(',')[1]
-        
-        # Decode base64 image
-        image_bytes = base64.b64decode(enhanced_image_data)
+        # Decode base64 image with padding fix
+        logger.info("Decoding base64 image with padding correction...")
+        image_bytes = handler_instance.decode_base64_with_padding_fix(enhanced_image_data)
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if image is None:
             raise ValueError("Failed to decode image from base64")
         
-        # Process image
-        enhanced_image, detected_color, processing_info = handler_instance.process_image(image)
+        logger.info(f"Successfully decoded image: {image.shape}")
         
-        # Convert result to base64
+        # Process image (using dummy path since we have the image directly)
+        handler_instance.detect_ring_regions = lambda img: handler_instance.detect_ring_regions(image)
+        handler_instance.detect_ring_color_enhanced = lambda img, regions: handler_instance.detect_ring_color_enhanced(image, regions)
+        handler_instance.apply_professional_enhancement = lambda img, color, regions: handler_instance.apply_professional_enhancement(image, color, regions)
+        
+        # Detect ring regions
+        ring_regions = handler_instance.detect_ring_regions(image)
+        
+        # Detect color
+        detected_color = handler_instance.detect_ring_color_enhanced(image, ring_regions)
+        
+        # Apply enhancement
+        enhanced_image = handler_instance.apply_professional_enhancement(image, detected_color, ring_regions)
+        
+        processing_info = {
+            'original_shape': image.shape,
+            'detected_color': detected_color,
+            'ring_regions_found': len(ring_regions['candidates']),
+            'primary_ring_bbox': ring_regions['primary_region']['bbox'] if ring_regions['primary_region'] else None,
+            'enhancement_version': 'v39_padding_fixed'
+        }
+        
+        # Convert result to base64 without padding
         _, buffer = cv2.imencode('.jpg', enhanced_image, 
                                 [cv2.IMWRITE_JPEG_QUALITY, 95])
-        result_base64 = base64.b64encode(buffer).decode('utf-8')
+        result_base64 = handler_instance.encode_base64_without_padding(buffer.tobytes())
         result_data_url = f"data:image/jpeg;base64,{result_base64}"
         
         # Return in nested structure for Make.com
