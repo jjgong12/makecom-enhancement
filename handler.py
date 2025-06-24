@@ -9,50 +9,59 @@ import traceback
 import time
 
 # Version info
-VERSION = "v26-enhancement"
+VERSION = "v27-enhancement"
 
-class WeddingRingEnhancerV26:
-    """v26 Wedding Ring Enhancement - Stronger Enhancement for Whiter Look"""
+class WeddingRingEnhancerV27:
+    """v27 Wedding Ring Enhancement - Soft White without Overexposure"""
     
     def __init__(self):
-        print(f"[{VERSION}] Initializing - Stronger Enhancement")
+        print(f"[{VERSION}] Initializing - Soft White Enhancement")
     
     def apply_simple_enhancement(self, image):
-        """Stronger color enhancement - v26 improved"""
+        """Soft white enhancement without overexposure - v27"""
         try:
-            # 1. Brightness - much stronger for whiter look
+            # 1. Brightness - reduced to prevent overexposure
             enhancer = ImageEnhance.Brightness(image)
-            image = enhancer.enhance(1.25)  # Increased from 1.15
+            image = enhancer.enhance(1.18)  # Reduced from 1.25
             
-            # 2. Contrast - stronger
+            # 2. Contrast - moderate
             enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.12)  # Increased from 1.08
+            image = enhancer.enhance(1.10)  # Reduced from 1.12
             
-            # 3. Color saturation - slightly reduced for purer whites
+            # 3. Color saturation - very subtle for white look
             enhancer = ImageEnhance.Color(image)
-            image = enhancer.enhance(0.98)  # Reduced from 1.03 for whiter look
+            image = enhancer.enhance(0.95)  # More desaturated for purer white
             
-            # 4. Background whitening
+            # 4. Soft white background
             img_np = np.array(image)
             h, w = img_np.shape[:2]
             
-            # Even whiter background
-            background_color = (252, 251, 250)  # Almost pure white
+            # Soft white background (not pure white to avoid harsh contrast)
+            background_color = (248, 246, 243)  # Soft warm white
             
-            # Apply white overlay more strongly
-            brightness_overlay = np.full((h, w, 3), background_color, dtype=np.float32)
+            # Create smooth gradient overlay instead of uniform
+            y_gradient = np.linspace(0.7, 1.0, h).reshape((h, 1))
+            x_gradient = np.linspace(1.0, 1.0, w).reshape((1, w))
+            gradient_mask = y_gradient * x_gradient
             
-            # Stronger uniform blending (15%)
+            # Apply gradient overlay for natural lighting
             for i in range(3):
-                img_np[:, :, i] = img_np[:, :, i] * 0.85 + brightness_overlay[:, :, i] * 0.15
+                overlay = background_color[i] * gradient_mask
+                img_np[:, :, i] = img_np[:, :, i] * 0.88 + overlay * 0.12
             
-            # Additional brightness boost
-            img_np = np.clip(img_np * 1.05, 0, 255)
+            # Soft brightness adjustment (no harsh boost)
+            img_np = np.clip(img_np * 1.02, 0, 255)
             
-            # Gamma correction for even brighter result
-            gamma = 0.9  # Lower gamma = brighter
+            # Gentle gamma correction
+            gamma = 0.95  # Less aggressive than before
             img_np = np.power(img_np / 255.0, gamma) * 255
             img_np = np.clip(img_np, 0, 255)
+            
+            # Prevent overexposure in bright areas
+            bright_mask = np.max(img_np, axis=2) > 240
+            if np.any(bright_mask):
+                for i in range(3):
+                    img_np[bright_mask, i] = img_np[bright_mask, i] * 0.97
             
             return Image.fromarray(img_np.astype(np.uint8))
             
@@ -61,7 +70,7 @@ class WeddingRingEnhancerV26:
             return image
 
 def handler(job):
-    """RunPod handler function - V26 STRONGER"""
+    """RunPod handler function - V27 SOFT WHITE"""
     print(f"[{VERSION}] ====== Handler Started ======")
     
     try:
@@ -150,9 +159,9 @@ def handler(job):
             }
         
         # Apply enhancement
-        enhancer = WeddingRingEnhancerV26()
+        enhancer = WeddingRingEnhancerV27()
         enhanced_image = enhancer.apply_simple_enhancement(image)
-        print(f"[{VERSION}] Enhancement applied with stronger settings")
+        print(f"[{VERSION}] Enhancement applied with soft white settings")
         
         # Convert back to base64
         buffer = io.BytesIO()
@@ -205,7 +214,7 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V26 - Stronger Enhancement for Whiter Look")
+    print("V27 - Soft White Enhancement without Overexposure")
     print("IMPORTANT: Google Apps Script must add padding back!")
     print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
     print("="*70)
