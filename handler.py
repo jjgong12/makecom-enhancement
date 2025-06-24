@@ -9,113 +9,109 @@ import traceback
 import time
 
 # Version info
-VERSION = "v29-enhancement"
+VERSION = "v30-enhancement"
 
-class WeddingRingEnhancerV29:
-    """v29 Wedding Ring Enhancement - Pure White Enhancement"""
+class WeddingRingEnhancerV30:
+    """v30 Wedding Ring Enhancement - Clear & Sharp like Image 3"""
     
     def __init__(self):
-        print(f"[{VERSION}] Initializing - Pure White Enhancement")
+        print(f"[{VERSION}] Initializing - Clear & Sharp Enhancement")
     
     def apply_simple_enhancement(self, image):
-        """Pure white enhancement for clean, bright results - v29"""
+        """Clear and sharp enhancement prioritizing clarity - v30"""
         try:
-            # 1. Pre-sharpening for clarity
-            image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=60, threshold=2))
+            # 1. FIRST: Strong sharpening to maintain detail
+            # This is KEY - apply sharpening BEFORE brightness
+            image = image.filter(ImageFilter.UnsharpMask(radius=2, percent=100, threshold=1))
             
-            # 2. Stronger brightness for pure white look
+            # 2. Moderate brightness - not too much
             enhancer = ImageEnhance.Brightness(image)
-            image = enhancer.enhance(1.28)  # Further increased from 1.22
+            image = enhancer.enhance(1.15)  # Reduced from 1.28 to prevent washout
             
-            # 3. Higher contrast for crisp details
+            # 3. Strong contrast for clarity
             enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.18)  # Increased from 1.15
+            image = enhancer.enhance(1.22)  # Increased for more definition
             
-            # 4. Reduced saturation for cleaner whites
+            # 4. Slight saturation reduction
             enhancer = ImageEnhance.Color(image)
-            image = enhancer.enhance(0.92)  # More desaturated for pure white
+            image = enhancer.enhance(0.94)  # Keep some color for natural look
             
             # 5. Convert to numpy for advanced processing
             img_np = np.array(image)
             h, w = img_np.shape[:2]
             
-            # 6. Apply strong CLAHE for even brightness
+            # 6. Apply moderate CLAHE for balanced brightness
             img_lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB)
             l_channel, a_channel, b_channel = cv2.split(img_lab)
             
-            # Stronger CLAHE settings
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            # Moderate CLAHE to avoid over-brightening
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             l_channel = clahe.apply(l_channel)
             
-            # Boost L channel for more brightness
-            l_channel = cv2.add(l_channel, 15)  # Add brightness to L channel
+            # Slight L channel boost only
+            l_channel = cv2.add(l_channel, 8)  # Much less than v29's 15
             l_channel = np.clip(l_channel, 0, 255)
             
             img_lab = cv2.merge([l_channel, a_channel, b_channel])
             img_np = cv2.cvtColor(img_lab, cv2.COLOR_LAB2RGB)
             
-            # 7. Pure white background
-            background_color = (253, 252, 251)  # Almost pure white
+            # 7. Clean white background with less overlay
+            background_color = (251, 250, 249)  # Slightly off-white for natural look
             
-            # Create strong white overlay
-            white_overlay = np.full((h, w, 3), background_color, dtype=np.float32)
+            # Edge detection for precise masking
+            edges = cv2.Canny(cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY), 50, 150)
+            edges_dilated = cv2.dilate(edges, np.ones((5,5), np.uint8), iterations=3)
             
-            # Edge detection for masking
-            edges = cv2.Canny(cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY), 40, 120)
-            edges_dilated = cv2.dilate(edges, np.ones((7,7), np.uint8), iterations=2)
-            
-            # Create mask avoiding product edges
+            # Create mask avoiding product
             mask = np.ones((h, w), dtype=np.float32)
             mask[edges_dilated > 0] = 0
-            mask = cv2.GaussianBlur(mask, (51, 51), 25)
+            mask = cv2.GaussianBlur(mask, (31, 31), 15)
             
-            # Apply white overlay more aggressively
+            # Apply white overlay more subtly
             for i in range(3):
-                img_np[:, :, i] = img_np[:, :, i] * (1 - mask * 0.25) + white_overlay[:, :, i] * mask * 0.25
+                img_np[:, :, i] = img_np[:, :, i] * (1 - mask * 0.12) + background_color[i] * mask * 0.12
             
-            # 8. Gamma correction for overall brightness
-            gamma = 0.85  # Lower gamma = brighter image
+            # 8. Gentle gamma correction
+            gamma = 0.92  # Less aggressive than v29
             img_np = np.power(img_np / 255.0, gamma) * 255
             img_np = np.clip(img_np, 0, 255).astype(np.uint8)
             
-            # 9. Additional brightness push
-            # Create brightness gradient (darker at top, brighter at bottom)
-            brightness_gradient = np.linspace(0.95, 1.05, h).reshape((h, 1))
-            brightness_mask = np.repeat(brightness_gradient, w, axis=1)
+            # 9. Detail enhancement using high-pass filter
+            # This makes the image crisp like image 3
+            img_float = img_np.astype(np.float32)
             
-            for i in range(3):
-                img_np[:, :, i] = np.clip(img_np[:, :, i] * brightness_mask * 1.03, 0, 255)
+            # High-pass filter for detail extraction
+            blurred = cv2.GaussianBlur(img_float, (0, 0), 3)
+            detail = img_float - blurred
             
-            # 10. Final color balance for pure white
-            # Reduce any color casts
-            img_np = img_np.astype(np.float32)
+            # Add detail back with strength
+            img_float = img_float + detail * 0.5
+            img_np = np.clip(img_float, 0, 255).astype(np.uint8)
             
-            # Calculate average color
-            avg_r = np.mean(img_np[:, :, 0])
-            avg_g = np.mean(img_np[:, :, 1])
-            avg_b = np.mean(img_np[:, :, 2])
-            avg_gray = (avg_r + avg_g + avg_b) / 3
-            
-            # Balance colors toward neutral
-            img_np[:, :, 0] *= (avg_gray / avg_r) * 0.95 + 0.05
-            img_np[:, :, 1] *= (avg_gray / avg_g) * 0.95 + 0.05
-            img_np[:, :, 2] *= (avg_gray / avg_b) * 0.95 + 0.05
-            
-            img_np = np.clip(img_np, 0, 255).astype(np.uint8)
-            
-            # Final sharpening
+            # 10. Final sharpening pass
             img_pil = Image.fromarray(img_np)
             enhancer = ImageEnhance.Sharpness(img_pil)
-            img_pil = enhancer.enhance(1.3)
+            img_pil = enhancer.enhance(1.4)
             
-            return img_pil
+            # 11. Micro-contrast enhancement for that "crisp" look
+            img_np = np.array(img_pil)
+            
+            # Local contrast enhancement
+            kernel = np.array([[-1,-1,-1],
+                              [-1, 9,-1],
+                              [-1,-1,-1]]) / 9.0
+            
+            sharpened = cv2.filter2D(img_np, -1, kernel)
+            img_np = cv2.addWeighted(img_np, 0.8, sharpened, 0.2, 0)
+            
+            return Image.fromarray(img_np.astype(np.uint8))
             
         except Exception as e:
             print(f"[{VERSION}] Enhancement error: {e}")
             return image
 
 def handler(job):
-    """RunPod handler function - V29 PURE WHITE"""
+    """RunPod handler function - V30 CLEAR & SHARP"""
     print(f"[{VERSION}] ====== Handler Started ======")
     
     try:
@@ -204,9 +200,9 @@ def handler(job):
             }
         
         # Apply enhancement
-        enhancer = WeddingRingEnhancerV29()
+        enhancer = WeddingRingEnhancerV30()
         enhanced_image = enhancer.apply_simple_enhancement(image)
-        print(f"[{VERSION}] Enhancement applied with pure white settings")
+        print(f"[{VERSION}] Enhancement applied with clear & sharp settings")
         
         # Convert back to base64
         buffer = io.BytesIO()
@@ -259,14 +255,13 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V29 - Pure White Enhancement")
+    print("V30 - Clear & Sharp Enhancement (Like Image 3)")
     print("Features:")
-    print("- Stronger brightness (1.28)")
-    print("- Higher contrast (1.18)")
-    print("- Reduced saturation (0.92)")
-    print("- L channel boost (+15)")
-    print("- Aggressive white overlay (25%)")
-    print("- Color balance to neutral")
+    print("- Sharpening first priority")
+    print("- Moderate brightness (1.15)")
+    print("- Strong contrast (1.22)")
+    print("- High-pass detail enhancement")
+    print("- Micro-contrast for crisp look")
     print("IMPORTANT: Google Apps Script must add padding back!")
     print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
     print("="*70)
