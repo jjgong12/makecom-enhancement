@@ -9,7 +9,7 @@ import time
 import traceback
 
 # Version
-VERSION = "v35-enhancement"
+VERSION = "v36-enhancement"
 
 def find_base64_in_dict(data, depth=0, max_depth=10):
     """Find base64 image in nested dictionary"""
@@ -88,29 +88,120 @@ def encode_image_to_base64(image, format='JPEG'):
         print(f"[{VERSION}] Error encoding image: {e}")
         raise
 
-def enhance_wedding_ring(image):
-    """v35 Enhancement - Much brighter for white gold/plain white"""
+def detect_metal_color(image):
+    """Detect metal color with priority: Plain White > Rose Gold > White Gold > Yellow Gold"""
     try:
-        print(f"[{VERSION}] Starting v35 enhancement - extra bright white gold")
+        # Convert to numpy array
+        img_np = np.array(image)
+        h, w = img_np.shape[:2]
         
-        # 1. Strong brightness boost for white metals
+        # Get center region (where ring is likely to be)
+        center_y, center_x = h//2, w//2
+        crop_size = min(h, w) // 3
+        
+        y1 = max(0, center_y - crop_size)
+        y2 = min(h, center_y + crop_size)
+        x1 = max(0, center_x - crop_size)
+        x2 = min(w, center_x + crop_size)
+        
+        center_region = img_np[y1:y2, x1:x2]
+        
+        # Calculate color statistics
+        r_mean = np.mean(center_region[:, :, 0])
+        g_mean = np.mean(center_region[:, :, 1])
+        b_mean = np.mean(center_region[:, :, 2])
+        
+        # Calculate brightness and saturation
+        brightness = (r_mean + g_mean + b_mean) / 3
+        max_channel = max(r_mean, g_mean, b_mean)
+        min_channel = min(r_mean, g_mean, b_mean)
+        saturation = max_channel - min_channel
+        
+        print(f"[{VERSION}] Color analysis - R:{r_mean:.1f} G:{g_mean:.1f} B:{b_mean:.1f}")
+        print(f"[{VERSION}] Brightness:{brightness:.1f} Saturation:{saturation:.1f}")
+        
+        # Detection priority
+        # 1. Rose Gold - pinkish tone
+        if r_mean - b_mean > 30 and r_mean > g_mean > b_mean:
+            print(f"[{VERSION}] Detected: Rose Gold")
+            return "rose_gold"
+        
+        # 2. Plain White - very bright and low saturation
+        elif brightness > 230 and saturation < 10:
+            print(f"[{VERSION}] Detected: Plain White")
+            return "plain_white"
+        
+        # 3. White Gold - bright but slightly less than plain white
+        elif brightness > 180 and saturation < 30:
+            print(f"[{VERSION}] Detected: White Gold")
+            return "white_gold"
+        
+        # 4. Everything else is Yellow Gold
+        else:
+            print(f"[{VERSION}] Detected: Yellow Gold (default)")
+            return "yellow_gold"
+            
+    except Exception as e:
+        print(f"[{VERSION}] Error in metal detection: {e}")
+        return "white_gold"  # Default fallback
+
+def enhance_wedding_ring_v36(image, metal_type=None):
+    """v36 Enhancement - Color-aware brightness enhancement"""
+    try:
+        # Detect metal type if not provided
+        if metal_type is None:
+            metal_type = detect_metal_color(image)
+        
+        print(f"[{VERSION}] Enhancing {metal_type} ring")
+        
+        # Metal-specific enhancement parameters
+        if metal_type == "plain_white":
+            # Extra bright for plain white
+            brightness_factor = 1.22
+            contrast_factor = 1.08
+            saturation_factor = 0.90  # More desaturated
+            gamma = 0.85  # Brighter
+            background_blend = 0.20
+        elif metal_type == "rose_gold":
+            # Warm enhancement for rose gold
+            brightness_factor = 1.15
+            contrast_factor = 1.10
+            saturation_factor = 1.02  # Keep warm tones
+            gamma = 0.92
+            background_blend = 0.12
+        elif metal_type == "white_gold":
+            # Cool enhancement for white gold
+            brightness_factor = 1.18
+            contrast_factor = 1.10
+            saturation_factor = 0.94
+            gamma = 0.88
+            background_blend = 0.18
+        else:  # yellow_gold
+            # Warm but controlled for yellow gold
+            brightness_factor = 1.12
+            contrast_factor = 1.08
+            saturation_factor = 0.98
+            gamma = 0.95
+            background_blend = 0.10
+        
+        # 1. Apply brightness
         enhancer = ImageEnhance.Brightness(image)
-        image = enhancer.enhance(1.20)  # Increased from 1.12
+        image = enhancer.enhance(brightness_factor)
         
-        # 2. Contrast adjustment
+        # 2. Apply contrast
         enhancer = ImageEnhance.Contrast(image)
-        image = enhancer.enhance(1.10)  # Slightly increased
+        image = enhancer.enhance(contrast_factor)
         
-        # 3. Reduce saturation for whiter appearance
+        # 3. Apply saturation
         enhancer = ImageEnhance.Color(image)
-        image = enhancer.enhance(0.92)  # More desaturated for white metals
+        image = enhancer.enhance(saturation_factor)
         
         # 4. Convert to numpy for advanced processing
         img_np = np.array(image)
         h, w = img_np.shape[:2]
         
-        # 5. Apply bright white background
-        white_color = (254, 254, 254)  # Almost pure white
+        # 5. Apply white background blend
+        white_color = (254, 254, 254)
         
         # Create edge mask
         gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
@@ -122,32 +213,19 @@ def enhance_wedding_ring(image):
         mask[edges_dilated > 0] = 0
         mask = cv2.GaussianBlur(mask, (31, 31), 15)
         
-        # Apply white background more strongly
+        # Apply white background
         for i in range(3):
-            img_np[:, :, i] = img_np[:, :, i] * (1 - mask * 0.18) + white_color[i] * mask * 0.18
+            img_np[:, :, i] = img_np[:, :, i] * (1 - mask * background_blend) + white_color[i] * mask * background_blend
         
-        # 6. Gamma correction for extra brightness
-        gamma = 0.88  # Lower gamma = brighter
+        # 6. Gamma correction
         img_np = np.power(img_np / 255.0, gamma) * 255
         img_np = np.clip(img_np, 0, 255).astype(np.uint8)
         
-        # 7. Additional brightness boost for white metals
-        # Detect bright areas (likely white gold/plain white)
-        bright_mask = gray > 180
-        bright_mask = cv2.GaussianBlur(bright_mask.astype(np.float32), (15, 15), 7)
-        
-        # Brighten white metal areas
-        for i in range(3):
-            img_np[:, :, i] = np.clip(img_np[:, :, i] * (1 + bright_mask * 0.08), 0, 255)
-        
-        # 8. Final overall brightness
-        img_np = np.clip(img_np * 1.05, 0, 255).astype(np.uint8)
-        
-        # 9. Light sharpening
+        # 7. Light sharpening
         image = Image.fromarray(img_np)
         image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=30, threshold=3))
         
-        print(f"[{VERSION}] Enhancement complete - extra bright for white metals")
+        print(f"[{VERSION}] Enhancement complete for {metal_type}")
         return image
         
     except Exception as e:
@@ -156,9 +234,9 @@ def enhance_wedding_ring(image):
         return image
 
 def handler(job):
-    """RunPod handler - v35 Enhancement"""
+    """RunPod handler - v36 Color-Aware Enhancement"""
     print(f"[{VERSION}] ====== Enhancement Handler Started ======")
-    print(f"[{VERSION}] Extra bright processing for white metals")
+    print(f"[{VERSION}] Color-aware processing with metal detection")
     
     start_time = time.time()
     
@@ -213,14 +291,16 @@ def handler(job):
             image = image.resize(new_size, Image.Resampling.LANCZOS)
             print(f"[{VERSION}] Resized to: {image.size}")
         
-        # Apply enhancement
+        # Apply color-aware enhancement
         try:
-            enhanced_image = enhance_wedding_ring(image)
+            metal_type = detect_metal_color(image)
+            enhanced_image = enhance_wedding_ring_v36(image, metal_type)
             print(f"[{VERSION}] Enhancement applied successfully")
         except Exception as e:
             print(f"[{VERSION}] Error during enhancement: {e}")
             traceback.print_exc()
             enhanced_image = image
+            metal_type = "unknown"
         
         # Encode result
         try:
@@ -247,21 +327,20 @@ def handler(job):
                 "version": VERSION,
                 "processing_time": round(processing_time, 2),
                 "original_size": list(image.size),
-                "enhancements_applied": [
-                    "brightness_boost_1.20",
-                    "contrast_1.10",
-                    "desaturation_0.92",
-                    "white_background_blend",
-                    "gamma_correction_0.88",
-                    "white_metal_brightening",
-                    "final_brightness_1.05"
-                ],
+                "detected_metal": metal_type,
+                "enhancements_applied": {
+                    "plain_white": "brightness_1.22_contrast_1.08_desat_0.90",
+                    "rose_gold": "brightness_1.15_contrast_1.10_sat_1.02",
+                    "white_gold": "brightness_1.18_contrast_1.10_desat_0.94",
+                    "yellow_gold": "brightness_1.12_contrast_1.08_desat_0.98"
+                }.get(metal_type, "default"),
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
                 "warning": "Google Script must add padding: while (base64Data.length % 4 !== 0) { base64Data += '='; }"
             }
         }
         
         print(f"[{VERSION}] ====== Success - Returning Enhanced Image ======")
+        print(f"[{VERSION}] Detected metal: {metal_type}")
         print(f"[{VERSION}] Total processing time: {processing_time:.2f}s")
         
         return result
@@ -285,12 +364,12 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V35 - Extra Bright for White Gold & Plain White")
+    print("V36 - Color-Aware Enhancement with Metal Detection")
     print("Features:")
-    print("- 20% brightness boost (up from 12%)")
-    print("- Stronger desaturation for white metals")
-    print("- Additional white metal brightening")
-    print("- Lower gamma for brighter appearance")
+    print("- Automatic metal color detection")
+    print("- Priority: Plain White > Rose Gold > White Gold > Yellow Gold")
+    print("- Metal-specific enhancement parameters")
+    print("- Plain white: Extra bright (22% boost)")
     print("- Max dimension limit: 4000px")
     print("CRITICAL: Padding is removed for Make.com")
     print("Google Apps Script MUST add padding back:")
