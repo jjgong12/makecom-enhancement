@@ -9,63 +9,63 @@ import traceback
 import time
 
 # Version info
-VERSION = "v31-enhancement"
+VERSION = "v32-enhancement"
 
-class WeddingRingEnhancerV31:
-    """v31 Wedding Ring Enhancement - Simple & Reliable"""
+class WeddingRingEnhancerV32:
+    """v32 Wedding Ring Enhancement - Minimal Bright Enhancement"""
     
     def __init__(self):
-        print(f"[{VERSION}] Initializing - Simple & Reliable Enhancement")
+        print(f"[{VERSION}] Initializing - Minimal Bright Enhancement")
     
     def apply_simple_enhancement(self, image):
-        """Simple color enhancement for bright white results"""
+        """Very minimal color enhancement for slight brightening"""
         try:
-            # 1. Pre-sharpening for clarity
-            image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=80, threshold=2))
+            # 1. Very light sharpening first - like image 3
+            image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=50, threshold=3))
             
-            # 2. Brightness increase
+            # 2. Minimal brightness increase - just a touch
             enhancer = ImageEnhance.Brightness(image)
-            image = enhancer.enhance(1.18)
+            image = enhancer.enhance(1.08)  # Very minimal - only 8% increase
             
-            # 3. Contrast for clarity
+            # 3. Slight contrast for clarity
             enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.15)
+            image = enhancer.enhance(1.06)  # Very minimal - only 6% increase
             
-            # 4. Slight saturation reduction for cleaner whites
+            # 4. Keep colors natural
             enhancer = ImageEnhance.Color(image)
-            image = enhancer.enhance(0.95)
+            image = enhancer.enhance(0.98)  # Almost no change
             
-            # 5. Convert to numpy for background whitening
+            # 5. Convert to numpy for very subtle background whitening
             img_np = np.array(image)
             h, w = img_np.shape[:2]
             
-            # 6. Simple white background blend
+            # 6. Very subtle white background blend
             # Create white overlay
-            white_color = (250, 250, 250)
+            white_color = (248, 248, 248)  # Not pure white, very subtle
             
             # Create simple edge mask
             gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray, 50, 150)
-            edges_dilated = cv2.dilate(edges, np.ones((5,5), np.uint8), iterations=2)
+            edges = cv2.Canny(gray, 60, 150)
+            edges_dilated = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=1)
             
             # Create mask
             mask = np.ones((h, w), dtype=np.float32)
             mask[edges_dilated > 0] = 0
-            mask = cv2.GaussianBlur(mask, (51, 51), 25)
+            mask = cv2.GaussianBlur(mask, (31, 31), 15)
             
-            # Apply white overlay
+            # Apply very subtle white overlay
             for i in range(3):
-                img_np[:, :, i] = img_np[:, :, i] * (1 - mask * 0.15) + white_color[i] * mask * 0.15
+                img_np[:, :, i] = img_np[:, :, i] * (1 - mask * 0.08) + white_color[i] * mask * 0.08
             
-            # 7. Simple gamma correction for brightness
-            gamma = 0.9
+            # 7. Very gentle gamma correction
+            gamma = 0.95  # Very subtle
             img_np = np.power(img_np / 255.0, gamma) * 255
             img_np = np.clip(img_np, 0, 255).astype(np.uint8)
             
-            # 8. Final sharpness
+            # 8. Final minimal sharpness
             img_pil = Image.fromarray(img_np)
             enhancer = ImageEnhance.Sharpness(img_pil)
-            img_pil = enhancer.enhance(1.2)
+            img_pil = enhancer.enhance(1.1)  # Very subtle
             
             return img_pil
             
@@ -75,7 +75,7 @@ class WeddingRingEnhancerV31:
             return image
 
 def handler(job):
-    """RunPod handler function - V31 FIXED"""
+    """RunPod handler function - V32 MINIMAL ENHANCEMENT"""
     print(f"[{VERSION}] ====== Handler Started ======")
     
     try:
@@ -86,7 +86,7 @@ def handler(job):
         # Find base64 image
         base64_image = None
         
-        # Direct access attempts - CRITICAL FIX: Added 'image_base64'
+        # Direct access attempts - CRITICAL: Added 'image_base64'
         if isinstance(job_input, dict):
             for key in ['image_base64', 'image', 'base64', 'data', 'input', 'file', 'imageData']:
                 if key in job_input:
@@ -165,9 +165,9 @@ def handler(job):
             }
         
         # Apply enhancement
-        enhancer = WeddingRingEnhancerV31()
+        enhancer = WeddingRingEnhancerV32()
         enhanced_image = enhancer.apply_simple_enhancement(image)
-        print(f"[{VERSION}] Enhancement applied")
+        print(f"[{VERSION}] Minimal enhancement applied")
         
         # Convert back to base64
         buffer = io.BytesIO()
@@ -221,12 +221,12 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V31 - Simple & Reliable (Based on V24)")
+    print("V32 - Minimal Bright Enhancement")
     print("Features:")
-    print("- Simple brightness (1.18)")
-    print("- Moderate contrast (1.15)")
-    print("- Subtle white background")
-    print("- Reliable processing")
+    print("- Very minimal brightness (1.08)")
+    print("- Subtle contrast (1.06)")
+    print("- Light white background blend (8%)")
+    print("- Gentle processing for natural look")
     print("IMPORTANT: Google Apps Script must add padding back!")
     print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
     print("="*70)
