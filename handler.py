@@ -9,49 +9,50 @@ import traceback
 import time
 
 # Version info
-VERSION = "v25-enhancement"
+VERSION = "v26-enhancement"
 
-class WeddingRingEnhancerV25:
-    """v25 Wedding Ring Enhancement - Fixed Shadow Issues & Better Enhancement"""
+class WeddingRingEnhancerV26:
+    """v26 Wedding Ring Enhancement - Stronger Enhancement for Whiter Look"""
     
     def __init__(self):
-        print(f"[{VERSION}] Initializing - Fixed Shadow & Enhanced Color")
+        print(f"[{VERSION}] Initializing - Stronger Enhancement")
     
     def apply_simple_enhancement(self, image):
-        """Simple but effective color enhancement - v25 improved"""
+        """Stronger color enhancement - v26 improved"""
         try:
-            # 1. Brightness - more increase for whiter look
+            # 1. Brightness - much stronger for whiter look
             enhancer = ImageEnhance.Brightness(image)
-            image = enhancer.enhance(1.15)  # Increased from 1.1
+            image = enhancer.enhance(1.25)  # Increased from 1.15
             
-            # 2. Contrast - slightly more
+            # 2. Contrast - stronger
             enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.08)  # Increased from 1.05
+            image = enhancer.enhance(1.12)  # Increased from 1.08
             
-            # 3. Color saturation - keep subtle
+            # 3. Color saturation - slightly reduced for purer whites
             enhancer = ImageEnhance.Color(image)
-            image = enhancer.enhance(1.03)  # Slightly increased from 1.02
+            image = enhancer.enhance(0.98)  # Reduced from 1.03 for whiter look
             
-            # 4. Background color adjustment WITHOUT shadow
+            # 4. Background whitening
             img_np = np.array(image)
             h, w = img_np.shape[:2]
             
-            # Brighter background color
-            background_color = (250, 248, 245)  # Even brighter beige
+            # Even whiter background
+            background_color = (252, 251, 250)  # Almost pure white
             
-            # FIX: Create mask without edge darkening
-            # Instead of blending edges, we'll brighten the whole image uniformly
-            # This prevents the shadow effect at edges
-            
-            # Simple brightness overlay instead of edge blending
+            # Apply white overlay more strongly
             brightness_overlay = np.full((h, w, 3), background_color, dtype=np.float32)
             
-            # Very subtle uniform blending (10% only)
+            # Stronger uniform blending (15%)
             for i in range(3):
-                img_np[:, :, i] = img_np[:, :, i] * 0.9 + brightness_overlay[:, :, i] * 0.1
+                img_np[:, :, i] = img_np[:, :, i] * 0.85 + brightness_overlay[:, :, i] * 0.15
             
-            # Additional overall brightness boost to match desired result
-            img_np = np.clip(img_np * 1.02, 0, 255)
+            # Additional brightness boost
+            img_np = np.clip(img_np * 1.05, 0, 255)
+            
+            # Gamma correction for even brighter result
+            gamma = 0.9  # Lower gamma = brighter
+            img_np = np.power(img_np / 255.0, gamma) * 255
+            img_np = np.clip(img_np, 0, 255)
             
             return Image.fromarray(img_np.astype(np.uint8))
             
@@ -60,7 +61,7 @@ class WeddingRingEnhancerV25:
             return image
 
 def handler(job):
-    """RunPod handler function - V25 FIXED"""
+    """RunPod handler function - V26 STRONGER"""
     print(f"[{VERSION}] ====== Handler Started ======")
     
     try:
@@ -149,9 +150,9 @@ def handler(job):
             }
         
         # Apply enhancement
-        enhancer = WeddingRingEnhancerV25()
+        enhancer = WeddingRingEnhancerV26()
         enhanced_image = enhancer.apply_simple_enhancement(image)
-        print(f"[{VERSION}] Enhancement applied")
+        print(f"[{VERSION}] Enhancement applied with stronger settings")
         
         # Convert back to base64
         buffer = io.BytesIO()
@@ -204,7 +205,7 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V25 - Fixed Shadow Issues & Better Enhancement")
+    print("V26 - Stronger Enhancement for Whiter Look")
     print("IMPORTANT: Google Apps Script must add padding back!")
     print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
     print("="*70)
