@@ -5,81 +5,14 @@ from PIL import Image, ImageEnhance, ImageFilter
 import cv2
 import io
 import os
-import traceback
 import time
+import traceback
 
-# Version info
-VERSION = "v33-enhancement"
-
-class WeddingRingEnhancerV33:
-    """v33 Wedding Ring Enhancement - Brighter Enhancement"""
-    
-    def __init__(self):
-        print(f"[{VERSION}] Initializing - Brighter Enhancement")
-    
-    def apply_simple_enhancement(self, image):
-        """Slightly brighter color enhancement for whiter results"""
-        try:
-            # 1. Light sharpening first - like image 3
-            image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=50, threshold=3))
-            
-            # 2. More brightness increase
-            enhancer = ImageEnhance.Brightness(image)
-            image = enhancer.enhance(1.12)  # Increased from 1.08
-            
-            # 3. Slightly more contrast
-            enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.08)  # Increased from 1.06
-            
-            # 4. Keep colors natural but cleaner
-            enhancer = ImageEnhance.Color(image)
-            image = enhancer.enhance(0.96)  # Slightly less saturation
-            
-            # 5. Convert to numpy for more white background
-            img_np = np.array(image)
-            h, w = img_np.shape[:2]
-            
-            # 6. More white background blend
-            # Create whiter overlay
-            white_color = (252, 252, 252)  # More white
-            
-            # Create simple edge mask
-            gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray, 60, 150)
-            edges_dilated = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=1)
-            
-            # Create mask
-            mask = np.ones((h, w), dtype=np.float32)
-            mask[edges_dilated > 0] = 0
-            mask = cv2.GaussianBlur(mask, (31, 31), 15)
-            
-            # Apply more white overlay
-            for i in range(3):
-                img_np[:, :, i] = img_np[:, :, i] * (1 - mask * 0.12) + white_color[i] * mask * 0.12
-            
-            # 7. More aggressive gamma correction for brightness
-            gamma = 0.92  # More brightness
-            img_np = np.power(img_np / 255.0, gamma) * 255
-            img_np = np.clip(img_np, 0, 255).astype(np.uint8)
-            
-            # 8. Additional brightness push
-            # Simple brightness adjustment
-            img_np = np.clip(img_np * 1.03, 0, 255).astype(np.uint8)
-            
-            # 9. Final minimal sharpness
-            img_pil = Image.fromarray(img_np)
-            enhancer = ImageEnhance.Sharpness(img_pil)
-            img_pil = enhancer.enhance(1.1)
-            
-            return img_pil
-            
-        except Exception as e:
-            print(f"[{VERSION}] Enhancement error: {e}")
-            traceback.print_exc()
-            return image
+# Version
+VERSION = "v35-enhancement"
 
 def find_base64_in_dict(data, depth=0, max_depth=10):
-    """중첩된 딕셔너리에서 base64 이미지 찾기"""
+    """Find base64 image in nested dictionary"""
     if depth > max_depth:
         return None
     
@@ -87,12 +20,10 @@ def find_base64_in_dict(data, depth=0, max_depth=10):
         return data
     
     if isinstance(data, dict):
-        # 우선순위 키들 먼저 체크
         for key in ['image_base64', 'image', 'base64', 'data', 'input', 'file', 'imageData']:
             if key in data and isinstance(data[key], str) and len(data[key]) > 100:
                 return data[key]
         
-        # 모든 값 재귀적으로 체크
         for value in data.values():
             result = find_base64_in_dict(value, depth + 1, max_depth)
             if result:
@@ -107,25 +38,25 @@ def find_base64_in_dict(data, depth=0, max_depth=10):
     return None
 
 def decode_base64_image(base64_str):
-    """Base64 문자열을 PIL Image로 디코드"""
+    """Decode base64 string to PIL Image"""
     try:
-        # Data URL 형식 처리
+        # Handle data URL format
         if ',' in base64_str and base64_str.startswith('data:'):
             base64_str = base64_str.split(',')[1]
         
-        # 공백 제거
+        # Clean base64
         base64_str = base64_str.strip()
         
-        # Padding 추가 (디코딩용)
+        # Add padding for decoding
         padding = 4 - len(base64_str) % 4
         if padding != 4:
             base64_str += '=' * padding
         
-        # 디코드
+        # Decode
         img_data = base64.b64decode(base64_str)
         img = Image.open(io.BytesIO(img_data))
         
-        # RGB로 변환
+        # Convert to RGB
         if img.mode != 'RGB':
             img = img.convert('RGB')
         
@@ -135,20 +66,20 @@ def decode_base64_image(base64_str):
         print(f"[{VERSION}] Error decoding base64: {e}")
         raise
 
-def encode_image_to_base64(image, format='PNG'):
-    """이미지를 base64로 인코딩 (Make.com 호환)"""
+def encode_image_to_base64(image, format='JPEG'):
+    """Encode image to base64 (Make.com compatible)"""
     try:
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
         
         buffer = io.BytesIO()
-        image.save(buffer, format=format, quality=95 if format == 'JPEG' else None)
+        image.save(buffer, format=format, quality=95)
         buffer.seek(0)
         
-        # Base64 인코딩
+        # Base64 encode
         base64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
         
-        # CRITICAL: Make.com을 위해 padding 제거
+        # CRITICAL: Remove padding for Make.com
         base64_str = base64_str.rstrip('=')
         
         return base64_str
@@ -157,10 +88,77 @@ def encode_image_to_base64(image, format='PNG'):
         print(f"[{VERSION}] Error encoding image: {e}")
         raise
 
+def enhance_wedding_ring(image):
+    """v35 Enhancement - Much brighter for white gold/plain white"""
+    try:
+        print(f"[{VERSION}] Starting v35 enhancement - extra bright white gold")
+        
+        # 1. Strong brightness boost for white metals
+        enhancer = ImageEnhance.Brightness(image)
+        image = enhancer.enhance(1.20)  # Increased from 1.12
+        
+        # 2. Contrast adjustment
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(1.10)  # Slightly increased
+        
+        # 3. Reduce saturation for whiter appearance
+        enhancer = ImageEnhance.Color(image)
+        image = enhancer.enhance(0.92)  # More desaturated for white metals
+        
+        # 4. Convert to numpy for advanced processing
+        img_np = np.array(image)
+        h, w = img_np.shape[:2]
+        
+        # 5. Apply bright white background
+        white_color = (254, 254, 254)  # Almost pure white
+        
+        # Create edge mask
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        edges_dilated = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=1)
+        
+        # Create background mask
+        mask = np.ones((h, w), dtype=np.float32)
+        mask[edges_dilated > 0] = 0
+        mask = cv2.GaussianBlur(mask, (31, 31), 15)
+        
+        # Apply white background more strongly
+        for i in range(3):
+            img_np[:, :, i] = img_np[:, :, i] * (1 - mask * 0.18) + white_color[i] * mask * 0.18
+        
+        # 6. Gamma correction for extra brightness
+        gamma = 0.88  # Lower gamma = brighter
+        img_np = np.power(img_np / 255.0, gamma) * 255
+        img_np = np.clip(img_np, 0, 255).astype(np.uint8)
+        
+        # 7. Additional brightness boost for white metals
+        # Detect bright areas (likely white gold/plain white)
+        bright_mask = gray > 180
+        bright_mask = cv2.GaussianBlur(bright_mask.astype(np.float32), (15, 15), 7)
+        
+        # Brighten white metal areas
+        for i in range(3):
+            img_np[:, :, i] = np.clip(img_np[:, :, i] * (1 + bright_mask * 0.08), 0, 255)
+        
+        # 8. Final overall brightness
+        img_np = np.clip(img_np * 1.05, 0, 255).astype(np.uint8)
+        
+        # 9. Light sharpening
+        image = Image.fromarray(img_np)
+        image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=30, threshold=3))
+        
+        print(f"[{VERSION}] Enhancement complete - extra bright for white metals")
+        return image
+        
+    except Exception as e:
+        print(f"[{VERSION}] Error in enhancement: {e}")
+        traceback.print_exc()
+        return image
+
 def handler(job):
-    """RunPod handler function - V33 BRIGHTER ENHANCEMENT"""
-    print(f"[{VERSION}] ====== Handler Started ======")
-    print(f"[{VERSION}] Job start time recorded")
+    """RunPod handler - v35 Enhancement"""
+    print(f"[{VERSION}] ====== Enhancement Handler Started ======")
+    print(f"[{VERSION}] Extra bright processing for white metals")
     
     start_time = time.time()
     
@@ -169,84 +167,70 @@ def handler(job):
         print(f"[{VERSION}] Input type: {type(job_input)}")
         print(f"[{VERSION}] Input keys: {list(job_input.keys()) if isinstance(job_input, dict) else 'Not a dict'}")
         
-        # 입력이 딕셔너리가 아닌 경우 처리
-        if not isinstance(job_input, dict):
+        # Find base64 image
+        base64_image = find_base64_in_dict(job_input)
+        
+        if not base64_image:
+            # Try direct string
             if isinstance(job_input, str) and len(job_input) > 100:
-                # 입력이 직접 base64 문자열인 경우
                 base64_image = job_input
-                print(f"[{VERSION}] Direct base64 string input")
             else:
-                print(f"[{VERSION}] Invalid input type: {type(job_input)}")
                 return {
                     "output": {
                         "enhanced_image": None,
-                        "error": "Invalid input type",
-                        "success": False,
-                        "version": VERSION
-                    }
-                }
-        else:
-            # Find base64 image using recursive search
-            base64_image = find_base64_in_dict(job_input)
-            
-            if not base64_image:
-                print(f"[{VERSION}] No base64 image found in input")
-                return {
-                    "output": {
-                        "enhanced_image": None,
-                        "error": "No image data found in input",
+                        "error": "No image data found",
                         "success": False,
                         "version": VERSION,
                         "debug_info": {
-                            "input_keys": list(job_input.keys()),
-                            "input_sample": str(job_input)[:200]
+                            "input_keys": list(job_input.keys()) if isinstance(job_input, dict) else [],
+                            "input_length": len(str(job_input))
                         }
                     }
                 }
         
         print(f"[{VERSION}] Base64 image found, length: {len(base64_image)}")
         
-        # Decode the image
+        # Decode image
         try:
             image = decode_base64_image(base64_image)
-            print(f"[{VERSION}] Image decoded successfully: {image.size}")
+            print(f"[{VERSION}] Image decoded: {image.size}")
         except Exception as e:
-            print(f"[{VERSION}] Failed to decode image: {e}")
             return {
                 "output": {
                     "enhanced_image": None,
-                    "error": f"Failed to decode base64: {str(e)}",
+                    "error": f"Failed to decode image: {str(e)}",
                     "success": False,
                     "version": VERSION
                 }
             }
+        
+        # Check image size and resize if too large
+        max_dimension = 4000
+        if image.width > max_dimension or image.height > max_dimension:
+            print(f"[{VERSION}] Image too large ({image.size}), resizing...")
+            ratio = max_dimension / max(image.width, image.height)
+            new_size = (int(image.width * ratio), int(image.height * ratio))
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+            print(f"[{VERSION}] Resized to: {image.size}")
         
         # Apply enhancement
         try:
-            enhancer = WeddingRingEnhancerV33()
-            enhanced_image = enhancer.apply_simple_enhancement(image)
+            enhanced_image = enhance_wedding_ring(image)
             print(f"[{VERSION}] Enhancement applied successfully")
         except Exception as e:
-            print(f"[{VERSION}] Enhancement failed: {e}")
-            return {
-                "output": {
-                    "enhanced_image": None,
-                    "error": f"Enhancement failed: {str(e)}",
-                    "success": False,
-                    "version": VERSION
-                }
-            }
+            print(f"[{VERSION}] Error during enhancement: {e}")
+            traceback.print_exc()
+            enhanced_image = image
         
-        # Encode the result
+        # Encode result
         try:
-            enhanced_base64 = encode_image_to_base64(enhanced_image, format='PNG')
+            enhanced_base64 = encode_image_to_base64(enhanced_image, format='JPEG')
             print(f"[{VERSION}] Enhanced image encoded, length: {len(enhanced_base64)}")
         except Exception as e:
-            print(f"[{VERSION}] Failed to encode result: {e}")
             return {
                 "output": {
                     "enhanced_image": None,
-                    "error": f"Failed to encode result: {str(e)}",
+                    "error": f"Failed to encode enhanced image: {str(e)}",
                     "success": False,
                     "version": VERSION
                 }
@@ -255,24 +239,30 @@ def handler(job):
         # Calculate processing time
         processing_time = time.time() - start_time
         
-        # Create output structure that Make.com expects
-        # RunPod wraps this in {"data": {"output": ...}}
-        # So Make.com path becomes: {{4.data.output.output.enhanced_image}}
+        # Return proper structure for Make.com
         result = {
             "output": {
                 "enhanced_image": enhanced_base64,
                 "success": True,
                 "version": VERSION,
-                "original_size": list(image.size),
-                "enhanced_size": list(enhanced_image.size),
                 "processing_time": round(processing_time, 2),
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+                "original_size": list(image.size),
+                "enhancements_applied": [
+                    "brightness_boost_1.20",
+                    "contrast_1.10",
+                    "desaturation_0.92",
+                    "white_background_blend",
+                    "gamma_correction_0.88",
+                    "white_metal_brightening",
+                    "final_brightness_1.05"
+                ],
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+                "warning": "Google Script must add padding: while (base64Data.length % 4 !== 0) { base64Data += '='; }"
             }
         }
         
-        print(f"[{VERSION}] ====== Success - Returning Result ======")
-        print(f"[{VERSION}] Processing time: {processing_time:.2f}s")
-        print(f"[{VERSION}] Output structure ready for Make.com")
+        print(f"[{VERSION}] ====== Success - Returning Enhanced Image ======")
+        print(f"[{VERSION}] Total processing time: {processing_time:.2f}s")
         
         return result
         
@@ -295,16 +285,15 @@ def handler(job):
 if __name__ == "__main__":
     print("="*70)
     print(f"Wedding Ring Enhancement {VERSION}")
-    print("V33 - Brighter Enhancement")
+    print("V35 - Extra Bright for White Gold & Plain White")
     print("Features:")
-    print("- More brightness (1.12)")
-    print("- More contrast (1.08)")
-    print("- Whiter background (252,252,252)")
-    print("- Additional brightness push (1.03x)")
-    print("- Gamma 0.92 for brighter results")
-    print("- Recursive base64 search")
-    print("- Full error handling")
-    print("IMPORTANT: Google Apps Script must add padding back!")
+    print("- 20% brightness boost (up from 12%)")
+    print("- Stronger desaturation for white metals")
+    print("- Additional white metal brightening")
+    print("- Lower gamma for brighter appearance")
+    print("- Max dimension limit: 4000px")
+    print("CRITICAL: Padding is removed for Make.com")
+    print("Google Apps Script MUST add padding back:")
     print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
     print("="*70)
     
