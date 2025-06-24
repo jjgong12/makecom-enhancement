@@ -234,6 +234,11 @@ def handler(job):
         }
         
         print(f"[{VERSION}] ====== Success - Returning Result ======")
+        print(f"[{VERSION}] Result structure check:")
+        print(f"[{VERSION}] - output exists: {'output' in result}")
+        print(f"[{VERSION}] - enhanced_image exists: {'enhanced_image' in result.get('output', {})}")
+        print(f"[{VERSION}] - enhanced_image length: {len(result['output']['enhanced_image'])}")
+        
         return result
         
     except Exception as e:
