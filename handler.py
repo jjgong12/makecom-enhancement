@@ -1,510 +1,400 @@
-import runpod
-import base64
-import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
-import cv2
-import io
 import os
-import time
+import json
+import numpy as np
+import cv2
+from PIL import Image, ImageEnhance, ImageFilter
+import logging
 import traceback
+import base64
+from io import BytesIO
+import requests
+from typing import Dict, Any, Tuple, Optional
 
-# Version
-VERSION = "v37-enhancement"
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def find_base64_in_dict(data, depth=0, max_depth=10):
-    """Find base64 image in nested dictionary"""
-    if depth > max_depth:
-        return None
-    
-    if isinstance(data, str) and len(data) > 100:
-        return data
-    
-    if isinstance(data, dict):
-        for key in ['image_base64', 'image', 'base64', 'data', 'input', 'file', 'imageData']:
-            if key in data and isinstance(data[key], str) and len(data[key]) > 100:
-                return data[key]
+class EnhancementHandler:
+    def __init__(self):
+        """Initialize the Enhancement Handler"""
+        logger.info("Enhancement Handler v38 initialized")
         
-        for value in data.values():
-            result = find_base64_in_dict(value, depth + 1, max_depth)
-            if result:
-                return result
-    
-    elif isinstance(data, list):
-        for item in data:
-            result = find_base64_in_dict(item, depth + 1, max_depth)
-            if result:
-                return result
-    
-    return None
-
-def decode_base64_image(base64_str):
-    """Decode base64 string to PIL Image"""
-    try:
-        # Handle data URL format
-        if ',' in base64_str and base64_str.startswith('data:'):
-            base64_str = base64_str.split(',')[1]
+    def detect_ring_regions(self, image: np.ndarray) -> Dict[str, Any]:
+        """Detect ring regions using simple but effective methods"""
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape
         
-        # Clean base64
-        base64_str = base64_str.strip()
-        
-        # Add padding for decoding
-        padding = 4 - len(base64_str) % 4
-        if padding != 4:
-            base64_str += '=' * padding
-        
-        # Decode
-        img_data = base64.b64decode(base64_str)
-        img = Image.open(io.BytesIO(img_data))
-        
-        # Convert to RGB
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        return img
-        
-    except Exception as e:
-        print(f"[{VERSION}] Error decoding base64: {e}")
-        raise
-
-def encode_image_to_base64(image, format='JPEG'):
-    """Encode image to base64 (Make.com compatible)"""
-    try:
-        if isinstance(image, np.ndarray):
-            image = Image.fromarray(image)
-        
-        buffer = io.BytesIO()
-        image.save(buffer, format=format, quality=95)
-        buffer.seek(0)
-        
-        # Base64 encode
-        base64_str = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        # CRITICAL: Remove padding for Make.com
-        base64_str = base64_str.rstrip('=')
-        
-        return base64_str
-        
-    except Exception as e:
-        print(f"[{VERSION}] Error encoding image: {e}")
-        raise
-
-def detect_ring_regions(image):
-    """Detect potential ring regions using edge detection and circular features"""
-    try:
-        img_np = np.array(image)
-        h, w = img_np.shape[:2]
-        
-        # Convert to grayscale
-        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-        
-        # Apply edge detection
+        # Use edge detection to find potential ring areas
         edges = cv2.Canny(gray, 50, 150)
         
         # Find contours
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Filter contours that might be rings
+        # Filter contours by size and circularity
         ring_candidates = []
         for contour in contours:
             area = cv2.contourArea(contour)
-            perimeter = cv2.arcLength(contour, True)
-            
-            # Skip too small or too large contours
-            if area < 100 or area > (w * h * 0.5):
+            if area < 100 or area > (width * height * 0.5):  # Skip too small or too large
                 continue
-            
+                
             # Check circularity
-            if perimeter > 0:
-                circularity = 4 * np.pi * area / (perimeter * perimeter)
-                if circularity > 0.3:  # Rings are somewhat circular
-                    x, y, cw, ch = cv2.boundingRect(contour)
-                    aspect_ratio = float(cw) / ch if ch > 0 else 0
-                    
-                    # Rings typically have aspect ratio close to 1
-                    if 0.5 < aspect_ratio < 2.0:
-                        ring_candidates.append({
-                            'bbox': (x, y, x+cw, y+ch),
-                            'center': (x + cw//2, y + ch//2),
-                            'area': area,
-                            'circularity': circularity
-                        })
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter == 0:
+                continue
+            circularity = 4 * np.pi * area / (perimeter * perimeter)
+            
+            if circularity > 0.4:  # Reasonably circular
+                x, y, w, h = cv2.boundingRect(contour)
+                ring_candidates.append({
+                    'bbox': (x, y, w, h),
+                    'center': (x + w//2, y + h//2),
+                    'area': area,
+                    'circularity': circularity
+                })
         
         # Sort by area (larger rings first)
         ring_candidates.sort(key=lambda x: x['area'], reverse=True)
         
-        # If we found candidates, return the top ones
-        if ring_candidates:
-            print(f"[{VERSION}] Found {len(ring_candidates)} potential ring regions")
-            return ring_candidates[:3]  # Return top 3 candidates
-        
-        # If no rings found, return center region as fallback
-        print(f"[{VERSION}] No rings detected, using center region")
-        cx, cy = w//2, h//2
-        size = min(w, h) // 3
-        return [{
-            'bbox': (cx-size//2, cy-size//2, cx+size//2, cy+size//2),
-            'center': (cx, cy),
-            'area': size * size,
-            'circularity': 0
-        }]
-        
-    except Exception as e:
-        print(f"[{VERSION}] Error in ring detection: {e}")
-        # Return center region as fallback
-        h, w = image.size[1], image.size[0]
-        cx, cy = w//2, h//2
-        size = min(w, h) // 3
-        return [{
-            'bbox': (cx-size//2, cy-size//2, cx+size//2, cy+size//2),
-            'center': (cx, cy),
-            'area': size * size,
-            'circularity': 0
-        }]
-
-def detect_metal_color_v37(image, ring_regions=None):
-    """v37: Much stricter color detection - yellow gold only for TRUE yellow"""
-    try:
-        img_np = np.array(image)
-        h, w = img_np.shape[:2]
-        
-        # If ring regions provided, analyze those
-        if ring_regions and len(ring_regions) > 0:
-            color_votes = []
+        # Return the most likely ring regions
+        return {
+            'candidates': ring_candidates[:5],  # Top 5 candidates
+            'primary_region': ring_candidates[0] if ring_candidates else None
+        }
+    
+    def detect_ring_color_enhanced(self, image: np.ndarray, ring_regions: Dict[str, Any]) -> str:
+        """Enhanced color detection focusing on detected ring regions"""
+        if ring_regions['primary_region']:
+            # Focus on the primary ring region
+            bbox = ring_regions['primary_region']['bbox']
+            x, y, w, h = bbox
             
-            for region in ring_regions:
-                x1, y1, x2, y2 = region['bbox']
-                # Ensure bounds are valid
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(w, x2), min(h, y2)
-                
-                if x2 > x1 and y2 > y1:
-                    roi = img_np[y1:y2, x1:x2]
-                    
-                    # Calculate color statistics for this region
-                    r_mean = np.mean(roi[:, :, 0])
-                    g_mean = np.mean(roi[:, :, 1])
-                    b_mean = np.mean(roi[:, :, 2])
-                    
-                    brightness = (r_mean + g_mean + b_mean) / 3
-                    max_channel = max(r_mean, g_mean, b_mean)
-                    min_channel = min(r_mean, g_mean, b_mean)
-                    saturation = max_channel - min_channel
-                    
-                    # Calculate yellowness (how much yellow vs other colors)
-                    yellowness = (r_mean + g_mean) / 2 - b_mean
-                    
-                    print(f"[{VERSION}] Region analysis - R:{r_mean:.1f} G:{g_mean:.1f} B:{b_mean:.1f}")
-                    print(f"[{VERSION}] Brightness:{brightness:.1f} Saturation:{saturation:.1f} Yellowness:{yellowness:.1f}")
-                    
-                    # Determine color for this region
-                    # 1. Rose Gold - clear pinkish tone
-                    if r_mean - b_mean > 25 and r_mean > g_mean > b_mean and r_mean - g_mean > 10:
-                        color_votes.append("rose_gold")
-                    # 2. Yellow Gold - ONLY if clearly yellow
-                    elif yellowness > 40 and g_mean > 180 and saturation > 30:
-                        color_votes.append("yellow_gold")
-                    # 3. Plain White - very bright and no color
-                    elif brightness > 235 and saturation < 8:
-                        color_votes.append("plain_white")
-                    # 4. White Gold - bright metallic
-                    elif brightness > 190 and saturation < 25:
-                        color_votes.append("white_gold")
-                    # 5. Default to plain white if uncertain
-                    else:
-                        color_votes.append("plain_white")
+            # Expand region slightly
+            margin = 20
+            x = max(0, x - margin)
+            y = max(0, y - margin)
+            w = min(image.shape[1] - x, w + 2*margin)
+            h = min(image.shape[0] - y, h + 2*margin)
             
-            # Vote on final color
-            if color_votes:
-                from collections import Counter
-                color_count = Counter(color_votes)
-                detected_color = color_count.most_common(1)[0][0]
-                print(f"[{VERSION}] Color votes: {dict(color_count)}")
-                print(f"[{VERSION}] Final detection: {detected_color}")
-                return detected_color
+            roi = image[y:y+h, x:x+w]
+        else:
+            # Fallback to center region
+            height, width = image.shape[:2]
+            center_y, center_x = height // 2, width // 2
+            roi_size = min(width, height) // 3
+            roi = image[
+                max(0, center_y - roi_size):min(height, center_y + roi_size),
+                max(0, center_x - roi_size):min(width, center_x + roi_size)
+            ]
         
-        # Fallback: analyze center region
-        center_y, center_x = h//2, w//2
-        crop_size = min(h, w) // 3
-        
-        y1 = max(0, center_y - crop_size)
-        y2 = min(h, center_y + crop_size)
-        x1 = max(0, center_x - crop_size)
-        x2 = min(w, center_x + crop_size)
-        
-        center_region = img_np[y1:y2, x1:x2]
+        # Convert to RGB and HSV
+        rgb_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         
         # Calculate color statistics
-        r_mean = np.mean(center_region[:, :, 0])
-        g_mean = np.mean(center_region[:, :, 1])
-        b_mean = np.mean(center_region[:, :, 2])
+        avg_hue = np.mean(hsv_roi[:, :, 0])
+        avg_sat = np.mean(hsv_roi[:, :, 1])
+        avg_val = np.mean(hsv_roi[:, :, 2])
         
-        brightness = (r_mean + g_mean + b_mean) / 3
-        max_channel = max(r_mean, g_mean, b_mean)
-        min_channel = min(r_mean, g_mean, b_mean)
-        saturation = max_channel - min_channel
-        yellowness = (r_mean + g_mean) / 2 - b_mean
+        avg_r = np.mean(rgb_roi[:, :, 0])
+        avg_g = np.mean(rgb_roi[:, :, 1])
+        avg_b = np.mean(rgb_roi[:, :, 2])
         
-        print(f"[{VERSION}] Center region - R:{r_mean:.1f} G:{g_mean:.1f} B:{b_mean:.1f}")
-        print(f"[{VERSION}] Yellowness:{yellowness:.1f}")
+        # Enhanced color detection logic
+        color = "white_gold"  # Default
         
-        # Very strict detection
-        if r_mean - b_mean > 25 and r_mean > g_mean > b_mean and r_mean - g_mean > 10:
-            return "rose_gold"
-        elif yellowness > 40 and g_mean > 180 and saturation > 30:
-            return "yellow_gold"
-        elif brightness > 235 and saturation < 8:
-            return "plain_white"
-        elif brightness > 190 and saturation < 25:
-            return "white_gold"
-        else:
-            return "plain_white"  # Default to plain white instead of yellow gold
+        # Yellow gold - strict criteria
+        if (20 <= avg_hue <= 35 and avg_sat > 40 and avg_val > 120 and
+            avg_r > avg_b + 25 and avg_g > avg_b + 15):
+            color = "yellow_gold"
+        
+        # Rose gold
+        elif ((0 <= avg_hue <= 15 or 340 <= avg_hue <= 360) and 
+              avg_sat > 25 and avg_r > avg_g + 10 and avg_r > avg_b + 15):
+            color = "rose_gold"
+        
+        # Unplated white - very bright and desaturated
+        elif avg_sat < 15 and avg_val > 200 and abs(avg_r - avg_g) < 10 and abs(avg_g - avg_b) < 10:
+            color = "unplated_white"
+        
+        logger.info(f"Color detection - HSV: ({avg_hue:.1f}, {avg_sat:.1f}, {avg_val:.1f}), "
+                   f"RGB: ({avg_r:.1f}, {avg_g:.1f}, {avg_b:.1f}) -> {color}")
+        
+        return color
+    
+    def create_focus_map(self, image: np.ndarray, ring_regions: Dict[str, Any]) -> np.ndarray:
+        """Create a focus map for depth of field effect"""
+        height, width = image.shape[:2]
+        focus_map = np.ones((height, width), dtype=np.float32)
+        
+        if ring_regions['primary_region']:
+            # Get ring center
+            center = ring_regions['primary_region']['center']
+            cx, cy = center
             
-    except Exception as e:
-        print(f"[{VERSION}] Error in metal detection: {e}")
-        return "plain_white"  # Safer default
-
-def enhance_wedding_ring_v37(image, metal_type=None):
-    """v37 Enhancement - Color-aware brightness enhancement"""
-    try:
-        print(f"[{VERSION}] Enhancing {metal_type} ring")
+            # Create radial gradient from ring center
+            y_indices, x_indices = np.ogrid[:height, :width]
+            distances = np.sqrt((x_indices - cx)**2 + (y_indices - cy)**2)
+            
+            # Normalize distances
+            max_dist = np.sqrt(width**2 + height**2) / 2
+            distances = distances / max_dist
+            
+            # Create smooth falloff (keep center sharp, blur edges)
+            focus_map = 1.0 - np.clip(distances * 1.5, 0, 1)
+            focus_map = np.power(focus_map, 2)  # Make falloff more gradual
+            
+        return focus_map
+    
+    def apply_professional_enhancement(self, image: np.ndarray, color: str, ring_regions: Dict[str, Any]) -> np.ndarray:
+        """Apply professional jewelry photography style enhancement"""
+        enhanced = image.copy()
         
-        # Metal-specific enhancement parameters
-        if metal_type == "yellow_gold":
-            # True yellow gold - warm enhancement
-            brightness_factor = 1.14
-            contrast_factor = 1.10
-            saturation_factor = 1.05  # Keep yellow tones
-            gamma = 0.93
-            background_blend = 0.12
-        elif metal_type == "plain_white":
-            # Extra bright for plain white
-            brightness_factor = 1.25
-            contrast_factor = 1.08
-            saturation_factor = 0.88  # More desaturated
-            gamma = 0.83  # Brighter
-            background_blend = 0.22
-        elif metal_type == "rose_gold":
-            # Warm enhancement for rose gold
-            brightness_factor = 1.16
-            contrast_factor = 1.10
-            saturation_factor = 1.03  # Keep warm tones
-            gamma = 0.91
-            background_blend = 0.14
-        elif metal_type == "white_gold":
-            # Cool enhancement for white gold
-            brightness_factor = 1.20
-            contrast_factor = 1.10
-            saturation_factor = 0.92
-            gamma = 0.86
-            background_blend = 0.20
+        # Step 1: Significantly brighten the image (especially background)
+        # Create a mask for likely background areas
+        gray = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
+        _, background_mask = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+        background_mask = cv2.dilate(background_mask, np.ones((5,5), np.uint8), iterations=2)
+        
+        # Brighten background more aggressively
+        background_brightened = cv2.addWeighted(enhanced, 1.0, np.ones_like(enhanced) * 255, 0.4, 0)
+        enhanced = np.where(background_mask[..., np.newaxis] > 0, background_brightened, enhanced)
+        
+        # Step 2: Overall brightness boost
+        enhanced = cv2.convertScaleAbs(enhanced, alpha=1.3, beta=40)
+        
+        # Step 3: Apply depth of field effect
+        focus_map = self.create_focus_map(enhanced, ring_regions)
+        
+        # Create blurred version
+        pil_img = Image.fromarray(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
+        blurred = pil_img.filter(ImageFilter.GaussianBlur(radius=3))
+        blurred_np = cv2.cvtColor(np.array(blurred), cv2.COLOR_RGB2BGR)
+        
+        # Blend based on focus map
+        focus_map_3ch = np.stack([focus_map] * 3, axis=-1)
+        enhanced = (enhanced * focus_map_3ch + blurred_np * (1 - focus_map_3ch)).astype(np.uint8)
+        
+        # Step 4: Color-specific adjustments
+        if color == "unplated_white":
+            # Pure white appearance
+            enhanced[:, :, 0] = np.clip(enhanced[:, :, 0] * 1.08, 0, 255)  # Boost blue
+            enhanced[:, :, 1] = np.clip(enhanced[:, :, 1] * 1.02, 0, 255)  # Slight green
+            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 0.98, 0, 255)  # Reduce red
+            
+        elif color == "white_gold":
+            # Cool white tone
+            enhanced[:, :, 0] = np.clip(enhanced[:, :, 0] * 1.05, 0, 255)
+            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 0.97, 0, 255)
+            
+        elif color == "yellow_gold":
+            # Warm golden tone
+            enhanced[:, :, 1] = np.clip(enhanced[:, :, 1] * 1.03, 0, 255)
+            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 1.05, 0, 255)
+            
+        elif color == "rose_gold":
+            # Pink tone
+            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 1.08, 0, 255)
+            enhanced[:, :, 0] = np.clip(enhanced[:, :, 0] * 0.96, 0, 255)
+        
+        # Step 5: Soften shadows
+        # Convert to LAB for better shadow control
+        lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
+        l_channel = lab[:, :, 0]
+        
+        # Lift shadows
+        shadow_mask = l_channel < 100
+        l_channel[shadow_mask] = np.clip(l_channel[shadow_mask] * 1.3, 0, 255)
+        
+        lab[:, :, 0] = l_channel
+        enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        
+        # Step 6: Selective sharpening on rings
+        if ring_regions['primary_region']:
+            # Create mask for ring area
+            mask = np.zeros(enhanced.shape[:2], dtype=np.uint8)
+            bbox = ring_regions['primary_region']['bbox']
+            x, y, w, h = bbox
+            
+            # Expand slightly for sharpening
+            margin = 30
+            x = max(0, x - margin)
+            y = max(0, y - margin)
+            w = min(enhanced.shape[1] - x, w + 2*margin)
+            h = min(enhanced.shape[0] - y, h + 2*margin)
+            
+            mask[y:y+h, x:x+w] = 255
+            
+            # Apply strong sharpening to ring area
+            kernel = np.array([[-1, -1, -1],
+                               [-1, 9.5, -1],
+                               [-1, -1, -1]])
+            sharpened = cv2.filter2D(enhanced, -1, kernel)
+            
+            # Blend sharpened with original based on mask
+            mask_3ch = np.stack([mask] * 3, axis=-1) / 255.0
+            enhanced = (sharpened * mask_3ch + enhanced * (1 - mask_3ch)).astype(np.uint8)
+        
+        # Step 7: Add subtle vignetting
+        height, width = enhanced.shape[:2]
+        center_x, center_y = width // 2, height // 2
+        
+        # Create vignette mask
+        Y, X = np.ogrid[:height, :width]
+        dist_from_center = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+        max_dist = np.sqrt(center_x**2 + center_y**2)
+        vignette = 1 - (dist_from_center / max_dist) * 0.15  # Very subtle
+        vignette = np.clip(vignette, 0.85, 1.0)
+        
+        # Apply vignette
+        vignette_3ch = np.stack([vignette] * 3, axis=-1)
+        enhanced = (enhanced * vignette_3ch).astype(np.uint8)
+        
+        # Step 8: Boost highlights on metal
+        # Create highlight mask
+        highlight_mask = cv2.inRange(enhanced, (200, 200, 200), (255, 255, 255))
+        highlight_mask = cv2.GaussianBlur(highlight_mask, (5, 5), 0)
+        
+        # Boost highlights
+        highlights_boosted = cv2.addWeighted(enhanced, 1.0, np.ones_like(enhanced) * 255, 0.2, 0)
+        mask_3ch = np.stack([highlight_mask] * 3, axis=-1) / 255.0
+        enhanced = (highlights_boosted * mask_3ch + enhanced * (1 - mask_3ch)).astype(np.uint8)
+        
+        # Step 9: Final adjustments using PIL
+        pil_img = Image.fromarray(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
+        
+        # Increase contrast
+        contrast_enhancer = ImageEnhance.Contrast(pil_img)
+        pil_img = contrast_enhancer.enhance(1.15)
+        
+        # Slight brightness boost
+        brightness_enhancer = ImageEnhance.Brightness(pil_img)
+        pil_img = brightness_enhancer.enhance(1.05)
+        
+        # Final conversion
+        final_enhanced = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        
+        return final_enhanced
+    
+    def process_image(self, input_path: str) -> Tuple[np.ndarray, str, Dict[str, Any]]:
+        """Main processing function"""
+        logger.info("Starting enhancement processing...")
+        
+        # Load image
+        if input_path.startswith('http'):
+            response = requests.get(input_path)
+            image = cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
         else:
-            # Default to plain white settings
-            brightness_factor = 1.25
-            contrast_factor = 1.08
-            saturation_factor = 0.88
-            gamma = 0.83
-            background_blend = 0.22
+            image = cv2.imread(input_path)
         
-        # 1. Apply brightness
-        enhancer = ImageEnhance.Brightness(image)
-        image = enhancer.enhance(brightness_factor)
+        if image is None:
+            raise ValueError("Failed to load image")
         
-        # 2. Apply contrast
-        enhancer = ImageEnhance.Contrast(image)
-        image = enhancer.enhance(contrast_factor)
+        original_shape = image.shape
+        logger.info(f"Original image shape: {original_shape}")
         
-        # 3. Apply saturation
-        enhancer = ImageEnhance.Color(image)
-        image = enhancer.enhance(saturation_factor)
+        # Detect ring regions
+        ring_regions = self.detect_ring_regions(image)
+        logger.info(f"Detected {len(ring_regions['candidates'])} ring candidates")
         
-        # 4. Convert to numpy for advanced processing
-        img_np = np.array(image)
-        h, w = img_np.shape[:2]
+        # Detect color using ring regions
+        detected_color = self.detect_ring_color_enhanced(image, ring_regions)
         
-        # 5. Apply white background blend
-        white_color = (254, 254, 254)
+        # Apply professional enhancement
+        enhanced = self.apply_professional_enhancement(image, detected_color, ring_regions)
         
-        # Create edge mask
-        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(gray, 50, 150)
-        edges_dilated = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=1)
+        processing_info = {
+            'original_shape': original_shape,
+            'detected_color': detected_color,
+            'ring_regions_found': len(ring_regions['candidates']),
+            'primary_ring_bbox': ring_regions['primary_region']['bbox'] if ring_regions['primary_region'] else None,
+            'enhancement_version': 'v38_professional'
+        }
         
-        # Create background mask
-        mask = np.ones((h, w), dtype=np.float32)
-        mask[edges_dilated > 0] = 0
-        mask = cv2.GaussianBlur(mask, (31, 31), 15)
-        
-        # Apply white background
-        for i in range(3):
-            img_np[:, :, i] = img_np[:, :, i] * (1 - mask * background_blend) + white_color[i] * mask * background_blend
-        
-        # 6. Gamma correction
-        img_np = np.power(img_np / 255.0, gamma) * 255
-        img_np = np.clip(img_np, 0, 255).astype(np.uint8)
-        
-        # 7. Light sharpening
-        image = Image.fromarray(img_np)
-        image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=30, threshold=3))
-        
-        print(f"[{VERSION}] Enhancement complete for {metal_type}")
-        return image
-        
-    except Exception as e:
-        print(f"[{VERSION}] Error in enhancement: {e}")
-        traceback.print_exc()
-        return image
+        return enhanced, detected_color, processing_info
 
-def handler(job):
-    """RunPod handler - v37 Ring Detection + Stricter Color"""
-    print(f"[{VERSION}] ====== Enhancement Handler Started ======")
-    print(f"[{VERSION}] Ring detection + stricter color classification")
-    
-    start_time = time.time()
+def handler(event):
+    """RunPod handler function"""
+    logger.info("=== Enhancement Handler v38 Started ===")
     
     try:
-        job_input = job.get("input", {})
-        print(f"[{VERSION}] Input type: {type(job_input)}")
-        print(f"[{VERSION}] Input keys: {list(job_input.keys()) if isinstance(job_input, dict) else 'Not a dict'}")
+        handler_instance = EnhancementHandler()
         
-        # Find base64 image
-        base64_image = find_base64_in_dict(job_input)
+        # Get input from event
+        input_data = event.get('input', {})
         
-        if not base64_image:
-            # Try direct string
-            if isinstance(job_input, str) and len(job_input) > 100:
-                base64_image = job_input
+        # Handle Make.com webhook structure
+        if 'data' in input_data and 'output' in input_data['data']:
+            if 'output' in input_data['data']['output']:
+                enhanced_image_data = input_data['data']['output']['output'].get('enhanced_image', '')
             else:
-                return {
-                    "output": {
-                        "enhanced_image": None,
-                        "error": "No image data found",
-                        "success": False,
-                        "version": VERSION,
-                        "debug_info": {
-                            "input_keys": list(job_input.keys()) if isinstance(job_input, dict) else [],
-                            "input_length": len(str(job_input))
-                        }
-                    }
-                }
+                enhanced_image_data = input_data['data']['output'].get('enhanced_image', '')
+        else:
+            enhanced_image_data = input_data.get('enhanced_image', '')
         
-        print(f"[{VERSION}] Base64 image found, length: {len(base64_image)}")
+        if not enhanced_image_data:
+            # Try alternative path for Make.com
+            if '4' in input_data and 'data' in input_data['4']:
+                enhanced_image_data = input_data['4']['data']['output']['output'].get('enhanced_image', '')
         
-        # Decode image
-        try:
-            image = decode_base64_image(base64_image)
-            print(f"[{VERSION}] Image decoded: {image.size}")
-        except Exception as e:
-            return {
-                "output": {
-                    "enhanced_image": None,
-                    "error": f"Failed to decode image: {str(e)}",
-                    "success": False,
-                    "version": VERSION
-                }
-            }
+        if not enhanced_image_data:
+            raise ValueError("No enhanced_image data found in input")
         
-        # Check image size and resize if too large
-        max_dimension = 4000
-        if image.width > max_dimension or image.height > max_dimension:
-            print(f"[{VERSION}] Image too large ({image.size}), resizing...")
-            ratio = max_dimension / max(image.width, image.height)
-            new_size = (int(image.width * ratio), int(image.height * ratio))
-            image = image.resize(new_size, Image.Resampling.LANCZOS)
-            print(f"[{VERSION}] Resized to: {image.size}")
+        # Remove data URL prefix if present
+        if enhanced_image_data.startswith('data:'):
+            enhanced_image_data = enhanced_image_data.split(',')[1]
         
-        # Detect ring regions first
-        try:
-            ring_regions = detect_ring_regions(image)
-            print(f"[{VERSION}] Ring detection complete")
-        except Exception as e:
-            print(f"[{VERSION}] Ring detection failed: {e}")
-            ring_regions = None
+        # Decode base64 image
+        image_bytes = base64.b64decode(enhanced_image_data)
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # Apply color-aware enhancement with ring regions
-        try:
-            metal_type = detect_metal_color_v37(image, ring_regions)
-            enhanced_image = enhance_wedding_ring_v37(image, metal_type)
-            print(f"[{VERSION}] Enhancement applied successfully")
-        except Exception as e:
-            print(f"[{VERSION}] Error during enhancement: {e}")
-            traceback.print_exc()
-            enhanced_image = image
-            metal_type = "unknown"
+        if image is None:
+            raise ValueError("Failed to decode image from base64")
         
-        # Encode result
-        try:
-            enhanced_base64 = encode_image_to_base64(enhanced_image, format='JPEG')
-            print(f"[{VERSION}] Enhanced image encoded, length: {len(enhanced_base64)}")
-        except Exception as e:
-            return {
-                "output": {
-                    "enhanced_image": None,
-                    "error": f"Failed to encode enhanced image: {str(e)}",
-                    "success": False,
-                    "version": VERSION
-                }
-            }
+        # Process image
+        enhanced_image, detected_color, processing_info = handler_instance.process_image(image)
         
-        # Calculate processing time
-        processing_time = time.time() - start_time
+        # Convert result to base64
+        _, buffer = cv2.imencode('.jpg', enhanced_image, 
+                                [cv2.IMWRITE_JPEG_QUALITY, 95])
+        result_base64 = base64.b64encode(buffer).decode('utf-8')
+        result_data_url = f"data:image/jpeg;base64,{result_base64}"
         
-        # Return proper structure for Make.com
+        # Return in nested structure for Make.com
         result = {
             "output": {
-                "enhanced_image": enhanced_base64,
-                "success": True,
-                "version": VERSION,
-                "processing_time": round(processing_time, 2),
-                "original_size": list(image.size),
-                "detected_metal": metal_type,
-                "ring_regions_found": len(ring_regions) if ring_regions else 0,
-                "enhancements_applied": {
-                    "yellow_gold": "brightness_1.14_contrast_1.10_sat_1.05",
-                    "plain_white": "brightness_1.25_contrast_1.08_desat_0.88",
-                    "rose_gold": "brightness_1.16_contrast_1.10_sat_1.03",
-                    "white_gold": "brightness_1.20_contrast_1.10_desat_0.92"
-                }.get(metal_type, "default"),
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
-                "warning": "Google Script must add padding: while (base64Data.length % 4 !== 0) { base64Data += '='; }"
+                "enhanced_image": result_data_url,
+                "detected_color": detected_color,
+                "processing_info": processing_info,
+                "success": True
             }
         }
         
-        print(f"[{VERSION}] ====== Success - Returning Enhanced Image ======")
-        print(f"[{VERSION}] Detected metal: {metal_type}")
-        print(f"[{VERSION}] Total processing time: {processing_time:.2f}s")
+        logger.info(f"Processing completed successfully")
+        logger.info(f"Detected color: {detected_color}")
+        logger.info(f"Ring regions found: {processing_info['ring_regions_found']}")
         
         return result
         
     except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
-        print(f"[{VERSION}] CRITICAL ERROR: {error_msg}")
-        traceback.print_exc()
+        logger.error(f"Error in handler: {str(e)}")
+        logger.error(traceback.format_exc())
         
         return {
             "output": {
-                "enhanced_image": None,
-                "error": error_msg,
-                "success": False,
-                "version": VERSION,
-                "traceback": traceback.format_exc()
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "success": False
             }
         }
 
-# RunPod serverless start
+# For local testing
 if __name__ == "__main__":
-    print("="*70)
-    print(f"Wedding Ring Enhancement {VERSION}")
-    print("V37 - Ring Detection + Stricter Color Classification")
-    print("Features:")
-    print("- Ring region detection using edge detection")
-    print("- Much stricter yellow gold detection (only true yellow)")
-    print("- Default to plain white instead of yellow gold")
-    print("- Analyze multiple ring regions and vote")
-    print("- Plain white: Extra bright (25% boost)")
-    print("- Max dimension limit: 4000px")
-    print("CRITICAL: Padding is removed for Make.com")
-    print("Google Apps Script MUST add padding back:")
-    print("while (base64Data.length % 4 !== 0) { base64Data += '='; }")
-    print("="*70)
+    # Test with base64 encoded image
+    test_event = {
+        "input": {
+            "enhanced_image": "base64_encoded_image_data_here"
+        }
+    }
     
-    runpod.serverless.start({"handler": handler})
+    result = handler(test_event)
+    print(json.dumps(result, indent=2))
