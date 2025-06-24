@@ -1,77 +1,82 @@
-import os
-import json
-import numpy as np
+import runpod
 import cv2
+import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
+import base64
+import io
+import json
 import logging
 import traceback
-import base64
-from io import BytesIO
-import requests
-from typing import Dict, Any, Tuple, Optional, Union
+from typing import Dict, Any, Tuple, Optional, List
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class EnhancementHandler:
     def __init__(self):
-        """Initialize the Enhancement Handler"""
-        logger.info("Enhancement Handler v40 initialized - Stable Version")
+        self.version = "v41-fixed-decode"
+        logger.info(f"Initializing {self.version}")
         
     def find_input_data(self, event: Dict[str, Any]) -> Optional[str]:
-        """Find image data from various possible paths in the event"""
-        logger.info("Searching for input data in event structure...")
+        """Find image data from various possible locations"""
+        # Most common paths first
+        simple_paths = [
+            ['input', 'enhanced_image'],
+            ['input', 'image_base64'],
+            ['input', 'image'],
+            ['enhanced_image'],
+            ['image_base64'],
+            ['image']
+        ]
         
-        # Direct input paths
-        input_data = event.get('input', {})
+        # Check simple paths
+        for path in simple_paths:
+            try:
+                data = event
+                for key in path:
+                    if isinstance(data, dict) and key in data:
+                        data = data[key]
+                    else:
+                        break
+                else:
+                    if isinstance(data, str) and len(data) > 100:
+                        logger.info(f"Found data at path: {'.'.join(path)}")
+                        return data
+            except:
+                continue
         
-        # Try direct image key
-        if 'enhanced_image' in input_data:
-            logger.info("Found enhanced_image in direct input")
-            return input_data['enhanced_image']
+        # Check numbered paths (like 4.data.output.output.enhanced_image)
+        if 'input' in event:
+            for i in range(10):
+                key = str(i)
+                if key in event['input']:
+                    try:
+                        # Try nested path
+                        if isinstance(event['input'][key], dict):
+                            paths = [
+                                ['data', 'output', 'output', 'enhanced_image'],
+                                ['data', 'output', 'enhanced_image'],
+                                ['output', 'enhanced_image'],
+                                ['enhanced_image']
+                            ]
+                            
+                            for path in paths:
+                                data = event['input'][key]
+                                for subkey in path:
+                                    if isinstance(data, dict) and subkey in data:
+                                        data = data[subkey]
+                                    else:
+                                        break
+                                else:
+                                    if isinstance(data, str) and len(data) > 100:
+                                        logger.info(f"Found data at numbered path: {key}.{'.'.join(path)}")
+                                        return data
+                    except:
+                        continue
         
-        if 'image_base64' in input_data:
-            logger.info("Found image_base64 in direct input")
-            return input_data['image_base64']
-            
-        if 'image' in input_data:
-            logger.info("Found image in direct input")
-            return input_data['image']
-        
-        # Try Make.com nested structures
-        # Pattern: data.output.output
-        if 'data' in input_data and isinstance(input_data['data'], dict):
-            data = input_data['data']
-            if 'output' in data and isinstance(data['output'], dict):
-                output = data['output']
-                if 'output' in output and isinstance(output['output'], dict):
-                    nested_output = output['output']
-                    if 'enhanced_image' in nested_output:
-                        logger.info("Found enhanced_image in data.output.output")
-                        return nested_output['enhanced_image']
-                elif 'enhanced_image' in output:
-                    logger.info("Found enhanced_image in data.output")
-                    return output['enhanced_image']
-        
-        # Try numbered keys (like '4')
-        for key in input_data:
-            if key.isdigit() and isinstance(input_data[key], dict):
-                numbered_data = input_data[key]
-                if 'data' in numbered_data and isinstance(numbered_data['data'], dict):
-                    data = numbered_data['data']
-                    if 'output' in data and isinstance(data['output'], dict):
-                        output = data['output']
-                        if 'output' in output and isinstance(output['output'], dict):
-                            nested_output = output['output']
-                            if 'enhanced_image' in nested_output:
-                                logger.info(f"Found enhanced_image in {key}.data.output.output")
-                                return nested_output['enhanced_image']
-        
-        # Log what we found for debugging
-        logger.warning(f"Could not find image data. Event keys: {list(event.keys())}")
-        if input_data:
-            logger.warning(f"Input keys: {list(input_data.keys())}")
-        
+        logger.error(f"No valid image data found in event")
+        logger.error(f"Event structure: {json.dumps(event, indent=2)[:500]}...")
         return None
     
     def decode_base64_safe(self, base64_str: str) -> bytes:
@@ -92,6 +97,7 @@ class EnhancementHandler:
             return base64.b64decode(base64_str)
         except Exception as e:
             logger.error(f"Error decoding base64: {str(e)}")
+            logger.error(f"Base64 preview: {base64_str[:100]}...")
             raise
     
     def encode_base64_no_padding(self, data: bytes) -> str:
@@ -122,230 +128,199 @@ class EnhancementHandler:
                 continue
             circularity = 4 * np.pi * area / (perimeter * perimeter)
             
-            if circularity > 0.4:  # Reasonably circular
+            if circularity > 0.3:  # Reasonably circular
                 x, y, w, h = cv2.boundingRect(contour)
                 ring_candidates.append({
                     'bbox': (x, y, w, h),
-                    'center': (x + w//2, y + h//2),
                     'area': area,
-                    'circularity': circularity
+                    'circularity': circularity,
+                    'center': (x + w//2, y + h//2)
                 })
         
-        # Sort by area (larger rings first)
+        # Sort by area (largest first)
         ring_candidates.sort(key=lambda x: x['area'], reverse=True)
         
-        # Return the most likely ring regions
+        # Primary region is the largest suitable candidate
+        primary_region = None
+        if ring_candidates:
+            # Take up to 2 largest candidates (for wedding ring pairs)
+            primary_region = ring_candidates[0]
+            if len(ring_candidates) > 1:
+                # Check if second candidate is close enough to be a pair
+                dist = np.sqrt((ring_candidates[0]['center'][0] - ring_candidates[1]['center'][0])**2 +
+                              (ring_candidates[0]['center'][1] - ring_candidates[1]['center'][1])**2)
+                if dist < max(width, height) * 0.3:  # Close enough to be a pair
+                    # Combine bounding boxes
+                    x1 = min(ring_candidates[0]['bbox'][0], ring_candidates[1]['bbox'][0])
+                    y1 = min(ring_candidates[0]['bbox'][1], ring_candidates[1]['bbox'][1])
+                    x2 = max(ring_candidates[0]['bbox'][0] + ring_candidates[0]['bbox'][2],
+                            ring_candidates[1]['bbox'][0] + ring_candidates[1]['bbox'][2])
+                    y2 = max(ring_candidates[0]['bbox'][1] + ring_candidates[0]['bbox'][3],
+                            ring_candidates[1]['bbox'][1] + ring_candidates[1]['bbox'][3])
+                    primary_region = {
+                        'bbox': (x1, y1, x2-x1, y2-y1),
+                        'center': ((x1+x2)//2, (y1+y2)//2)
+                    }
+        
         return {
-            'candidates': ring_candidates[:5],  # Top 5 candidates
-            'primary_region': ring_candidates[0] if ring_candidates else None
+            'candidates': ring_candidates,
+            'primary_region': primary_region
         }
     
     def detect_ring_color_enhanced(self, image: np.ndarray, ring_regions: Dict[str, Any]) -> str:
-        """Enhanced color detection focusing on detected ring regions"""
+        """Enhanced color detection focusing on ring regions"""
         if ring_regions['primary_region']:
-            # Focus on the primary ring region
-            bbox = ring_regions['primary_region']['bbox']
-            x, y, w, h = bbox
-            
-            # Expand region slightly
-            margin = 20
-            x = max(0, x - margin)
-            y = max(0, y - margin)
-            w = min(image.shape[1] - x, w + 2*margin)
-            h = min(image.shape[0] - y, h + 2*margin)
+            x, y, w, h = ring_regions['primary_region']['bbox']
+            # Add some padding
+            padding = int(min(w, h) * 0.1)
+            x = max(0, x - padding)
+            y = max(0, y - padding)
+            w = min(image.shape[1] - x, w + 2*padding)
+            h = min(image.shape[0] - y, h + 2*padding)
             
             roi = image[y:y+h, x:x+w]
         else:
-            # Fallback to center region
-            height, width = image.shape[:2]
-            center_y, center_x = height // 2, width // 2
-            roi_size = min(width, height) // 3
-            roi = image[
-                max(0, center_y - roi_size):min(height, center_y + roi_size),
-                max(0, center_x - roi_size):min(width, center_x + roi_size)
-            ]
+            # Use center region
+            h, w = image.shape[:2]
+            roi = image[h//4:3*h//4, w//4:3*w//4]
         
-        # Convert to RGB and HSV
-        rgb_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        # Convert to different color spaces
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        lab = cv2.cvtColor(roi, cv2.COLOR_BGR2LAB)
         
         # Calculate color statistics
-        avg_hue = np.mean(hsv_roi[:, :, 0])
-        avg_sat = np.mean(hsv_roi[:, :, 1])
-        avg_val = np.mean(hsv_roi[:, :, 2])
+        avg_b, avg_g, avg_r = cv2.mean(roi)[:3]
+        avg_h, avg_s, avg_v = cv2.mean(hsv)[:3]
+        avg_l, avg_a, avg_b_lab = cv2.mean(lab)[:3]
         
-        avg_r = np.mean(rgb_roi[:, :, 0])
-        avg_g = np.mean(rgb_roi[:, :, 1])
-        avg_b = np.mean(rgb_roi[:, :, 2])
+        # Detect plain white first (highest priority)
+        if avg_v > 220 and avg_s < 20:  # Very bright and low saturation
+            return 'plain_white'
         
-        # Enhanced color detection logic
-        color = "white_gold"  # Default
+        # White gold detection
+        if avg_s < 30 and avg_v > 180 and abs(avg_a - 128) < 5:
+            return 'white_gold'
         
-        # Yellow gold - strict criteria
-        if (20 <= avg_hue <= 35 and avg_sat > 40 and avg_val > 120 and
-            avg_r > avg_b + 25 and avg_g > avg_b + 15):
-            color = "yellow_gold"
+        # Yellow gold detection (stricter to avoid false positives)
+        yellow_hue = (15 <= avg_h <= 35)
+        warm_tone = avg_a > 130
+        sufficient_saturation = avg_s > 30
         
-        # Rose gold
-        elif ((0 <= avg_hue <= 15 or 340 <= avg_hue <= 360) and 
-              avg_sat > 25 and avg_r > avg_g + 10 and avg_r > avg_b + 15):
-            color = "rose_gold"
+        if yellow_hue and warm_tone and sufficient_saturation:
+            return 'yellow_gold'
         
-        # Unplated white - very bright and desaturated
-        elif avg_sat < 15 and avg_val > 200 and abs(avg_r - avg_g) < 10 and abs(avg_g - avg_b) < 10:
-            color = "unplated_white"
+        # Rose gold detection
+        rose_hue = (avg_h < 15 or avg_h > 165)
+        pink_tone = avg_a > 135
+        moderate_saturation = 20 < avg_s < 60
         
-        logger.info(f"Color detection - HSV: ({avg_hue:.1f}, {avg_sat:.1f}, {avg_val:.1f}), "
-                   f"RGB: ({avg_r:.1f}, {avg_g:.1f}, {avg_b:.1f}) -> {color}")
+        if rose_hue and pink_tone and moderate_saturation:
+            return 'rose_gold'
         
-        return color
+        # Default
+        return 'plain_white'
     
-    def create_focus_map(self, image: np.ndarray, ring_regions: Dict[str, Any]) -> np.ndarray:
-        """Create a focus map for depth of field effect"""
-        height, width = image.shape[:2]
-        focus_map = np.ones((height, width), dtype=np.float32)
-        
-        if ring_regions['primary_region']:
-            # Get ring center
-            center = ring_regions['primary_region']['center']
-            cx, cy = center
-            
-            # Create radial gradient from ring center
-            y_indices, x_indices = np.ogrid[:height, :width]
-            distances = np.sqrt((x_indices - cx)**2 + (y_indices - cy)**2)
-            
-            # Normalize distances
-            max_dist = np.sqrt(width**2 + height**2) / 2
-            distances = distances / max_dist
-            
-            # Create smooth falloff (keep center sharp, blur edges)
-            focus_map = 1.0 - np.clip(distances * 1.5, 0, 1)
-            focus_map = np.power(focus_map, 2)  # Make falloff more gradual
-            
-        return focus_map
-    
-    def apply_professional_enhancement(self, image: np.ndarray, color: str, ring_regions: Dict[str, Any]) -> np.ndarray:
+    def apply_professional_enhancement(self, image: np.ndarray, detected_color: str, 
+                                     ring_regions: Dict[str, Any]) -> np.ndarray:
         """Apply professional jewelry photography style enhancement"""
         enhanced = image.copy()
         
-        # Step 1: Significantly brighten the image (especially background)
-        # Create a mask for likely background areas
-        gray = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
-        _, background_mask = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
-        background_mask = cv2.dilate(background_mask, np.ones((5,5), np.uint8), iterations=2)
-        
-        # Brighten background more aggressively
-        background_brightened = cv2.addWeighted(enhanced, 1.0, np.ones_like(enhanced) * 255, 0.4, 0)
-        enhanced = np.where(background_mask[..., np.newaxis] > 0, background_brightened, enhanced)
-        
-        # Step 2: Overall brightness boost
-        enhanced = cv2.convertScaleAbs(enhanced, alpha=1.3, beta=40)
-        
-        # Step 3: Apply depth of field effect
-        focus_map = self.create_focus_map(enhanced, ring_regions)
-        
-        # Create blurred version
-        pil_img = Image.fromarray(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
-        blurred = pil_img.filter(ImageFilter.GaussianBlur(radius=3))
-        blurred_np = cv2.cvtColor(np.array(blurred), cv2.COLOR_RGB2BGR)
-        
-        # Blend based on focus map
-        focus_map_3ch = np.stack([focus_map] * 3, axis=-1)
-        enhanced = (enhanced * focus_map_3ch + blurred_np * (1 - focus_map_3ch)).astype(np.uint8)
-        
-        # Step 4: Color-specific adjustments
-        if color == "unplated_white":
-            # Pure white appearance
-            enhanced[:, :, 0] = np.clip(enhanced[:, :, 0] * 1.08, 0, 255)  # Boost blue
-            enhanced[:, :, 1] = np.clip(enhanced[:, :, 1] * 1.02, 0, 255)  # Slight green
-            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 0.98, 0, 255)  # Reduce red
-            
-        elif color == "white_gold":
-            # Cool white tone
-            enhanced[:, :, 0] = np.clip(enhanced[:, :, 0] * 1.05, 0, 255)
-            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 0.97, 0, 255)
-            
-        elif color == "yellow_gold":
-            # Warm golden tone
-            enhanced[:, :, 1] = np.clip(enhanced[:, :, 1] * 1.03, 0, 255)
-            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 1.05, 0, 255)
-            
-        elif color == "rose_gold":
-            # Pink tone
-            enhanced[:, :, 2] = np.clip(enhanced[:, :, 2] * 1.08, 0, 255)
-            enhanced[:, :, 0] = np.clip(enhanced[:, :, 0] * 0.96, 0, 255)
-        
-        # Step 5: Soften shadows
-        # Convert to LAB for better shadow control
+        # Convert to LAB for better shadow/highlight control
         lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
-        l_channel = lab[:, :, 0]
+        l_channel, a_channel, b_channel = cv2.split(lab)
         
-        # Lift shadows
-        shadow_mask = l_channel < 100
-        l_channel[shadow_mask] = np.clip(l_channel[shadow_mask] * 1.3, 0, 255)
+        # 1. Brighten the background more aggressively
+        # Create a mask for the background (non-ring areas)
+        background_mask = np.ones_like(l_channel, dtype=np.float32)
         
-        lab[:, :, 0] = l_channel
-        enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-        
-        # Step 6: Selective sharpening on rings
         if ring_regions['primary_region']:
-            # Create mask for ring area
-            mask = np.zeros(enhanced.shape[:2], dtype=np.uint8)
-            bbox = ring_regions['primary_region']['bbox']
-            x, y, w, h = bbox
+            x, y, w, h = ring_regions['primary_region']['bbox']
+            # Expand the ring region slightly
+            padding = int(min(w, h) * 0.3)
+            x = max(0, x - padding)
+            y = max(0, y - padding)
+            w = min(image.shape[1] - x, w + 2*padding)
+            h = min(image.shape[0] - y, h + 2*padding)
             
-            # Expand slightly for sharpening
-            margin = 30
-            x = max(0, x - margin)
-            y = max(0, y - margin)
-            w = min(enhanced.shape[1] - x, w + 2*margin)
-            h = min(enhanced.shape[0] - y, h + 2*margin)
+            # Create gradient mask
+            center_x = x + w//2
+            center_y = y + h//2
             
-            mask[y:y+h, x:x+w] = 255
-            
-            # Apply strong sharpening to ring area
-            kernel = np.array([[-1, -1, -1],
-                               [-1, 9.5, -1],
-                               [-1, -1, -1]])
-            sharpened = cv2.filter2D(enhanced, -1, kernel)
-            
-            # Blend sharpened with original based on mask
-            mask_3ch = np.stack([mask] * 3, axis=-1) / 255.0
-            enhanced = (sharpened * mask_3ch + enhanced * (1 - mask_3ch)).astype(np.uint8)
+            for i in range(image.shape[0]):
+                for j in range(image.shape[1]):
+                    dist = np.sqrt((i - center_y)**2 + (j - center_x)**2)
+                    max_dist = np.sqrt((h/2)**2 + (w/2)**2)
+                    if dist < max_dist:
+                        background_mask[i, j] = dist / max_dist
         
-        # Step 7: Add subtle vignetting
-        height, width = enhanced.shape[:2]
-        center_x, center_y = width // 2, height // 2
+        # Apply strong brightening to background
+        l_float = l_channel.astype(np.float32)
+        l_float = l_float + (255 - l_float) * background_mask * 0.5  # Push towards white
+        l_channel = np.clip(l_float, 0, 255).astype(np.uint8)
         
-        # Create vignette mask
-        Y, X = np.ogrid[:height, :width]
-        dist_from_center = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
-        max_dist = np.sqrt(center_x**2 + center_y**2)
-        vignette = 1 - (dist_from_center / max_dist) * 0.15  # Very subtle
-        vignette = np.clip(vignette, 0.85, 1.0)
+        # 2. Enhance the L channel for overall brightness
+        l_channel = cv2.add(l_channel, 30)  # Increase overall brightness
+        
+        # 3. Apply CLAHE for local contrast
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        l_channel = clahe.apply(l_channel)
+        
+        # Merge back
+        enhanced = cv2.merge([l_channel, a_channel, b_channel])
+        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+        
+        # 4. Create shallow depth of field effect
+        if ring_regions['primary_region']:
+            # Create focus mask
+            mask = np.zeros(image.shape[:2], dtype=np.float32)
+            x, y, w, h = ring_regions['primary_region']['bbox']
+            cv2.ellipse(mask, ((x + w//2), (y + h//2)), (w//2, h//2), 0, 0, 360, 1, -1)
+            mask = cv2.GaussianBlur(mask, (51, 51), 20)
+            
+            # Blur the entire image slightly
+            blurred = cv2.GaussianBlur(enhanced, (7, 7), 2)
+            
+            # Combine sharp and blurred based on mask
+            for c in range(3):
+                enhanced[:,:,c] = enhanced[:,:,c] * mask + blurred[:,:,c] * (1 - mask)
+        
+        # 5. Apply color-specific adjustments
+        if detected_color == 'plain_white':
+            # Make whites even brighter and cooler
+            enhanced = cv2.addWeighted(enhanced, 1.3, np.ones_like(enhanced) * 255, 0.1, -30)
+        
+        # 6. Final touches
+        # Convert to PIL for final adjustments
+        pil_img = Image.fromarray(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
+        
+        # Selective sharpening on ring area only
+        if ring_regions['primary_region']:
+            x, y, w, h = ring_regions['primary_region']['bbox']
+            ring_crop = pil_img.crop((x, y, x+w, y+h))
+            ring_sharp = ring_crop.filter(ImageFilter.SHARPEN)
+            sharpness = ImageEnhance.Sharpness(ring_sharp)
+            ring_sharp = sharpness.enhance(1.5)
+            pil_img.paste(ring_sharp, (x, y))
+        
+        # Professional white balance
+        color_enhancer = ImageEnhance.Color(pil_img)
+        pil_img = color_enhancer.enhance(0.95)  # Slight desaturation
+        
+        # Subtle vignette
+        width, height = pil_img.size
+        vignette = Image.new('L', (width, height), 255)
+        for i in range(width):
+            for j in range(height):
+                dist = np.sqrt((i - width/2)**2 + (j - height/2)**2)
+                max_dist = np.sqrt((width/2)**2 + (height/2)**2)
+                brightness = 255 - int(30 * (dist / max_dist)**2)
+                vignette.putpixel((i, j), brightness)
         
         # Apply vignette
-        vignette_3ch = np.stack([vignette] * 3, axis=-1)
-        enhanced = (enhanced * vignette_3ch).astype(np.uint8)
-        
-        # Step 8: Boost highlights on metal
-        # Create highlight mask
-        highlight_mask = cv2.inRange(enhanced, (200, 200, 200), (255, 255, 255))
-        highlight_mask = cv2.GaussianBlur(highlight_mask, (5, 5), 0)
+        vignette = vignette.convert('RGB')
+        pil_img = Image.blend(pil_img, vignette, 0.1)
         
         # Boost highlights
-        highlights_boosted = cv2.addWeighted(enhanced, 1.0, np.ones_like(enhanced) * 255, 0.2, 0)
-        mask_3ch = np.stack([highlight_mask] * 3, axis=-1) / 255.0
-        enhanced = (highlights_boosted * mask_3ch + enhanced * (1 - mask_3ch)).astype(np.uint8)
-        
-        # Step 9: Final adjustments using PIL
-        pil_img = Image.fromarray(cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB))
-        
-        # Increase contrast
-        contrast_enhancer = ImageEnhance.Contrast(pil_img)
-        pil_img = contrast_enhancer.enhance(1.15)
-        
-        # Slight brightness boost
         brightness_enhancer = ImageEnhance.Brightness(pil_img)
         pil_img = brightness_enhancer.enhance(1.05)
         
@@ -356,18 +331,24 @@ class EnhancementHandler:
 
 def handler(event):
     """RunPod handler function"""
-    logger.info("=== Enhancement Handler v40 Started ===")
-    
     try:
+        logger.info("="*50)
+        logger.info(f"Handler started with event keys: {list(event.keys())}")
+        
         handler_instance = EnhancementHandler()
         
-        # Find input data from various possible paths
+        # Find image data with improved logic
         enhanced_image_data = handler_instance.find_input_data(event)
         
         if not enhanced_image_data:
-            raise ValueError("No image data found in input. Please check the input structure.")
+            raise ValueError("No image data found. Please check the input structure.")
         
-        logger.info(f"Found image data, length: {len(enhanced_image_data[:100])}...")
+        logger.info(f"Found image data, type: {type(enhanced_image_data)}, length: {len(str(enhanced_image_data)[:100])}...")
+        
+        # If the data is not a string, try to extract it
+        if not isinstance(enhanced_image_data, str):
+            logger.error(f"Image data is not a string, it's: {type(enhanced_image_data)}")
+            raise ValueError(f"Expected string data but got {type(enhanced_image_data)}")
         
         # Decode base64 image with padding fix
         logger.info("Decoding base64 image...")
@@ -386,6 +367,7 @@ def handler(event):
         
         # Detect color
         detected_color = handler_instance.detect_ring_color_enhanced(image, ring_regions)
+        logger.info(f"Detected color: {detected_color}")
         
         # Apply enhancement
         enhanced_image = handler_instance.apply_professional_enhancement(image, detected_color, ring_regions)
@@ -395,7 +377,7 @@ def handler(event):
             'detected_color': detected_color,
             'ring_regions_found': len(ring_regions['candidates']),
             'primary_ring_bbox': ring_regions['primary_region']['bbox'] if ring_regions['primary_region'] else None,
-            'enhancement_version': 'v40_stable'
+            'enhancement_version': 'v41_fixed_decode'
         }
         
         # Convert result to base64 without padding
@@ -415,8 +397,6 @@ def handler(event):
         }
         
         logger.info(f"Processing completed successfully")
-        logger.info(f"Detected color: {detected_color}")
-        logger.info(f"Ring regions found: {processing_info['ring_regions_found']}")
         
         return result
         
