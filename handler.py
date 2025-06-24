@@ -15,69 +15,72 @@ logger = logging.getLogger(__name__)
 
 class EnhancementHandler:
     def __init__(self):
-        self.version = "v41-fixed-decode"
+        self.version = "v42-perfect-recursive"
         logger.info(f"Initializing {self.version}")
         
     def find_input_data(self, event: Dict[str, Any]) -> Optional[str]:
-        """Find image data from various possible locations"""
-        # Most common paths first
-        simple_paths = [
-            ['input', 'enhanced_image'],
-            ['input', 'image_base64'],
-            ['input', 'image'],
-            ['enhanced_image'],
-            ['image_base64'],
-            ['image']
-        ]
+        """Find image data using recursive search - FOOLPROOF VERSION"""
         
-        # Check simple paths
-        for path in simple_paths:
-            try:
-                data = event
-                for key in path:
-                    if isinstance(data, dict) and key in data:
-                        data = data[key]
-                    else:
-                        break
-                else:
-                    if isinstance(data, str) and len(data) > 100:
-                        logger.info(f"Found data at path: {'.'.join(path)}")
-                        return data
-            except:
-                continue
-        
-        # Check numbered paths (like 4.data.output.output.enhanced_image)
-        if 'input' in event:
-            for i in range(10):
-                key = str(i)
-                if key in event['input']:
-                    try:
-                        # Try nested path
-                        if isinstance(event['input'][key], dict):
-                            paths = [
-                                ['data', 'output', 'output', 'enhanced_image'],
-                                ['data', 'output', 'enhanced_image'],
-                                ['output', 'enhanced_image'],
-                                ['enhanced_image']
-                            ]
+        def find_string_recursive(obj, path="", depth=0, max_depth=10):
+            """Recursively find string data that looks like base64"""
+            if depth > max_depth:
+                return None
+                
+            if isinstance(obj, str):
+                # Check if it's likely base64 image data
+                if len(obj) > 1000:  # Base64 images are typically long
+                    # Check if it's a data URL or raw base64
+                    if obj.startswith('data:image') or not obj.startswith('http'):
+                        logger.info(f"Found potential image data at path: {path}")
+                        return obj
+                        
+            elif isinstance(obj, dict):
+                # Priority keys to check first
+                priority_keys = ['enhanced_image', 'image_base64', 'image', 'data', 'imageData', 'file', 'base64']
+                
+                # Check priority keys first
+                for key in priority_keys:
+                    if key in obj:
+                        result = find_string_recursive(obj[key], f"{path}.{key}" if path else key, depth + 1, max_depth)
+                        if result:
+                            return result
+                
+                # Check numbered keys (0-9)
+                for i in range(10):
+                    key = str(i)
+                    if key in obj:
+                        result = find_string_recursive(obj[key], f"{path}.{key}" if path else key, depth + 1, max_depth)
+                        if result:
+                            return result
+                
+                # Check all other keys
+                for key, value in obj.items():
+                    if key not in priority_keys and not key.isdigit():
+                        result = find_string_recursive(value, f"{path}.{key}" if path else key, depth + 1, max_depth)
+                        if result:
+                            return result
                             
-                            for path in paths:
-                                data = event['input'][key]
-                                for subkey in path:
-                                    if isinstance(data, dict) and subkey in data:
-                                        data = data[subkey]
-                                    else:
-                                        break
-                                else:
-                                    if isinstance(data, str) and len(data) > 100:
-                                        logger.info(f"Found data at numbered path: {key}.{'.'.join(path)}")
-                                        return data
-                    except:
-                        continue
+            elif isinstance(obj, list):
+                for i, item in enumerate(obj):
+                    result = find_string_recursive(item, f"{path}[{i}]", depth + 1, max_depth)
+                    if result:
+                        return result
+                        
+            return None
         
-        logger.error(f"No valid image data found in event")
-        logger.error(f"Event structure: {json.dumps(event, indent=2)[:500]}...")
-        return None
+        # Log the event structure for debugging
+        logger.info(f"Event keys at top level: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
+        if 'input' in event:
+            logger.info(f"Input keys: {list(event['input'].keys()) if isinstance(event['input'], dict) else 'Not a dict'}")
+        
+        # Start recursive search
+        result = find_string_recursive(event)
+        
+        if not result:
+            logger.error("No valid image data found in event")
+            logger.error(f"Full event structure: {json.dumps(event, indent=2)}")
+            
+        return result
     
     def decode_base64_safe(self, base64_str: str) -> bytes:
         """Safely decode base64 with automatic padding correction"""
@@ -333,22 +336,18 @@ def handler(event):
     """RunPod handler function"""
     try:
         logger.info("="*50)
-        logger.info(f"Handler started with event keys: {list(event.keys())}")
+        logger.info(f"Handler started - v42")
+        logger.info(f"Event type: {type(event)}")
         
         handler_instance = EnhancementHandler()
         
-        # Find image data with improved logic
+        # Find image data with perfect recursive logic
         enhanced_image_data = handler_instance.find_input_data(event)
         
         if not enhanced_image_data:
             raise ValueError("No image data found. Please check the input structure.")
         
-        logger.info(f"Found image data, type: {type(enhanced_image_data)}, length: {len(str(enhanced_image_data)[:100])}...")
-        
-        # If the data is not a string, try to extract it
-        if not isinstance(enhanced_image_data, str):
-            logger.error(f"Image data is not a string, it's: {type(enhanced_image_data)}")
-            raise ValueError(f"Expected string data but got {type(enhanced_image_data)}")
+        logger.info(f"Found image data successfully")
         
         # Decode base64 image with padding fix
         logger.info("Decoding base64 image...")
@@ -377,7 +376,7 @@ def handler(event):
             'detected_color': detected_color,
             'ring_regions_found': len(ring_regions['candidates']),
             'primary_ring_bbox': ring_regions['primary_region']['bbox'] if ring_regions['primary_region'] else None,
-            'enhancement_version': 'v41_fixed_decode'
+            'enhancement_version': 'v42_perfect_recursive'
         }
         
         # Convert result to base64 without padding
