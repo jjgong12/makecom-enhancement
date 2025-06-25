@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V73-ConservativeYellowGold"
+VERSION = "V75-OnlyPureGold"
 
 def decode_base64_safe(base64_str: str) -> bytes:
     """Safely decode base64 with automatic padding correction"""
@@ -27,7 +27,7 @@ def decode_base64_safe(base64_str: str) -> bytes:
     return base64.b64decode(base64_str)
 
 def detect_ring_color(image: Image.Image) -> str:
-    """Improved color detection with better yellow/rose gold distinction"""
+    """Ultra-conservative yellow gold detection - only pure gold colors"""
     img_array = np.array(image)
     height, width = img_array.shape[:2]
     
@@ -69,30 +69,31 @@ def detect_ring_color(image: Image.Image) -> str:
     rb_ratio = r_mean / (b_mean + 1)  # Red to Blue ratio
     gb_ratio = g_mean / (b_mean + 1)  # Green to Blue ratio
     
-    # Improved color detection logic - 무도금화이트 우선, 옐로우골드 보수적
-    if avg_saturation < 40 and avg_value > 200:
-        # Wider range for 무도금화이트 (includes slightly warm whites)
-        return "무도금화이트"
-    elif avg_saturation < 50 and avg_value > 180:
-        # Medium saturation + high brightness = 화이트골드
-        return "화이트골드"
-    elif avg_hue >= 20 and avg_hue <= 35 and avg_saturation > 60 and gb_ratio > 1.2:
-        # Very strict yellow gold - high saturation + clear yellow hue
+    # ULTRA-CONSERVATIVE YELLOW GOLD - Only pure gold colors
+    # Must have ALL conditions met for yellow gold
+    is_pure_gold = (
+        avg_hue >= 25 and avg_hue <= 32 and  # Very narrow hue range for pure gold
+        avg_saturation > 80 and  # Very high saturation required
+        avg_value > 120 and avg_value < 200 and  # Not too bright, not too dark
+        gb_ratio > 1.4 and  # Strong green/blue ratio
+        r_mean > 180 and g_mean > 140 and  # High red and green values
+        b_mean < 100  # Low blue for pure gold
+    )
+    
+    if is_pure_gold:
         return "옐로우골드"
+    
+    # Rose gold detection - clear pink/red tones
     elif rg_ratio > 1.2 and rb_ratio > 1.3 and avg_hue < 15:
-        # Clear red dominance = 로즈골드
         return "로즈골드"
-    elif avg_saturation > 70 and g_norm > 0.9 and r_norm > 0.9:
-        # Very saturated warm color = 옐로우골드
-        return "옐로우골드"
+    
+    # White gold - cool metallic
+    elif avg_saturation < 50 and avg_value > 180 and b_norm > r_norm:
+        return "화이트골드"
+    
+    # DEFAULT: 무도금화이트 for everything else
     else:
-        # Default based on characteristics
-        if avg_saturation < 45:
-            return "무도금화이트"  # Default to 무도금화이트 for low saturation
-        elif r_norm > g_norm * 1.1 and r_norm > b_norm * 1.1:
-            return "로즈골드"
-        else:
-            return "화이트골드"
+        return "무도금화이트"
 
 def apply_center_focus(image: Image.Image, strength: float = 0.1) -> Image.Image:
     """Apply subtle center focus vignette"""
@@ -154,7 +155,7 @@ def apply_color_enhancement(image: Image.Image, detected_color: str) -> Image.Im
         image = Image.fromarray(img_array)
         
     elif detected_color == "옐로우골드":
-        # Warm enhancement for yellow gold
+        # Only for pure gold colors - warm enhancement
         img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.05, 0, 255)  # Red
         img_array[:, :, 1] = np.clip(img_array[:, :, 1] * 1.03, 0, 255)  # Green
         image = Image.fromarray(img_array)
@@ -183,12 +184,11 @@ def apply_color_enhancement(image: Image.Image, detected_color: str) -> Image.Im
     return image
 
 def find_input_data(data):
-    """Find input data recursively"""
+    """Find input data recursively - FIXED to match Thumbnail handler"""
     if isinstance(data, dict):
-        # Check for image data keys
-        for key in ['image', 'image_data', 'base64_image', 'imageBase64', 'enhanced_image']:
-            if key in data and data[key]:
-                return data[key]
+        # Check if any of the image keys exist in the dict
+        if any(key in data for key in ['image', 'image_data', 'base64_image', 'imageBase64', 'enhanced_image']):
+            return data  # Return the entire dict, not just the value
         
         # Check nested structures
         if 'input' in data:
@@ -203,20 +203,41 @@ def find_input_data(data):
                 if result:
                     return result
     
-    return data if isinstance(data, str) else None
+    return data  # Return the data as is
 
 def process_enhancement(job):
     """Process enhancement request"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
-        # Find image data using recursive search
-        image_data = find_input_data(job)
+        # Find input data using recursive search - now returns full dict
+        input_data = find_input_data(job)
         
-        if not image_data:
+        if not input_data:
             return {
                 "output": {
-                    "error": "No image data found",
+                    "error": "No input data found",
+                    "status": "error"
+                }
+            }
+        
+        # Extract image data from the dict or use as string
+        image_data = None
+        
+        if isinstance(input_data, dict):
+            # Try different keys for image data
+            for key in ['image', 'image_data', 'base64_image', 'imageBase64', 'enhanced_image']:
+                if key in input_data and input_data[key]:
+                    image_data = input_data[key]
+                    break
+        elif isinstance(input_data, str):
+            image_data = input_data
+        
+        if not image_data:
+            logger.error(f"No image data found in input: {json.dumps(input_data)[:200]}")
+            return {
+                "output": {
+                    "error": "No image data found in input",
                     "status": "error"
                 }
             }
@@ -236,7 +257,7 @@ def process_enhancement(job):
         
         logger.info(f"Original image: {image.size}")
         
-        # Detect color FIRST
+        # Detect color FIRST with ultra-conservative logic
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
