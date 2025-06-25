@@ -63,7 +63,7 @@ def create_gradient_mask(shape: Tuple[int, int], center: Tuple[int, int], radius
 def enhance_wedding_ring_image(image_input: str, mask_type: str = "none") -> Tuple[str, str]:
     """Enhance wedding ring image with adjusted background preservation"""
     try:
-        # V64: Use safe base64 decoding with padding fix
+        # V65: Use safe base64 decoding with padding fix
         logger.info("Decoding base64 image...")
         image_data = decode_base64_safe(image_input)
         
@@ -142,7 +142,7 @@ def enhance_wedding_ring_image(image_input: str, mask_type: str = "none") -> Tup
         final_image.save(enhanced_buffer, format='PNG', quality=95)
         enhanced_base64 = base64.b64encode(enhanced_buffer.getvalue()).decode('utf-8')
         
-        # V64: Remove padding for Make.com compatibility
+        # V65: Remove padding for Make.com compatibility
         enhanced_base64_no_padding = enhanced_base64.rstrip('=')
         
         # For thumbnail, use the same image (no separate processing needed)
@@ -164,7 +164,7 @@ def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optio
             'Content-Type': 'application/json',
         }
         
-        # V64: Ensure no padding for Replicate API
+        # V65: Ensure no padding for Replicate API
         image_base64_clean = image_base64.rstrip('=')
         
         # Add data URI prefix for Replicate
@@ -223,7 +223,7 @@ def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optio
                     
                     # Convert to base64
                     result_base64 = base64.b64encode(img_response.content).decode('utf-8')
-                    # V64: Remove padding for consistency
+                    # V65: Remove padding for consistency
                     result_base64 = result_base64.rstrip('=')
                     logger.info("Background removal successful")
                     return result_base64
@@ -290,7 +290,7 @@ def handler(job):
         if not image_input:
             raise ValueError("No image provided")
         
-        # V64: Log base64 info for debugging
+        # V65: Log base64 info for debugging
         if isinstance(image_input, str):
             logger.info(f"Input image length: {len(image_input)}")
             if image_input.startswith('data:'):
