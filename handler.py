@@ -1,222 +1,293 @@
 import runpod
 import base64
 import requests
-import time
-import json
+from io import BytesIO
+from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 import numpy as np
-from PIL import Image, ImageEnhance
-import io
 import cv2
-from typing import Optional, Dict, Any, Union
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+import json
+import traceback
+import time
+import logging
 
-def find_input_data(data: Dict[str, Any]) -> Optional[Union[str, Dict]]:
-    """Find input data from various possible locations"""
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+VERSION = "Enhancement_V62_Brighter"
+
+def create_session():
+    """Create a session with retry strategy"""
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504]
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+def find_input_data(data):
+    """Recursively find input data from various possible locations"""
+    logger.info("Searching for input data...")
     
-    # Direct check for common keys
+    # Log the structure (limited to prevent huge logs)
+    logger.info(f"Input structure: {json.dumps(data, indent=2)[:1000]}...")
+    
+    # Direct access attempts
     if isinstance(data, dict):
-        # Check for image_base64 first (most common)
-        if 'image_base64' in data:
-            return data['image_base64']
-        if 'imageBase64' in data:
-            return data['imageBase64']
-        
-        # Check for image/base64 keys
-        if 'image' in data:
-            return data['image']
-        if 'base64' in data:
-            return data['base64']
-        
-        # Check for URL keys
-        if 'url' in data:
-            return data['url']
-        if 'image_url' in data:
-            return data['image_url']
-        if 'imageUrl' in data:
-            return data['imageUrl']
-            
-        # Check input sub-object
+        # Check top level
         if 'input' in data:
-            result = find_input_data(data['input'])
-            if result:
-                return result
-                
-        # Check job structure
-        if 'job' in data and isinstance(data['job'], dict):
-            if 'input' in data['job']:
-                result = find_input_data(data['job']['input'])
+            return data['input']
+        
+        # Common RunPod structures
+        common_paths = [
+            ['job', 'input'],
+            ['data', 'input'],
+            ['payload', 'input'],
+            ['body', 'input'],
+            ['request', 'input']
+        ]
+        
+        for path in common_paths:
+            current = data
+            for key in path:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    break
+            else:
+                logger.info(f"Found input at path: {'.'.join(path)}")
+                return current
+    
+    # Recursive search function
+    def recursive_search(obj, target_keys=None):
+        if target_keys is None:
+            target_keys = ['input', 'url', 'image_url', 'imageUrl', 'image_base64', 
+                          'imageBase64', 'image', 'enhanced_image', 'base64_image']
+        
+        if isinstance(obj, dict):
+            # Check for target keys
+            for key in target_keys:
+                if key in obj:
+                    value = obj[key]
+                    if key == 'input':
+                        return value
+                    else:
+                        # Return as dict to maintain structure
+                        return {key: value}
+            
+            # Recursive search in values
+            for value in obj.values():
+                result = recursive_search(value, target_keys)
                 if result:
                     return result
                     
-        # Check numbered keys (Make.com structure)
-        for i in range(10):
-            key = str(i)
-            if key in data:
-                result = find_input_data(data[key])
+        elif isinstance(obj, list):
+            for item in obj:
+                result = recursive_search(item, target_keys)
                 if result:
                     return result
-                    
-        # Deep search in nested structures
-        for key, value in data.items():
-            if isinstance(value, dict):
-                # Skip 'output' to avoid circular references
-                if key != 'output':
-                    result = find_input_data(value)
-                    if result:
-                        return result
-                        
+        
+        return None
+    
+    # Try recursive search
+    result = recursive_search(data)
+    if result:
+        logger.info(f"Found input via recursive search: {type(result)}")
+        return result
+    
+    # Last resort - check if the data itself is the input
+    if isinstance(data, str) and len(data) > 100:
+        logger.info("Using raw data as input")
+        return data
+    
+    logger.warning("No input data found")
     return None
 
-def download_image_from_url(url: str) -> Image.Image:
-    """Download image from URL with retries"""
-    headers_list = [
-        {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
-        {'User-Agent': 'Python-Requests/2.31.0'},
-        {}
-    ]
-    
-    for headers in headers_list:
-        try:
-            response = requests.get(url, headers=headers, timeout=30, stream=True)
-            response.raise_for_status()
-            return Image.open(io.BytesIO(response.content)).convert('RGB')
-        except Exception as e:
-            print(f"Failed with headers {headers}: {e}")
-            continue
-            
-    raise ValueError(f"Failed to download image from URL: {url}")
-
-def base64_to_image(base64_str: str) -> Image.Image:
-    """Convert base64 string to PIL Image with padding fix"""
-    # Remove data URL prefix if present
-    if 'base64,' in base64_str:
-        base64_str = base64_str.split('base64,')[1]
-    
-    # Fix padding if needed
-    padding = 4 - len(base64_str) % 4
-    if padding != 4:
-        base64_str += '=' * padding
-    
-    image_data = base64.b64decode(base64_str)
-    return Image.open(io.BytesIO(image_data)).convert('RGB')
-
-def detect_jewelry_color(image: Image.Image) -> str:
-    """Detect jewelry color type with improved logic"""
-    # Convert PIL Image to numpy array
-    img_array = np.array(image)
-    
-    # Get center region
-    h, w = img_array.shape[:2]
-    center_y, center_x = h // 2, w // 2
-    region_size = min(h, w) // 3
-    
-    center_region = img_array[
-        center_y - region_size:center_y + region_size,
-        center_x - region_size:center_x + region_size
-    ]
-    
-    # Convert to HSV
-    hsv = cv2.cvtColor(center_region, cv2.COLOR_RGB2HSV)
-    
-    # Define color ranges (무도금화이트 우선 감지)
-    white_mask = cv2.inRange(hsv, np.array([0, 0, 200]), np.array([180, 30, 255]))
-    yellow_mask = cv2.inRange(hsv, np.array([15, 50, 100]), np.array([35, 255, 255]))
-    rose_mask = cv2.inRange(hsv, np.array([0, 30, 100]), np.array([15, 255, 255]))
-    
-    # Count pixels
-    white_pixels = cv2.countNonZero(white_mask)
-    yellow_pixels = cv2.countNonZero(yellow_mask)
-    rose_pixels = cv2.countNonZero(rose_mask)
-    total_pixels = center_region.shape[0] * center_region.shape[1]
-    
-    # Priority detection - 무도금화이트 first
-    if white_pixels > total_pixels * 0.5:
-        return "white_plain"
-    
-    # Check average brightness in center
-    gray = cv2.cvtColor(center_region, cv2.COLOR_RGB2GRAY)
-    avg_brightness = np.mean(gray)
-    
-    if avg_brightness > 200 and white_pixels > total_pixels * 0.3:
-        return "white_plain"
-    
-    # Other colors
-    if yellow_pixels > rose_pixels and yellow_pixels > total_pixels * 0.1:
-        # Double check it's really yellow
-        avg_b, avg_g, avg_r = np.mean(center_region, axis=(0, 1))
-        if avg_r > avg_b and avg_g > avg_b:
-            return "yellow_gold"
-    
-    if rose_pixels > yellow_pixels and rose_pixels > total_pixels * 0.1:
-        return "rose_gold"
-    
-    return "white_gold"
-
-def apply_color_enhancement_v61(image: Image.Image, jewelry_color: str) -> Image.Image:
-    """Apply V61 color enhancement - Natural tone like image 2"""
-    # Convert to numpy array
-    img_array = np.array(image).astype(np.float32) / 255.0
-    
-    # V61 specific adjustments - more natural tone
-    brightness = 1.25  # Reduced from 1.45 to 1.25
-    contrast = 1.05
-    gamma = 0.8  # Increased from 0.6 to 0.8 for more natural look
-    saturation_factor = 0.8  # Reduced from 0.65 to 0.8 (20% reduction instead of 35%)
-    # No additional brightness
-    
-    # Apply brightness
-    img_array = img_array * brightness
-    
-    # Apply contrast
-    img_array = (img_array - 0.5) * contrast + 0.5
-    
-    # Apply gamma correction
-    img_array = np.power(np.clip(img_array, 0, 1), gamma)
-    
-    # Apply saturation adjustment
-    # Convert to HSV for saturation control
-    img_array_uint8 = np.clip(img_array * 255, 0, 255).astype(np.uint8)
-    hsv = cv2.cvtColor(img_array_uint8, cv2.COLOR_RGB2HSV).astype(np.float32)
-    hsv[:,:,1] = hsv[:,:,1] * saturation_factor  # Reduce saturation
-    hsv = np.clip(hsv, 0, 255)
-    img_array_uint8 = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
-    img_array = img_array_uint8.astype(np.float32) / 255.0
-    
-    # Apply subtle background brightening using LAB color space
-    lab = cv2.cvtColor((img_array * 255).astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
-    lab[:,:,0] = lab[:,:,0] * 1.05  # Reduced from 1.1 to 1.05
-    lab = np.clip(lab, 0, 255)
-    img_array = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB).astype(np.float32) / 255.0
-    
-    # Color-specific adjustments (more subtle)
-    if jewelry_color == "yellow_gold":
-        # Subtle warm enhancement
-        img_array[:,:,0] *= 1.01  # Red (reduced from 1.02)
-        img_array[:,:,1] *= 1.005  # Green (reduced from 1.01)
-    elif jewelry_color == "rose_gold":
-        # Subtle rose enhancement
-        img_array[:,:,0] *= 1.02  # Red (reduced from 1.03)
-        img_array[:,:,1] *= 0.99  # Slight green reduction
-    elif jewelry_color == "white_plain":
-        # Slight brightness for white (not too much)
-        img_array = img_array * 1.02  # Reduced from 1.05
-        # Cool tone
-        img_array[:,:,2] *= 1.01  # Slight blue enhancement
-    
-    # Final clipping
-    img_array = np.clip(img_array, 0, 1)
-    
-    # Convert back to PIL Image
-    img_array = (img_array * 255).astype(np.uint8)
-    return Image.fromarray(img_array)
-
-def handler(job: Dict[str, Any]) -> Dict[str, Any]:
-    """Main handler function for RunPod - Fixed parameter name"""
+def validate_base64(data):
+    """Validate and clean base64 string"""
     try:
-        # Get job input
-        job_input = job.get("input", {})
-        print(f"Enhancement V61 received input: {json.dumps(job_input, indent=2)[:500]}...")
+        # Remove data URL prefix if present
+        if isinstance(data, str) and 'base64,' in data:
+            data = data.split('base64,')[1]
         
-        # Find input data
+        # Remove whitespace
+        if isinstance(data, str):
+            data = data.strip()
+        
+        # Try decoding
+        base64.b64decode(data)
+        return True, data
+    except Exception as e:
+        logger.error(f"Base64 validation error: {str(e)}")
+        return False, None
+
+def decode_base64_safe(base64_str):
+    """Decode base64 with automatic padding correction"""
+    try:
+        # Clean the string
+        if 'base64,' in base64_str:
+            base64_str = base64_str.split('base64,')[1]
+        
+        # Fix padding if needed
+        padding = 4 - len(base64_str) % 4
+        if padding != 4:
+            base64_str += '=' * padding
+        
+        return base64.b64decode(base64_str)
+    except Exception as e:
+        logger.error(f"Base64 decode error: {str(e)}")
+        raise
+
+def download_image_from_url(url):
+    """Download image from URL"""
+    try:
+        session = create_session()
+        response = session.get(url, timeout=30)
+        response.raise_for_status()
+        return Image.open(BytesIO(response.content))
+    except Exception as e:
+        logger.error(f"Failed to download image: {str(e)}")
+        raise
+
+def apply_gamma_correction(image, gamma):
+    """Apply gamma correction to brighten mid-tones"""
+    try:
+        # Convert to numpy array
+        img_array = np.array(image).astype(float) / 255.0
+        
+        # Apply gamma correction
+        corrected = np.power(img_array, gamma)
+        
+        # Convert back to 8-bit
+        corrected = (corrected * 255).astype(np.uint8)
+        
+        return Image.fromarray(corrected)
+    except Exception as e:
+        logger.error(f"Gamma correction error: {str(e)}")
+        return image
+
+def detect_ring_color(image):
+    """Detect ring color from image"""
+    try:
+        # Convert to numpy array
+        img_array = np.array(image)
+        
+        # Get center region (where ring is likely to be)
+        h, w = img_array.shape[:2]
+        center_y, center_x = h // 2, w // 2
+        region_size = min(h, w) // 3
+        
+        center_region = img_array[
+            center_y - region_size:center_y + region_size,
+            center_x - region_size:center_x + region_size
+        ]
+        
+        # Convert to HSV for better color detection
+        hsv = cv2.cvtColor(center_region, cv2.COLOR_RGB2HSV)
+        
+        # Calculate average values
+        avg_h = np.mean(hsv[:, :, 0])
+        avg_s = np.mean(hsv[:, :, 1])
+        avg_v = np.mean(hsv[:, :, 2])
+        
+        logger.info(f"Color analysis - H: {avg_h:.1f}, S: {avg_s:.1f}, V: {avg_v:.1f}")
+        
+        # Color detection logic
+        if avg_v > 200 and avg_s < 30:  # Very bright and low saturation
+            return 'white'
+        elif avg_s < 40 and avg_v > 150:  # Low saturation, bright
+            return 'white_gold'
+        elif 15 <= avg_h <= 35 and avg_s > 30:  # Yellow hue with good saturation
+            return 'yellow_gold'
+        elif (avg_h < 15 or avg_h > 165) and avg_s > 20:  # Red/pink hue
+            return 'rose_gold'
+        else:
+            return 'white'  # Default
+            
+    except Exception as e:
+        logger.error(f"Color detection error: {str(e)}")
+        return 'white'
+
+def enhance_jewelry_image(image, metal_type='white'):
+    """Apply enhancement specifically for jewelry photography"""
+    try:
+        # Ensure RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        logger.info(f"Applying V62 enhancement for {metal_type}")
+        
+        # V62 보정값 - 더 밝고 하얗게
+        # 1. 밝기 35% 증가 (V61: 25% → V62: 35%)
+        enhancer = ImageEnhance.Brightness(image)
+        image = enhancer.enhance(1.35)
+        
+        # 2. 감마 보정 0.7 (V61: 0.8 → V62: 0.7) - 더 밝게
+        image = apply_gamma_correction(image, 0.7)
+        
+        # 3. 채도 30% 감소 (V61: -20% → V62: -30%) - 더 무채색에 가깝게
+        enhancer = ImageEnhance.Color(image)
+        image = enhancer.enhance(0.7)
+        
+        # 4. 대비 살짝 증가로 선명도 유지
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(1.05)
+        
+        # 5. 샤프니스 증가
+        enhancer = ImageEnhance.Sharpness(image)
+        image = enhancer.enhance(1.1)
+        
+        # 6. Convert to LAB for advanced adjustments
+        img_array = np.array(image)
+        lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB).astype(np.float32)
+        
+        # Increase L channel (lightness)
+        lab[:, :, 0] = lab[:, :, 0] * 1.08
+        lab[:, :, 0] = np.clip(lab[:, :, 0], 0, 255)
+        
+        # Adjust color based on metal type
+        if metal_type == 'yellow_gold':
+            # Warm up slightly
+            lab[:, :, 2] = lab[:, :, 2] * 1.05  # More yellow
+        elif metal_type == 'rose_gold':
+            # Add pink tone
+            lab[:, :, 1] = lab[:, :, 1] * 1.05  # More red
+        elif metal_type == 'white_gold':
+            # Cool down slightly
+            lab[:, :, 2] = lab[:, :, 2] * 0.95  # Less yellow
+        
+        # Convert back to RGB
+        lab = lab.astype(np.uint8)
+        img_array = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        image = Image.fromarray(img_array)
+        
+        # 7. Final sharpening
+        image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=50, threshold=3))
+        
+        return image
+        
+    except Exception as e:
+        logger.error(f"Enhancement error: {str(e)}")
+        return image
+
+def process_enhancement(job):
+    """Process enhancement request"""
+    logger.info(f"=== {VERSION} Started ===")
+    logger.info(f"Received job: {json.dumps(job, indent=2)[:500]}...")
+    
+    start_time = time.time()
+    
+    try:
+        # Extract input using the job parameter correctly
+        job_input = job.get('input', {})
+        
+        # Find image data
         input_data = find_input_data(job_input)
         
         # If not found in job_input, try the whole job dict
@@ -224,96 +295,119 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             input_data = find_input_data(job)
         
         if not input_data:
-            # Last resort - check if job_input itself is the image data
-            if isinstance(job_input, str) and len(job_input) > 100:
-                input_data = job_input
-            else:
-                print("Failed to find input data. Job structure:")
-                print(json.dumps(job, indent=2)[:1000])
-                return {
-                    "output": {
-                        "error": "No input image found",
-                        "status": "failed",
-                        "version": "v61"
-                    }
-                }
-        
-        print(f"Found input data type: {type(input_data).__name__}")
-        
-        # Load image based on input type
-        image = None
-        
-        if isinstance(input_data, str):
-            if input_data.startswith('http'):
-                print(f"Loading from URL: {input_data[:100]}...")
-                image = download_image_from_url(input_data)
-            else:
-                print("Loading from base64 string")
-                image = base64_to_image(input_data)
-        elif isinstance(input_data, dict):
-            # Check for various possible keys
-            for key in ['image_base64', 'imageBase64', 'image', 'base64', 'data', 'url']:
-                if key in input_data and isinstance(input_data[key], str):
-                    print(f"Loading from dict key: {key}")
-                    if input_data[key].startswith('http'):
-                        image = download_image_from_url(input_data[key])
-                    else:
-                        image = base64_to_image(input_data[key])
-                    break
-        
-        if image is None:
+            error_msg = "No image data provided in any expected field"
+            logger.error(error_msg)
             return {
                 "output": {
-                    "error": "Failed to load image from input",
-                    "status": "failed",
-                    "version": "v61"
+                    "error": error_msg,
+                    "status": "error",
+                    "available_fields": list(job_input.keys()) if isinstance(job_input, dict) else []
                 }
             }
         
-        print(f"Image loaded successfully: {image.size}")
+        # Extract image data from various possible formats
+        image_data = None
         
-        # Detect jewelry color
-        jewelry_color = detect_jewelry_color(image)
-        print(f"Detected jewelry color: {jewelry_color}")
+        if isinstance(input_data, dict):
+            # Try various keys
+            for key in ['image', 'image_base64', 'imageBase64', 'base64_image', 
+                       'url', 'image_url', 'imageUrl', 'enhanced_image']:
+                if key in input_data:
+                    image_data = input_data[key]
+                    break
+        elif isinstance(input_data, str):
+            image_data = input_data
         
-        # Apply V61 enhancement (natural tone)
-        enhanced_image = apply_color_enhancement_v61(image, jewelry_color)
-        print("Enhancement applied successfully")
+        if not image_data:
+            return {
+                "output": {
+                    "error": "Could not extract image data from input",
+                    "status": "error"
+                }
+            }
         
-        # Convert to base64
-        buffered = io.BytesIO()
-        enhanced_image.save(buffered, format="PNG", quality=95)
+        # Process based on data type
+        if isinstance(image_data, str) and image_data.startswith('http'):
+            # URL input
+            logger.info(f"Processing URL: {image_data[:100]}...")
+            image = download_image_from_url(image_data)
+        else:
+            # Base64 input
+            logger.info("Processing base64 image...")
+            
+            # Validate base64
+            is_valid, clean_base64 = validate_base64(image_data)
+            if not is_valid:
+                return {
+                    "output": {
+                        "error": "Invalid base64 image data",
+                        "status": "error"
+                    }
+                }
+            
+            # Decode image
+            image_bytes = decode_base64_safe(clean_base64)
+            image = Image.open(BytesIO(image_bytes))
+        
+        logger.info(f"Original image: {image.mode} {image.size}")
+        
+        # Detect ring color
+        metal_type = detect_ring_color(image)
+        logger.info(f"Detected metal type: {metal_type}")
+        
+        # Apply enhancements
+        logger.info("Applying V62 enhancements (brighter settings)...")
+        enhanced_image = enhance_jewelry_image(image, metal_type)
+        
+        # Save to base64
+        logger.info("Encoding result...")
+        buffered = BytesIO()
+        
+        # Use PNG for quality
+        enhanced_image.save(buffered, format="PNG", optimize=True)
         enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
         # Remove padding for Make.com
         enhanced_base64_no_padding = enhanced_base64.rstrip('=')
-        print(f"Base64 length (no padding): {len(enhanced_base64_no_padding)}")
         
-        # Return with proper structure
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
+        logger.info(f"Enhancement completed in {processing_time:.2f}s")
+        logger.info(f"Output size: {len(enhanced_base64_no_padding)} chars (no padding)")
+        
         return {
             "output": {
                 "enhanced_image": enhanced_base64_no_padding,
-                "detected_color": jewelry_color,
+                "status": "success",
+                "message": "Enhancement completed - V62 brighter settings",
+                "processing_time": f"{processing_time:.2f}s",
+                "detected_metal": metal_type,
                 "original_size": list(image.size),
-                "enhanced_size": list(enhanced_image.size),
-                "version": "v61_natural",
-                "status": "success"
+                "settings": {
+                    "brightness": "135%",
+                    "gamma": "0.7",
+                    "saturation": "70%",
+                    "contrast": "105%",
+                    "sharpness": "110%",
+                    "lab_lightness": "108%"
+                }
             }
         }
         
     except Exception as e:
-        print(f"Error in Enhancement V61: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        error_msg = f"Enhancement failed: {str(e)}"
+        logger.error(error_msg)
+        logger.error(f"Traceback: {traceback.format_exc()}")
         
         return {
             "output": {
-                "error": str(e),
-                "status": "failed",
-                "version": "v61",
+                "error": error_msg,
+                "status": "error",
                 "traceback": traceback.format_exc()
             }
         }
 
-# RunPod serverless handler
-runpod.serverless.start({"handler": handler})
+# RunPod handler
+logger.info(f"Starting RunPod {VERSION}...")
+runpod.serverless.start({"handler": process_enhancement})
