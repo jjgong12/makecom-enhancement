@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V75-OnlyPureGold"
+VERSION = "V76-PerfectRecursive"
 
 def decode_base64_safe(base64_str: str) -> bytes:
     """Safely decode base64 with automatic padding correction"""
@@ -183,64 +183,76 @@ def apply_color_enhancement(image: Image.Image, detected_color: str) -> Image.Im
     
     return image
 
-def find_input_data(data):
-    """Find input data recursively - FIXED to match Thumbnail handler"""
+def find_enhanced_image_data(data, path="root"):
+    """Recursively find enhanced_image data from any structure - V76 Perfect"""
+    logger.info(f"Searching in path: {path}")
+    
+    if data is None:
+        return None
+    
+    # If it's a string, it might be our image data
+    if isinstance(data, str):
+        if len(data) > 100:  # Likely base64 data
+            logger.info(f"Found potential image data at {path} (string)")
+            return data
+        return None
+    
+    # If it's a dict, check all possible keys
     if isinstance(data, dict):
-        # Check if any of the image keys exist in the dict
-        if any(key in data for key in ['image', 'image_data', 'base64_image', 'imageBase64', 'enhanced_image']):
-            return data  # Return the entire dict, not just the value
+        # Direct image keys
+        image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
+                     'imageBase64', 'image_base64', 'base64']
         
-        # Check nested structures
-        if 'input' in data:
-            result = find_input_data(data['input'])
-            if result:
-                return result
+        for key in image_keys:
+            if key in data and data[key]:
+                logger.info(f"Found image data at {path}.{key}")
+                return data[key]
         
-        # Check other common nested keys
-        for key in ['job', 'payload', 'data']:
-            if key in data:
-                result = find_input_data(data[key])
+        # Special handling for numbered keys (like '4')
+        for key in data:
+            if key.isdigit() or key in ['input', 'data', 'output', 'payload', 'job']:
+                result = find_enhanced_image_data(data[key], f"{path}.{key}")
+                if result:
+                    return result
+        
+        # Try all other keys
+        for key, value in data.items():
+            if key not in image_keys:
+                result = find_enhanced_image_data(value, f"{path}.{key}")
                 if result:
                     return result
     
-    return data  # Return the data as is
+    # If it's a list, check all items
+    if isinstance(data, list):
+        for i, item in enumerate(data):
+            result = find_enhanced_image_data(item, f"{path}[{i}]")
+            if result:
+                return result
+    
+    return None
 
 def process_enhancement(job):
     """Process enhancement request"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
+    logger.info(f"Input structure: {json.dumps(job, indent=2)[:500]}...")  # Log first 500 chars
     
     try:
-        # Find input data using recursive search - now returns full dict
-        input_data = find_input_data(job)
-        
-        if not input_data:
-            return {
-                "output": {
-                    "error": "No input data found",
-                    "status": "error"
-                }
-            }
-        
-        # Extract image data from the dict or use as string
-        image_data = None
-        
-        if isinstance(input_data, dict):
-            # Try different keys for image data
-            for key in ['image', 'image_data', 'base64_image', 'imageBase64', 'enhanced_image']:
-                if key in input_data and input_data[key]:
-                    image_data = input_data[key]
-                    break
-        elif isinstance(input_data, str):
-            image_data = input_data
+        # Find image data using perfect recursive search
+        image_data = find_enhanced_image_data(job)
         
         if not image_data:
-            logger.error(f"No image data found in input: {json.dumps(input_data)[:200]}")
+            # Log the entire structure for debugging
+            logger.error(f"No image data found. Full structure: {json.dumps(job, indent=2)}")
             return {
                 "output": {
                     "error": "No image data found in input",
-                    "status": "error"
+                    "status": "error",
+                    "version": VERSION,
+                    "searched_structure": json.dumps(job, indent=2)[:1000]
                 }
             }
+        
+        logger.info(f"Found image data, length: {len(image_data)}")
         
         # Decode image
         image_bytes = decode_base64_safe(image_data)
@@ -310,6 +322,7 @@ def process_enhancement(job):
             "output": {
                 "error": str(e),
                 "status": "error",
+                "version": VERSION,
                 "traceback": traceback.format_exc()
             }
         }
