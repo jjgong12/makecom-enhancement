@@ -103,7 +103,7 @@ def base64_to_image(base64_string):
     return Image.open(BytesIO(img_data))
 
 def enhance_image_brightness(image):
-    """이미지의 전체적인 색감을 매우 밝고 하얗게 보정 (더 강한 버전)"""
+    """이미지의 전체적인 색감을 밝고 하얗게 보정 (밸런스 버전)"""
     # RGB로 변환 (RGBA인 경우)
     if image.mode == 'RGBA':
         # 흰색 배경에 합성
@@ -113,52 +113,52 @@ def enhance_image_brightness(image):
     elif image.mode != 'RGB':
         image = image.convert('RGB')
     
-    # 1단계: 전체적으로 매우 밝게
+    # 1단계: 전체적으로 밝게 (35%)
     brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.5)  # 50% 밝게 (기존 30% -> 50%)
+    image = brightness.enhance(1.35)  # 35% 밝게
     
-    # 2단계: 대비 감소로 부드럽게
+    # 2단계: 대비 약간 감소로 부드럽게
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(0.85)  # 15% 대비 감소
+    image = contrast.enhance(0.9)  # 10% 대비 감소
     
-    # 3단계: 채도 크게 감소 (더 하얗게)
+    # 3단계: 채도 감소 (더 하얗게)
     color = ImageEnhance.Color(image)
-    image = color.enhance(0.6)  # 40% 채도 감소 (기존 20% -> 40%)
+    image = color.enhance(0.7)  # 30% 채도 감소
     
-    # 4단계: 강력한 하이라이트 강화
+    # 4단계: 하이라이트 강화
     img_array = np.array(image)
     
     # RGB 각 채널별로 처리
     for i in range(3):
         channel = img_array[:, :, i].astype(np.float32) / 255.0
         
-        # 감마 보정을 더 강하게 (밝은 톤 극대화)
-        channel = np.power(channel, 0.6)  # 기존 0.8 -> 0.6
+        # 감마 보정 (밝은 톤 강화)
+        channel = np.power(channel, 0.6)  # 감마 0.6 유지
         
-        # 추가로 밝은 영역을 더 밝게
-        channel = np.where(channel > 0.5, 
-                          channel + (1 - channel) * 0.3,  # 밝은 부분 30% 더 밝게
-                          channel * 1.1)  # 어두운 부분도 10% 밝게
+        # 밝은 영역 추가 강화 (적당히)
+        channel = np.where(channel > 0.6, 
+                          channel + (1 - channel) * 0.15,  # 밝은 부분 15% 더 밝게
+                          channel * 1.05)  # 어두운 부분 5% 밝게
         
         # 클리핑
         channel = np.clip(channel, 0, 1)
         img_array[:, :, i] = (channel * 255).astype(np.uint8)
     
-    # 5단계: 전체적으로 화이트 오버레이 효과
+    # 5단계: 전체적으로 화이트 오버레이 효과 (3%)
     white_overlay = np.ones_like(img_array) * 255
-    alpha = 0.15  # 15% 흰색 오버레이
+    alpha = 0.03  # 3% 흰색 오버레이
     img_array = (img_array * (1 - alpha) + white_overlay * alpha).astype(np.uint8)
     
     # PIL Image로 변환
     enhanced_image = Image.fromarray(img_array)
     
-    # 6단계: 추가 밝기 조정
+    # 6단계: 추가 밝기 조정 (5%)
     brightness2 = ImageEnhance.Brightness(enhanced_image)
-    enhanced_image = brightness2.enhance(1.1)  # 추가 10% 밝게
+    enhanced_image = brightness2.enhance(1.05)  # 추가 5% 밝게
     
-    # 7단계: 샤프니스는 약간만
+    # 7단계: 샤프니스
     sharpness = ImageEnhance.Sharpness(enhanced_image)
-    enhanced_image = sharpness.enhance(1.05)  # 5% 선명도 증가
+    enhanced_image = sharpness.enhance(1.1)  # 10% 선명도 증가
     
     return enhanced_image
 
@@ -222,9 +222,9 @@ def handler(event):
         # 원본 크기 저장
         original_size = image.size
         
-        # 이미지 향상 처리 (매우 밝고 하얗게)
+        # 이미지 향상 처리 (밸런스 버전)
         enhanced_image = enhance_image_brightness(image)
-        print("이미지 향상 처리 완료 (강화된 버전)")
+        print("이미지 향상 처리 완료 (V57 밸런스)")
         
         # base64 변환 (padding 제거)
         enhanced_base64 = image_to_base64(enhanced_image)
@@ -236,7 +236,7 @@ def handler(event):
                 "original_size": list(original_size),
                 "enhanced_size": list(enhanced_image.size),
                 "format": "base64_no_padding",
-                "enhancement_applied": "strong_brightness_whitening_v56"
+                "enhancement_applied": "balanced_brightness_whitening_v57"
             }
         }
         
