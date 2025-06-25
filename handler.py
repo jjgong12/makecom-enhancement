@@ -1,221 +1,286 @@
+import json
 import runpod
 import base64
+import requests
+import time
 from io import BytesIO
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageOps
 import numpy as np
 import cv2
-import traceback
 
-VERSION = "v53"
-
-def find_input_data(event):
-    """Find base64 data from ALL possible locations"""
-    # All possible keys for base64 data
-    possible_keys = [
-        'image_base64', 'imageBase64', 'image', 'base64', 
-        'input_image', 'inputImage', 'img', 'photo',
-        'base64Image', 'base64_image', 'image_data', 'imageData',
-        'data', 'file', 'upload', 'content'
-    ]
+def find_input_data(data):
+    """재귀적으로 모든 가능한 경로에서 입력 데이터 찾기"""
     
-    def check_value(value):
-        """Check if value is likely base64 image data"""
-        if isinstance(value, str) and len(value) > 100:
-            # Check if it's base64 or data URL
-            if value.startswith('data:image'):
-                return True
-            # Check if it looks like base64
-            if all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in value[:100]):
-                return True
-        return False
+    # 전체 구조 로깅 (디버깅용)
+    print(f"전체 입력 데이터 구조: {json.dumps(data, indent=2)[:1000]}")
     
-    def search_dict(d, path=""):
-        """Recursively search dictionary for image data"""
-        if not isinstance(d, dict):
-            return None
-            
-        # Check all possible keys
-        for key in possible_keys:
-            if key in d:
-                if check_value(d[key]):
-                    print(f"Found image at: {path}{key}")
-                    return d[key]
+    # 직접 접근 시도
+    if isinstance(data, dict):
+        # 최상위 레벨 체크
+        if 'input' in data:
+            return data['input']
         
-        # Check all keys (not just known ones)
-        for key, value in d.items():
-            if check_value(value):
-                print(f"Found image at: {path}{key}")
-                return value
-            elif isinstance(value, dict):
-                result = search_dict(value, f"{path}{key}.")
+        # 일반적인 RunPod 구조들
+        common_paths = [
+            ['job', 'input'],
+            ['data', 'input'],
+            ['payload', 'input'],
+            ['body', 'input'],
+            ['request', 'input']
+        ]
+        
+        for path in common_paths:
+            current = data
+            for key in path:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    break
+            else:
+                return current
+    
+    # 재귀적 탐색
+    def recursive_search(obj, target_keys=['input', 'url', 'image_url', 'imageUrl']):
+        if isinstance(obj, dict):
+            for key in target_keys:
+                if key in obj:
+                    return obj[key]
+            
+            for value in obj.values():
+                result = recursive_search(value, target_keys)
+                if result:
+                    return result
+        elif isinstance(obj, list):
+            for item in obj:
+                result = recursive_search(item, target_keys)
                 if result:
                     return result
         
         return None
     
-    # Search main event
-    result = search_dict(event)
-    if result:
-        return result
-    
-    # If not found, dump structure for debugging
-    print("No image data found - dumping structure")
-    print(f"Event type: {type(event)}")
-    print(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not dict'}")
-    if isinstance(event, dict):
-        for key, value in event.items():
-            if isinstance(value, dict):
-                print(f"  {key}: {list(value.keys())}")
-            elif isinstance(value, str):
-                print(f"  {key}: string (length: {len(value)})")
-            else:
-                print(f"  {key}: {type(value)}")
-    
-    return None
+    result = recursive_search(data)
+    print(f"재귀 탐색 결과: {result}")
+    return result
 
-def enhance_professional_style(image):
-    """Professional jewelry photography style enhancement"""
-    # Convert to LAB for better color control
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l_channel, a_channel, b_channel = cv2.split(lab)
+def download_image_from_url(url):
+    """URL에서 이미지를 다운로드하여 PIL Image 객체로 반환"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
+    }
     
-    # Brighten the L channel significantly (professional white background)
-    l_channel = cv2.add(l_channel, 40)
-    l_channel = cv2.normalize(l_channel, None, 0, 255, cv2.NORM_MINMAX)
-    
-    # Apply CLAHE for better contrast
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    l_channel = clahe.apply(l_channel)
-    
-    # Merge back
-    enhanced_lab = cv2.merge([l_channel, a_channel, b_channel])
-    enhanced_bgr = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
-    
-    # Convert to PIL for final adjustments
-    pil_img = Image.fromarray(cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB))
-    
-    # Professional style adjustments
-    # Brightness - make it really bright like studio photos
-    enhancer = ImageEnhance.Brightness(pil_img)
-    pil_img = enhancer.enhance(1.25)
-    
-    # Contrast - subtle increase
-    enhancer = ImageEnhance.Contrast(pil_img)
-    pil_img = enhancer.enhance(1.15)
-    
-    # Color - slightly desaturate for clean look
-    enhancer = ImageEnhance.Color(pil_img)
-    pil_img = enhancer.enhance(0.95)
-    
-    # Sharpness - enhance details
-    enhancer = ImageEnhance.Sharpness(pil_img)
-    pil_img = enhancer.enhance(1.2)
-    
-    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-
-def handler(job):
-    """RunPod handler function"""
-    print(f"=== Enhancement Handler {VERSION} Started ===")
-    
-    try:
-        # Find base64 data
-        img_data = find_input_data(job)
-        if not img_data:
-            print(f"ERROR: No image data found in job structure")
-            print(f"Job type: {type(job)}")
-            print(f"Job keys: {list(job.keys()) if isinstance(job, dict) else 'Not dict'}")
-            
-            # Deep structure dump
-            if isinstance(job, dict):
-                for key, value in job.items():
-                    print(f"\n--- Key: {key} ---")
-                    if isinstance(value, dict):
-                        print(f"  Type: dict, Keys: {list(value.keys())}")
-                        for k, v in value.items():
-                            if isinstance(v, str):
-                                print(f"    {k}: string (length: {len(v)}, starts: {v[:50]}...)")
-                            elif isinstance(v, dict):
-                                print(f"    {k}: dict with keys: {list(v.keys())}")
-                            else:
-                                print(f"    {k}: {type(v)}")
-                    elif isinstance(value, str):
-                        print(f"  Type: string (length: {len(value)}, starts: {value[:50]}...)")
-                    else:
-                        print(f"  Type: {type(value)}")
-            
-            return {
-                "output": {
-                    "error": "No image data found in any known location",
-                    "success": False,
-                    "version": VERSION,
-                    "checked_structure": True
-                }
-            }
-        
-        print(f"Found image data, length: {len(img_data)}")
-        
-        # Clean base64 data
-        if img_data.startswith('data:'):
-            img_data = img_data.split(',')[1]
-        
-        # Add padding for decoding if needed
-        padding = 4 - (len(img_data) % 4)
-        if padding != 4:
-            img_data += '=' * padding
-        
-        # Decode image
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            img_bytes = base64.b64decode(img_data)
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
             
-            if img is None:
-                raise ValueError("Failed to decode image")
-                
+            # 컨텐츠 타입 확인
+            content_type = response.headers.get('content-type', '')
+            if 'image' not in content_type and not url.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                print(f"경고: 이미지가 아닌 컨텐츠 타입: {content_type}")
+            
+            return Image.open(BytesIO(response.content))
+            
         except Exception as e:
-            print(f"Decode error: {str(e)}")
-            return {
-                "output": {
-                    "error": f"Failed to decode image: {str(e)}",
-                    "success": False,
-                    "version": VERSION
-                }
-            }
+            print(f"다운로드 시도 {attempt + 1}/{max_retries} 실패: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+            else:
+                raise
+
+def enhance_image(image):
+    """이미지 향상 처리 - 밝고 깨끗한 느낌으로"""
+    img_array = np.array(image)
+    
+    # 1. 전체적인 밝기 증가
+    brightness_enhancer = ImageEnhance.Brightness(image)
+    image = brightness_enhancer.enhance(1.3)
+    
+    # 2. LAB 색공간에서 명도 조절
+    img_array = np.array(image)
+    lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+    
+    # L 채널(명도) 향상
+    l = cv2.add(l, 30)
+    l = np.clip(l, 0, 255)
+    
+    # 다시 합치기
+    lab = cv2.merge([l, a, b])
+    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    
+    # 3. 하이라이트 부분 더 밝게
+    hsv = cv2.cvtColor(enhanced, cv2.COLOR_RGB2HSV).astype(np.float32)
+    h, s, v = cv2.split(hsv)
+    
+    # 밝은 부분을 더 밝게
+    v = np.where(v > 180, v * 1.1, v)
+    v = np.clip(v, 0, 255)
+    
+    # 채도 약간 감소 (더 깨끗한 느낌)
+    s = s * 0.85
+    
+    hsv = cv2.merge([h, s, v]).astype(np.uint8)
+    enhanced = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    
+    # 4. 감마 보정으로 전체적으로 밝게
+    gamma = 0.8
+    inv_gamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+    enhanced = cv2.LUT(enhanced, table)
+    
+    # 5. 약간의 블러로 부드럽게
+    enhanced = cv2.GaussianBlur(enhanced, (3, 3), 0)
+    
+    # 6. 샤프닝
+    kernel = np.array([[-1,-1,-1],
+                       [-1, 9,-1],
+                       [-1,-1,-1]])
+    enhanced = cv2.filter2D(enhanced, -1, kernel)
+    
+    # PIL Image로 변환
+    result_image = Image.fromarray(enhanced)
+    
+    # 7. 최종 밝기와 대비 미세 조정
+    brightness = ImageEnhance.Brightness(result_image)
+    result_image = brightness.enhance(1.1)
+    
+    contrast = ImageEnhance.Contrast(result_image)
+    result_image = contrast.enhance(1.05)
+    
+    return result_image
+
+def detect_ring_color(image):
+    """반지 색상 감지 - 무도금화이트 우선 감지"""
+    img_array = np.array(image)
+    hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+    
+    # 이미지 중앙 부분만 분석 (반지가 있을 가능성이 높은 부분)
+    h, w = hsv.shape[:2]
+    center_region = hsv[h//4:3*h//4, w//4:3*w//4]
+    
+    # 각 색상별 픽셀 수 계산
+    color_pixels = {}
+    
+    # 1. 무도금화이트 우선 체크 (넓은 범위)
+    white_mask = cv2.inRange(center_region, 
+                            np.array([0, 0, 180]),      # 매우 밝은 영역
+                            np.array([180, 30, 255]))    # 채도 낮음
+    color_pixels['white'] = cv2.countNonZero(white_mask)
+    
+    # 2. 옐로우골드
+    yellow_mask = cv2.inRange(center_region,
+                             np.array([20, 50, 100]),
+                             np.array([30, 255, 255]))
+    color_pixels['yellow'] = cv2.countNonZero(yellow_mask)
+    
+    # 3. 로즈골드
+    rose_mask = cv2.inRange(center_region,
+                           np.array([0, 30, 100]),
+                           np.array([15, 150, 255]))
+    color_pixels['rose'] = cv2.countNonZero(rose_mask)
+    
+    # 4. 화이트골드
+    white_gold_mask = cv2.inRange(center_region,
+                                 np.array([0, 0, 150]),
+                                 np.array([180, 40, 230]))
+    color_pixels['white_gold'] = cv2.countNonZero(white_gold_mask)
+    
+    # 무도금화이트가 전체의 70% 이상이면 무도금화이트로 판정
+    total_pixels = center_region.shape[0] * center_region.shape[1]
+    if color_pixels['white'] > total_pixels * 0.7:
+        return '무도금화이트'
+    
+    # 그 외의 경우 가장 많은 픽셀 수를 가진 색상 선택
+    detected_color = max(color_pixels.items(), key=lambda x: x[1])[0]
+    
+    color_map = {
+        'yellow': '옐로우골드',
+        'rose': '로즈골드',
+        'white_gold': '화이트골드',
+        'white': '무도금화이트'
+    }
+    
+    return color_map.get(detected_color, '무도금화이트')
+
+def image_to_base64(image, format='JPEG'):
+    """PIL Image를 base64 문자열로 변환"""
+    buffered = BytesIO()
+    if format == 'JPEG' and image.mode == 'RGBA':
+        rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+        rgb_image.paste(image, mask=image.split()[3])
+        image = rgb_image
+    
+    image.save(buffered, format=format, quality=95)
+    img_base64 = base64.b64encode(buffered.getvalue()).decode()
+    
+    # Make.com을 위해 padding 제거
+    img_base64_no_padding = img_base64.rstrip('=')
+    
+    print(f"Base64 길이 (padding 제거): {len(img_base64_no_padding)}")
+    
+    return img_base64_no_padding
+
+def handler(event):
+    """Enhancement 핸들러 함수"""
+    try:
+        print("Enhancement 이벤트 수신:", json.dumps(event, indent=2)[:500])
         
-        print(f"Image decoded: {img.shape}")
+        # 입력 데이터 찾기
+        input_data = find_input_data(event)
         
-        # Apply professional enhancement
-        enhanced = enhance_professional_style(img)
+        if not input_data:
+            raise ValueError("입력 데이터를 찾을 수 없습니다")
         
-        # Encode result
-        _, buffer = cv2.imencode('.jpg', enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        enhanced_base64 = base64.b64encode(buffer).decode('utf-8')
+        # URL 추출
+        image_url = None
+        if isinstance(input_data, dict):
+            image_url = input_data.get('url') or input_data.get('image_url') or input_data.get('imageUrl')
+        elif isinstance(input_data, str):
+            image_url = input_data
         
-        # Remove padding for Make.com
-        enhanced_base64 = enhanced_base64.rstrip('=')
+        if not image_url:
+            raise ValueError(f"이미지 URL을 찾을 수 없습니다. 입력: {input_data}")
         
-        # Create data URL
-        result_url = f"data:image/jpeg;base64,{enhanced_base64}"
+        print(f"이미지 URL: {image_url}")
         
+        # 이미지 다운로드
+        image = download_image_from_url(image_url)
+        print(f"이미지 다운로드 완료: {image.size}")
+        
+        # 색상 감지
+        detected_color = detect_ring_color(image)
+        print(f"감지된 반지 색상: {detected_color}")
+        
+        # 이미지 향상
+        enhanced_image = enhance_image(image)
+        print("이미지 향상 완료")
+        
+        # base64 변환 (padding 제거)
+        enhanced_base64 = image_to_base64(enhanced_image)
+        
+        # 중첩된 output 구조로 반환
         return {
             "output": {
-                "enhanced_image": result_url,
-                "success": True,
-                "version": VERSION,
-                "message": "Professional enhancement applied successfully"
+                "enhanced_image": enhanced_base64,
+                "detected_color": detected_color,
+                "original_size": image.size,
+                "format": "base64_no_padding"
             }
         }
         
     except Exception as e:
-        print(f"Handler error: {str(e)}")
-        print(traceback.format_exc())
+        print(f"Enhancement 오류 발생: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
         return {
             "output": {
                 "error": str(e),
-                "success": False,
-                "version": VERSION,
-                "traceback": traceback.format_exc()
+                "status": "failed"
             }
         }
 
+# RunPod 핸들러 등록
 runpod.serverless.start({"handler": handler})
