@@ -6,6 +6,7 @@ from PIL import Image, ImageEnhance
 import cv2
 import traceback
 
+
 VERSION = "enhancement_v50"
 print(f"{VERSION} starting...")
 
