@@ -151,17 +151,17 @@ def detect_jewelry_color(image: Image.Image) -> str:
     
     return "white_gold"
 
-def apply_color_enhancement_v60(image: Image.Image, jewelry_color: str) -> Image.Image:
-    """Apply V60 color enhancement with updated values"""
+def apply_color_enhancement_v61(image: Image.Image, jewelry_color: str) -> Image.Image:
+    """Apply V61 color enhancement - Natural tone like image 2"""
     # Convert to numpy array
     img_array = np.array(image).astype(np.float32) / 255.0
     
-    # V60 specific adjustments
-    brightness = 1.45  # 45% brightness increase
+    # V61 specific adjustments - more natural tone
+    brightness = 1.25  # Reduced from 1.45 to 1.25
     contrast = 1.05
-    gamma = 0.6
-    saturation_factor = 0.65  # 35% saturation decrease
-    additional_brightness = 0.02  # 2% additional brightness
+    gamma = 0.8  # Increased from 0.6 to 0.8 for more natural look
+    saturation_factor = 0.8  # Reduced from 0.65 to 0.8 (20% reduction instead of 35%)
+    # No additional brightness
     
     # Apply brightness
     img_array = img_array * brightness
@@ -181,29 +181,26 @@ def apply_color_enhancement_v60(image: Image.Image, jewelry_color: str) -> Image
     img_array_uint8 = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
     img_array = img_array_uint8.astype(np.float32) / 255.0
     
-    # Apply additional brightness
-    img_array = img_array + additional_brightness
-    
-    # Apply background brightening using LAB color space
+    # Apply subtle background brightening using LAB color space
     lab = cv2.cvtColor((img_array * 255).astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
-    lab[:,:,0] = lab[:,:,0] * 1.1  # Increase L channel (lightness)
+    lab[:,:,0] = lab[:,:,0] * 1.05  # Reduced from 1.1 to 1.05
     lab = np.clip(lab, 0, 255)
     img_array = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB).astype(np.float32) / 255.0
     
-    # Color-specific adjustments
+    # Color-specific adjustments (more subtle)
     if jewelry_color == "yellow_gold":
         # Subtle warm enhancement
-        img_array[:,:,0] *= 1.02  # Red
-        img_array[:,:,1] *= 1.01  # Green
+        img_array[:,:,0] *= 1.01  # Red (reduced from 1.02)
+        img_array[:,:,1] *= 1.005  # Green (reduced from 1.01)
     elif jewelry_color == "rose_gold":
         # Subtle rose enhancement
-        img_array[:,:,0] *= 1.03  # Red
-        img_array[:,:,1] *= 0.98  # Slight green reduction
+        img_array[:,:,0] *= 1.02  # Red (reduced from 1.03)
+        img_array[:,:,1] *= 0.99  # Slight green reduction
     elif jewelry_color == "white_plain":
-        # Extra brightness for white
-        img_array = img_array * 1.05
+        # Slight brightness for white (not too much)
+        img_array = img_array * 1.02  # Reduced from 1.05
         # Cool tone
-        img_array[:,:,2] *= 1.02  # Slight blue enhancement
+        img_array[:,:,2] *= 1.01  # Slight blue enhancement
     
     # Final clipping
     img_array = np.clip(img_array, 0, 1)
@@ -212,27 +209,32 @@ def apply_color_enhancement_v60(image: Image.Image, jewelry_color: str) -> Image
     img_array = (img_array * 255).astype(np.uint8)
     return Image.fromarray(img_array)
 
-def handler(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Main handler function for RunPod"""
+def handler(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Main handler function for RunPod - Fixed parameter name"""
     try:
-        print(f"Enhancement V60 received event: {json.dumps(event, indent=2)[:500]}...")
+        # Get job input
+        job_input = job.get("input", {})
+        print(f"Enhancement V61 received input: {json.dumps(job_input, indent=2)[:500]}...")
         
         # Find input data
-        input_data = find_input_data(event)
+        input_data = find_input_data(job_input)
+        
+        # If not found in job_input, try the whole job dict
+        if not input_data:
+            input_data = find_input_data(job)
         
         if not input_data:
-            # Try direct access for RunPod structure
-            if 'input' in event and isinstance(event['input'], dict):
-                input_data = event['input'].get('image') or event['input'].get('image_base64')
-            
-            if not input_data:
-                print("Failed to find input data. Event structure:")
-                print(json.dumps(event, indent=2)[:1000])
+            # Last resort - check if job_input itself is the image data
+            if isinstance(job_input, str) and len(job_input) > 100:
+                input_data = job_input
+            else:
+                print("Failed to find input data. Job structure:")
+                print(json.dumps(job, indent=2)[:1000])
                 return {
                     "output": {
                         "error": "No input image found",
                         "status": "failed",
-                        "version": "v60"
+                        "version": "v61"
                     }
                 }
         
@@ -250,7 +252,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 image = base64_to_image(input_data)
         elif isinstance(input_data, dict):
             # Check for various possible keys
-            for key in ['image_base64', 'imageBase64', 'image', 'base64', 'data']:
+            for key in ['image_base64', 'imageBase64', 'image', 'base64', 'data', 'url']:
                 if key in input_data and isinstance(input_data[key], str):
                     print(f"Loading from dict key: {key}")
                     if input_data[key].startswith('http'):
@@ -264,7 +266,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 "output": {
                     "error": "Failed to load image from input",
                     "status": "failed",
-                    "version": "v60"
+                    "version": "v61"
                 }
             }
         
@@ -274,8 +276,8 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         jewelry_color = detect_jewelry_color(image)
         print(f"Detected jewelry color: {jewelry_color}")
         
-        # Apply V60 enhancement
-        enhanced_image = apply_color_enhancement_v60(image, jewelry_color)
+        # Apply V61 enhancement (natural tone)
+        enhanced_image = apply_color_enhancement_v61(image, jewelry_color)
         print("Enhancement applied successfully")
         
         # Convert to base64
@@ -294,13 +296,13 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 "detected_color": jewelry_color,
                 "original_size": list(image.size),
                 "enhanced_size": list(enhanced_image.size),
-                "version": "v60_complete",
+                "version": "v61_natural",
                 "status": "success"
             }
         }
         
     except Exception as e:
-        print(f"Error in Enhancement V60: {str(e)}")
+        print(f"Error in Enhancement V61: {str(e)}")
         import traceback
         traceback.print_exc()
         
@@ -308,7 +310,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             "output": {
                 "error": str(e),
                 "status": "failed",
-                "version": "v60",
+                "version": "v61",
                 "traceback": traceback.format_exc()
             }
         }
