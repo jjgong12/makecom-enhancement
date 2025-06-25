@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V70-Optimized"
+VERSION = "V71-Brighter"
 
 def decode_base64_safe(base64_str: str) -> bytes:
     """Safely decode base64 with automatic padding correction"""
@@ -73,14 +73,14 @@ def detect_ring_color(image: Image.Image) -> str:
     logger.info(f"Detected color: {color}")
     return color
 
-def create_center_focus_mask(image: Image.Image, focus_strength: float = 0.15) -> np.ndarray:
-    """Create subtle center focus mask"""
+def create_center_focus_mask(image: Image.Image, focus_strength: float = 0.1) -> np.ndarray:
+    """Create very subtle center focus mask"""
     width, height = image.size
     y, x = np.ogrid[:height, :width]
     center_x, center_y = width / 2, height / 2
     
     dist = np.sqrt((x - center_x)**2 + (y - center_y)**2)
-    max_dist = np.sqrt(center_x**2 + center_y**2) * 0.7
+    max_dist = np.sqrt(center_x**2 + center_y**2) * 0.8
     
     mask = 1 - (dist / max_dist) * focus_strength
     mask = np.clip(mask, 1 - focus_strength, 1)
@@ -100,48 +100,62 @@ def enhance_wedding_ring_image(image_input: str) -> tuple:
     # Detect color
     detected_color = detect_ring_color(image)
     
-    # Basic enhancement
+    # Basic enhancement - Brighter overall
     brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.15 if detected_color == "무도금화이트" else 1.08)
+    image = brightness.enhance(1.2 if detected_color == "무도금화이트" else 1.12)
     
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.05)
+    image = contrast.enhance(1.08)
     
     color = ImageEnhance.Color(image)
-    image = color.enhance(0.7 if detected_color == "무도금화이트" else 1.02)
+    image = color.enhance(0.8 if detected_color == "무도금화이트" else 1.05)
     
-    # Apply center focus
+    # Apply very subtle center focus
     img_array = np.array(image)
-    focus_mask = create_center_focus_mask(image, 0.15)
+    focus_mask = create_center_focus_mask(image, 0.1)
     for i in range(3):
         img_array[:, :, i] = img_array[:, :, i] * focus_mask
     image = Image.fromarray(img_array.astype(np.uint8))
     
     # Color-specific enhancement
     if detected_color == "무도금화이트":
-        # Pure white enhancement
+        # Pure white enhancement - make it brighter
         img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2LAB)
         l, a, b = cv2.split(img_cv)
         
-        l = cv2.multiply(l, 1.15)
+        l = cv2.multiply(l, 1.1)  # Less aggressive
         l = np.clip(l, 0, 255)
-        a = cv2.multiply(a, 0.7)
-        b = cv2.multiply(b, 0.7)
+        a = cv2.multiply(a, 0.8)
+        b = cv2.multiply(b, 0.8)
         
         img_cv = cv2.merge([l, a, b])
         img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_LAB2RGB)
         image = Image.fromarray(img_rgb)
         
+        # Additional brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.1)
+        image = brightness.enhance(1.05)
         
-        # Remove yellow tint
+        # Slight blue tint to remove yellow
         img_array = np.array(image)
-        img_array[:, :, 2] = np.clip(img_array[:, :, 2] * 1.05, 0, 255)
+        img_array[:, :, 2] = np.clip(img_array[:, :, 2] * 1.03, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
     
-    # Final sharpening
-    image = image.filter(ImageFilter.UnsharpMask(radius=1, percent=50, threshold=3))
+    elif detected_color == "옐로우골드":
+        # Warm golden enhancement
+        img_array = np.array(image)
+        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.05, 0, 255)
+        img_array[:, :, 1] = np.clip(img_array[:, :, 1] * 1.03, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+        
+    elif detected_color == "로즈골드":
+        # Rose gold enhancement
+        img_array = np.array(image)
+        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.08, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+    
+    # Final sharpening - lighter touch
+    image = image.filter(ImageFilter.UnsharpMask(radius=1, percent=40, threshold=3))
     
     # Create thumbnail
     thumbnail = create_thumbnail(image)
