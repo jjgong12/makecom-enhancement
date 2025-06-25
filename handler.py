@@ -1,256 +1,317 @@
-import json
 import runpod
 import base64
 import requests
 import time
-from io import BytesIO
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+import json
 import numpy as np
+from PIL import Image, ImageEnhance
+import io
+import cv2
+from typing import Optional, Dict, Any, Union
 
-def find_input_data(data):
-    """재귀적으로 모든 가능한 경로에서 입력 데이터 찾기"""
+def find_input_data(data: Dict[str, Any]) -> Optional[Union[str, Dict]]:
+    """Find input data from various possible locations"""
     
-    # 전체 구조 로깅 (디버깅용)
-    print(f"전체 입력 데이터 구조: {json.dumps(data, indent=2)[:1000]}")
-    
-    # 직접 접근 시도
+    # Direct check for common keys
     if isinstance(data, dict):
-        # 최상위 레벨 체크
+        # Check for image_base64 first (most common)
+        if 'image_base64' in data:
+            return data['image_base64']
+        if 'imageBase64' in data:
+            return data['imageBase64']
+        
+        # Check for image/base64 keys
+        if 'image' in data:
+            return data['image']
+        if 'base64' in data:
+            return data['base64']
+        
+        # Check for URL keys
+        if 'url' in data:
+            return data['url']
+        if 'image_url' in data:
+            return data['image_url']
+        if 'imageUrl' in data:
+            return data['imageUrl']
+            
+        # Check input sub-object
         if 'input' in data:
-            return data['input']
-        
-        # 일반적인 RunPod 구조들
-        common_paths = [
-            ['job', 'input'],
-            ['data', 'input'],
-            ['payload', 'input'],
-            ['body', 'input'],
-            ['request', 'input']
-        ]
-        
-        for path in common_paths:
-            current = data
-            for key in path:
-                if isinstance(current, dict) and key in current:
-                    current = current[key]
-                else:
-                    break
-            else:
-                return current
-    
-    # 재귀적 탐색 - image_base64도 찾기
-    def recursive_search(obj, target_keys=['input', 'url', 'image_url', 'imageUrl', 'image_base64', 'imageBase64']):
-        if isinstance(obj, dict):
-            for key in target_keys:
-                if key in obj:
-                    return obj[key] if key == 'input' else {key: obj[key]}
-            
-            for value in obj.values():
-                result = recursive_search(value, target_keys)
+            result = find_input_data(data['input'])
+            if result:
+                return result
+                
+        # Check job structure
+        if 'job' in data and isinstance(data['job'], dict):
+            if 'input' in data['job']:
+                result = find_input_data(data['job']['input'])
                 if result:
                     return result
-        elif isinstance(obj, list):
-            for item in obj:
-                result = recursive_search(item, target_keys)
+                    
+        # Check numbered keys (Make.com structure)
+        for i in range(10):
+            key = str(i)
+            if key in data:
+                result = find_input_data(data[key])
                 if result:
                     return result
-        
-        return None
-    
-    result = recursive_search(data)
-    print(f"재귀 탐색 결과: {result}")
-    return result
+                    
+        # Deep search in nested structures
+        for key, value in data.items():
+            if isinstance(value, dict):
+                # Skip 'output' to avoid circular references
+                if key != 'output':
+                    result = find_input_data(value)
+                    if result:
+                        return result
+                        
+    return None
 
-def download_image_from_url(url):
-    """URL에서 이미지를 다운로드하여 PIL Image 객체로 반환"""
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
-    }
+def download_image_from_url(url: str) -> Image.Image:
+    """Download image from URL with retries"""
+    headers_list = [
+        {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
+        {'User-Agent': 'Python-Requests/2.31.0'},
+        {}
+    ]
     
-    max_retries = 3
-    for attempt in range(max_retries):
+    for headers in headers_list:
         try:
-            response = requests.get(url, headers=headers, timeout=30)
+            response = requests.get(url, headers=headers, timeout=30, stream=True)
             response.raise_for_status()
-            
-            # 컨텐츠 타입 확인
-            content_type = response.headers.get('content-type', '')
-            if 'image' not in content_type and not url.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                print(f"경고: 이미지가 아닌 컨텐츠 타입: {content_type}")
-            
-            return Image.open(BytesIO(response.content))
-            
+            return Image.open(io.BytesIO(response.content)).convert('RGB')
         except Exception as e:
-            print(f"다운로드 시도 {attempt + 1}/{max_retries} 실패: {str(e)}")
-            if attempt < max_retries - 1:
-                time.sleep(2)
-            else:
-                raise
+            print(f"Failed with headers {headers}: {e}")
+            continue
+            
+    raise ValueError(f"Failed to download image from URL: {url}")
 
-def base64_to_image(base64_string):
-    """Base64 문자열을 PIL Image로 변환"""
-    # padding 복원
-    padding = 4 - len(base64_string) % 4
+def base64_to_image(base64_str: str) -> Image.Image:
+    """Convert base64 string to PIL Image with padding fix"""
+    # Remove data URL prefix if present
+    if 'base64,' in base64_str:
+        base64_str = base64_str.split('base64,')[1]
+    
+    # Fix padding if needed
+    padding = 4 - len(base64_str) % 4
     if padding != 4:
-        base64_string += '=' * padding
+        base64_str += '=' * padding
     
-    # data URL 형식 처리
-    if ',' in base64_string:
-        base64_string = base64_string.split(',')[1]
-    
-    img_data = base64.b64decode(base64_string)
-    return Image.open(BytesIO(img_data))
+    image_data = base64.b64decode(base64_str)
+    return Image.open(io.BytesIO(image_data)).convert('RGB')
 
-def enhance_image_brightness(image):
-    """이미지의 전체적인 색감을 밝고 하얗게 보정 (자연스러운 버전)"""
-    # RGB로 변환 (RGBA인 경우)
-    if image.mode == 'RGBA':
-        # 흰색 배경에 합성
-        background = Image.new('RGB', image.size, (255, 255, 255))
-        background.paste(image, mask=image.split()[3])
-        image = background
-    elif image.mode != 'RGB':
-        image = image.convert('RGB')
-    
-    # 1단계: 전체적으로 밝게 (35%)
-    brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.35)  # 35% 밝게
-    
-    # 2단계: 대비 약간 감소로 부드럽게
-    contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(0.9)  # 10% 대비 감소
-    
-    # 3단계: 채도 감소 (더 하얗게)
-    color = ImageEnhance.Color(image)
-    image = color.enhance(0.7)  # 30% 채도 감소
-    
-    # 4단계: 하이라이트 강화
+def detect_jewelry_color(image: Image.Image) -> str:
+    """Detect jewelry color type with improved logic"""
+    # Convert PIL Image to numpy array
     img_array = np.array(image)
     
-    # RGB 각 채널별로 처리
-    for i in range(3):
-        channel = img_array[:, :, i].astype(np.float32) / 255.0
-        
-        # 감마 보정 (밝은 톤 강화) - 0.7로 변경
-        channel = np.power(channel, 0.7)  # 감마 0.6 → 0.7
-        
-        # 밝은 영역 추가 강화 (적당히)
-        channel = np.where(channel > 0.6, 
-                          channel + (1 - channel) * 0.15,  # 밝은 부분 15% 더 밝게
-                          channel * 1.05)  # 어두운 부분 5% 밝게
-        
-        # 클리핑
-        channel = np.clip(channel, 0, 1)
-        img_array[:, :, i] = (channel * 255).astype(np.uint8)
+    # Get center region
+    h, w = img_array.shape[:2]
+    center_y, center_x = h // 2, w // 2
+    region_size = min(h, w) // 3
     
-    # 5단계: 화이트 오버레이 제거 (0%)
-    # white_overlay = np.ones_like(img_array) * 255
-    # alpha = 0.00  # 0% 흰색 오버레이 (제거)
-    # img_array = (img_array * (1 - alpha) + white_overlay * alpha).astype(np.uint8)
+    center_region = img_array[
+        center_y - region_size:center_y + region_size,
+        center_x - region_size:center_x + region_size
+    ]
     
-    # PIL Image로 변환
-    enhanced_image = Image.fromarray(img_array)
+    # Convert to HSV
+    hsv = cv2.cvtColor(center_region, cv2.COLOR_RGB2HSV)
     
-    # 6단계: 추가 밝기 조정 (5%)
-    brightness2 = ImageEnhance.Brightness(enhanced_image)
-    enhanced_image = brightness2.enhance(1.05)  # 추가 5% 밝게
+    # Define color ranges (무도금화이트 우선 감지)
+    white_mask = cv2.inRange(hsv, np.array([0, 0, 200]), np.array([180, 30, 255]))
+    yellow_mask = cv2.inRange(hsv, np.array([15, 50, 100]), np.array([35, 255, 255]))
+    rose_mask = cv2.inRange(hsv, np.array([0, 30, 100]), np.array([15, 255, 255]))
     
-    # 7단계: 샤프니스
-    sharpness = ImageEnhance.Sharpness(enhanced_image)
-    enhanced_image = sharpness.enhance(1.1)  # 10% 선명도 증가
+    # Count pixels
+    white_pixels = cv2.countNonZero(white_mask)
+    yellow_pixels = cv2.countNonZero(yellow_mask)
+    rose_pixels = cv2.countNonZero(rose_mask)
+    total_pixels = center_region.shape[0] * center_region.shape[1]
     
-    return enhanced_image
+    # Priority detection - 무도금화이트 first
+    if white_pixels > total_pixels * 0.5:
+        return "white_plain"
+    
+    # Check average brightness in center
+    gray = cv2.cvtColor(center_region, cv2.COLOR_RGB2GRAY)
+    avg_brightness = np.mean(gray)
+    
+    if avg_brightness > 200 and white_pixels > total_pixels * 0.3:
+        return "white_plain"
+    
+    # Other colors
+    if yellow_pixels > rose_pixels and yellow_pixels > total_pixels * 0.1:
+        # Double check it's really yellow
+        avg_b, avg_g, avg_r = np.mean(center_region, axis=(0, 1))
+        if avg_r > avg_b and avg_g > avg_b:
+            return "yellow_gold"
+    
+    if rose_pixels > yellow_pixels and rose_pixels > total_pixels * 0.1:
+        return "rose_gold"
+    
+    return "white_gold"
 
-def image_to_base64(image, format='JPEG'):
-    """PIL Image를 base64 문자열로 변환"""
-    buffered = BytesIO()
-    if format == 'JPEG' and image.mode == 'RGBA':
-        rgb_image = Image.new('RGB', image.size, (255, 255, 255))
-        rgb_image.paste(image, mask=image.split()[3])
-        image = rgb_image
+def apply_color_enhancement_v60(image: Image.Image, jewelry_color: str) -> Image.Image:
+    """Apply V60 color enhancement with updated values"""
+    # Convert to numpy array
+    img_array = np.array(image).astype(np.float32) / 255.0
     
-    image.save(buffered, format=format, quality=95)
-    img_base64 = base64.b64encode(buffered.getvalue()).decode()
+    # V60 specific adjustments
+    brightness = 1.45  # 45% brightness increase
+    contrast = 1.05
+    gamma = 0.6
+    saturation_factor = 0.65  # 35% saturation decrease
+    additional_brightness = 0.02  # 2% additional brightness
     
-    # Make.com을 위해 padding 제거
-    img_base64_no_padding = img_base64.rstrip('=')
+    # Apply brightness
+    img_array = img_array * brightness
     
-    print(f"Base64 길이 (padding 제거): {len(img_base64_no_padding)}")
+    # Apply contrast
+    img_array = (img_array - 0.5) * contrast + 0.5
     
-    return img_base64_no_padding
+    # Apply gamma correction
+    img_array = np.power(np.clip(img_array, 0, 1), gamma)
+    
+    # Apply saturation adjustment
+    # Convert to HSV for saturation control
+    img_array_uint8 = np.clip(img_array * 255, 0, 255).astype(np.uint8)
+    hsv = cv2.cvtColor(img_array_uint8, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hsv[:,:,1] = hsv[:,:,1] * saturation_factor  # Reduce saturation
+    hsv = np.clip(hsv, 0, 255)
+    img_array_uint8 = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+    img_array = img_array_uint8.astype(np.float32) / 255.0
+    
+    # Apply additional brightness
+    img_array = img_array + additional_brightness
+    
+    # Apply background brightening using LAB color space
+    lab = cv2.cvtColor((img_array * 255).astype(np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32)
+    lab[:,:,0] = lab[:,:,0] * 1.1  # Increase L channel (lightness)
+    lab = np.clip(lab, 0, 255)
+    img_array = cv2.cvtColor(lab.astype(np.uint8), cv2.COLOR_LAB2RGB).astype(np.float32) / 255.0
+    
+    # Color-specific adjustments
+    if jewelry_color == "yellow_gold":
+        # Subtle warm enhancement
+        img_array[:,:,0] *= 1.02  # Red
+        img_array[:,:,1] *= 1.01  # Green
+    elif jewelry_color == "rose_gold":
+        # Subtle rose enhancement
+        img_array[:,:,0] *= 1.03  # Red
+        img_array[:,:,1] *= 0.98  # Slight green reduction
+    elif jewelry_color == "white_plain":
+        # Extra brightness for white
+        img_array = img_array * 1.05
+        # Cool tone
+        img_array[:,:,2] *= 1.02  # Slight blue enhancement
+    
+    # Final clipping
+    img_array = np.clip(img_array, 0, 1)
+    
+    # Convert back to PIL Image
+    img_array = (img_array * 255).astype(np.uint8)
+    return Image.fromarray(img_array)
 
-def handler(event):
-    """Enhancement 핸들러 함수"""
+def handler(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Main handler function for RunPod"""
     try:
-        print("Enhancement 이벤트 수신:", json.dumps(event, indent=2)[:500])
+        print(f"Enhancement V60 received event: {json.dumps(event, indent=2)[:500]}...")
         
-        # 입력 데이터 찾기
+        # Find input data
         input_data = find_input_data(event)
         
         if not input_data:
-            raise ValueError("입력 데이터를 찾을 수 없습니다")
+            # Try direct access for RunPod structure
+            if 'input' in event and isinstance(event['input'], dict):
+                input_data = event['input'].get('image') or event['input'].get('image_base64')
+            
+            if not input_data:
+                print("Failed to find input data. Event structure:")
+                print(json.dumps(event, indent=2)[:1000])
+                return {
+                    "output": {
+                        "error": "No input image found",
+                        "status": "failed",
+                        "version": "v60"
+                    }
+                }
         
-        # 이미지 소스 확인 (URL 또는 Base64)
+        print(f"Found input data type: {type(input_data).__name__}")
+        
+        # Load image based on input type
         image = None
         
-        # Base64 입력 처리
-        if isinstance(input_data, dict):
-            if 'image_base64' in input_data or 'imageBase64' in input_data:
-                base64_str = input_data.get('image_base64') or input_data.get('imageBase64')
-                print("Base64 이미지 입력 감지")
-                image = base64_to_image(base64_str)
-            elif 'url' in input_data or 'image_url' in input_data or 'imageUrl' in input_data:
-                image_url = input_data.get('url') or input_data.get('image_url') or input_data.get('imageUrl')
-                print(f"URL 입력 감지: {image_url}")
-                image = download_image_from_url(image_url)
-        elif isinstance(input_data, str):
-            # 문자열인 경우 URL로 가정
+        if isinstance(input_data, str):
             if input_data.startswith('http'):
-                print(f"URL 문자열 입력: {input_data}")
+                print(f"Loading from URL: {input_data[:100]}...")
                 image = download_image_from_url(input_data)
             else:
-                # Base64 문자열로 가정
-                print("Base64 문자열 입력 감지")
+                print("Loading from base64 string")
                 image = base64_to_image(input_data)
+        elif isinstance(input_data, dict):
+            # Check for various possible keys
+            for key in ['image_base64', 'imageBase64', 'image', 'base64', 'data']:
+                if key in input_data and isinstance(input_data[key], str):
+                    print(f"Loading from dict key: {key}")
+                    if input_data[key].startswith('http'):
+                        image = download_image_from_url(input_data[key])
+                    else:
+                        image = base64_to_image(input_data[key])
+                    break
         
-        if not image:
-            raise ValueError(f"이미지를 로드할 수 없습니다. 입력: {input_data}")
+        if image is None:
+            return {
+                "output": {
+                    "error": "Failed to load image from input",
+                    "status": "failed",
+                    "version": "v60"
+                }
+            }
         
-        print(f"이미지 로드 완료: {image.size}")
+        print(f"Image loaded successfully: {image.size}")
         
-        # 원본 크기 저장
-        original_size = image.size
+        # Detect jewelry color
+        jewelry_color = detect_jewelry_color(image)
+        print(f"Detected jewelry color: {jewelry_color}")
         
-        # 이미지 향상 처리 (자연스러운 버전)
-        enhanced_image = enhance_image_brightness(image)
-        print("이미지 향상 처리 완료 (V58 자연스러운 버전)")
+        # Apply V60 enhancement
+        enhanced_image = apply_color_enhancement_v60(image, jewelry_color)
+        print("Enhancement applied successfully")
         
-        # base64 변환 (padding 제거)
-        enhanced_base64 = image_to_base64(enhanced_image)
+        # Convert to base64
+        buffered = io.BytesIO()
+        enhanced_image.save(buffered, format="PNG", quality=95)
+        enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
-        # 중첩된 output 구조로 반환
+        # Remove padding for Make.com
+        enhanced_base64_no_padding = enhanced_base64.rstrip('=')
+        print(f"Base64 length (no padding): {len(enhanced_base64_no_padding)}")
+        
+        # Return with proper structure
         return {
             "output": {
-                "enhanced_image": enhanced_base64,
-                "original_size": list(original_size),
+                "enhanced_image": enhanced_base64_no_padding,
+                "detected_color": jewelry_color,
+                "original_size": list(image.size),
                 "enhanced_size": list(enhanced_image.size),
-                "format": "base64_no_padding",
-                "enhancement_applied": "natural_brightness_whitening_v58"
+                "version": "v60_complete",
+                "status": "success"
             }
         }
         
     except Exception as e:
-        print(f"Enhancement 오류 발생: {str(e)}")
+        print(f"Error in Enhancement V60: {str(e)}")
         import traceback
         traceback.print_exc()
         
         return {
             "output": {
                 "error": str(e),
-                "status": "failed"
+                "status": "failed",
+                "version": "v60",
+                "traceback": traceback.format_exc()
             }
         }
 
-# RunPod 핸들러 등록
+# RunPod serverless handler
 runpod.serverless.start({"handler": handler})
