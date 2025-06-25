@@ -2,213 +2,179 @@ import json
 import base64
 import traceback
 from io import BytesIO
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from PIL import Image, ImageEnhance
-import numpy as np
+import time
 
-VERSION = "44"
+VERSION = "45"
 
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     """
     RunPod serverless handler for wedding ring image enhancement
-    v44: Fixed base64 handling and response structure
+    v45: Fixed infinite loop and timeout issues
     """
-    print(f"Enhancement Handler v{VERSION} starting...")
-    print(f"Event type: {type(event)}")
-    print(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
-    
-    enhancement_handler = EnhancementHandlerV44()
+    start_time = time.time()
+    print(f"Enhancement Handler v{VERSION} starting at {start_time}")
     
     try:
-        # Find base64 input using recursive search
-        input_base64 = enhancement_handler.find_string_recursive(event)
+        # Simple direct check first
+        input_base64 = None
+        
+        # Check most common locations first
+        if 'input' in event and isinstance(event['input'], dict):
+            if 'image_base64' in event['input']:
+                input_base64 = event['input']['image_base64']
+                print("Found in input.image_base64")
+            elif 'image' in event['input']:
+                input_base64 = event['input']['image']
+                print("Found in input.image")
+        
+        # Direct check
+        if not input_base64:
+            if 'image_base64' in event:
+                input_base64 = event['image_base64']
+                print("Found in image_base64")
+            elif 'image' in event:
+                input_base64 = event['image']
+                print("Found in image")
+        
+        # If still not found, do limited search
+        if not input_base64:
+            print("Doing limited search...")
+            input_base64 = find_base64_limited(event)
         
         if not input_base64:
             print("ERROR: No base64 data found")
-            print(f"Full event (first 1000 chars): {str(event)[:1000]}")
-            return enhancement_handler.create_error_response("No base64 input data found")
+            print(f"Event keys: {list(event.keys())}")
+            return {
+                "output": {
+                    "status": "error",
+                    "error": "No base64 input data found",
+                    "version": VERSION
+                }
+            }
         
-        print(f"Found base64 data, length: {len(input_base64)}")
+        print(f"Processing image, base64 length: {len(input_base64) if isinstance(input_base64, str) else 'unknown'}")
         
         # Process the image
-        result = enhancement_handler.process_image(input_base64)
+        result = process_image(input_base64)
         
-        print(f"Result keys: {list(result.get('output', {}).keys())}")
+        end_time = time.time()
+        print(f"Total processing time: {end_time - start_time:.2f} seconds")
+        
         return result
         
     except Exception as e:
         print(f"ERROR in handler: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
-        return enhancement_handler.create_error_response(f"Handler error: {str(e)}")
-
-
-class EnhancementHandlerV44:
-    def __init__(self):
-        self.version = VERSION
-        self.priority_keys = [
-            'image_base64', 'image', 'base64', 'image_data',
-            'input_image', 'input', 'data', 'enhanced_image',
-            'imageBase64', 'base64Image', 'img'
-        ]
-    
-    def find_string_recursive(self, obj: Any, path: str = "", depth: int = 0, max_depth: int = 10) -> Optional[str]:
-        """Recursively search for base64 string in nested structure"""
-        if depth > max_depth:
-            return None
-        
-        if isinstance(obj, str):
-            # Check if it's a data URL
-            if obj.startswith('data:image'):
-                print(f"Found data URL at path: {path}")
-                base64_part = obj.split(',')[1] if ',' in obj else obj
-                return base64_part
-            # Check if it's likely base64 (long string)
-            elif len(obj) > 1000:
-                # Check if it's not JSON
-                if not obj.strip().startswith('{') and not obj.strip().startswith('['):
-                    print(f"Found potential base64 at path: {path}, length: {len(obj)}")
-                    return obj
-        
-        elif isinstance(obj, dict):
-            # Check priority keys first
-            for key in self.priority_keys:
-                if key in obj:
-                    result = self.find_string_recursive(obj[key], f"{path}.{key}", depth + 1, max_depth)
-                    if result:
-                        return result
-            
-            # Check numbered keys (0-9)
-            for i in range(10):
-                key = str(i)
-                if key in obj:
-                    result = self.find_string_recursive(obj[key], f"{path}.{key}", depth + 1, max_depth)
-                    if result:
-                        return result
-            
-            # Check all other keys
-            for key, value in obj.items():
-                if key not in self.priority_keys and not key.isdigit():
-                    result = self.find_string_recursive(value, f"{path}.{key}", depth + 1, max_depth)
-                    if result:
-                        return result
-        
-        elif isinstance(obj, list):
-            for i, item in enumerate(obj):
-                result = self.find_string_recursive(item, f"{path}[{i}]", depth + 1, max_depth)
-                if result:
-                    return result
-        
-        return None
-    
-    def decode_base64_safe(self, base64_str: str) -> bytes:
-        """Safely decode base64 with automatic padding fix"""
-        try:
-            # Clean the input
-            base64_str = base64_str.strip()
-            
-            # Remove any whitespace or newlines
-            base64_str = ''.join(base64_str.split())
-            
-            # Remove data URL prefix if present
-            if 'base64,' in base64_str:
-                base64_str = base64_str.split('base64,')[1]
-            
-            # Try to decode as is first
-            try:
-                return base64.b64decode(base64_str)
-            except:
-                pass
-            
-            # Add padding if needed
-            padding = 4 - len(base64_str) % 4
-            if padding != 4:
-                base64_str += '=' * padding
-                print(f"Added {padding} padding characters")
-            
-            return base64.b64decode(base64_str)
-            
-        except Exception as e:
-            print(f"Base64 decode error: {str(e)}")
-            print(f"Base64 string first 100 chars: {base64_str[:100]}")
-            raise
-    
-    def encode_base64_no_padding(self, data: bytes) -> str:
-        """Encode to base64 without padding for Make.com compatibility"""
-        # CRITICAL: Remove padding for Make.com
-        return base64.b64encode(data).decode('utf-8').rstrip('=')
-    
-    def process_image(self, input_base64: str) -> Dict[str, Any]:
-        """Process the wedding ring image with simple enhancement"""
-        try:
-            # Decode base64
-            print("Decoding base64...")
-            image_data = self.decode_base64_safe(input_base64)
-            print(f"Decoded image data length: {len(image_data)}")
-            
-            # Open image
-            img = Image.open(BytesIO(image_data))
-            print(f"Image opened: {img.size}, mode: {img.mode}")
-            
-            # Convert to RGB if needed
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-                print("Converted to RGB")
-            
-            # Simple but effective enhancement (based on v31 success)
-            # Brightness
-            enhancer = ImageEnhance.Brightness(img)
-            img = enhancer.enhance(1.18)  # 18% brighter
-            
-            # Contrast
-            enhancer = ImageEnhance.Contrast(img)
-            img = enhancer.enhance(1.15)  # 15% more contrast
-            
-            # Slight saturation reduction for cleaner look
-            enhancer = ImageEnhance.Color(img)
-            img = enhancer.enhance(0.95)  # 5% less saturated
-            
-            print("Enhancement applied")
-            
-            # Save to buffer with high quality
-            buffer = BytesIO()
-            img.save(buffer, format='JPEG', quality=92, optimize=True)
-            buffer.seek(0)
-            
-            # Encode without padding - CRITICAL FOR MAKE.COM
-            enhanced_base64 = self.encode_base64_no_padding(buffer.getvalue())
-            print(f"Enhanced base64 length: {len(enhanced_base64)}")
-            print(f"Last 3 chars of base64: '{enhanced_base64[-3:]}'")  # Should NOT be '='
-            
-            # Return with correct structure
-            result = {
-                "output": {
-                    "enhanced_image": f"data:image/jpeg;base64,{enhanced_base64}",
-                    "status": "success",
-                    "version": self.version,
-                    "original_size": f"{img.width}x{img.height}",
-                    "message": "Image enhanced successfully"
-                }
-            }
-            
-            print("Returning success response")
-            return result
-            
-        except Exception as e:
-            print(f"ERROR in process_image: {str(e)}")
-            print(f"Traceback: {traceback.format_exc()}")
-            return self.create_error_response(f"Processing error: {str(e)}")
-    
-    def create_error_response(self, error_message: str) -> Dict[str, Any]:
-        """Create error response with correct structure"""
         return {
             "output": {
                 "status": "error",
-                "error": error_message,
-                "version": self.version
+                "error": f"Handler error: {str(e)}",
+                "version": VERSION
+            }
+        }
+
+
+def find_base64_limited(obj: Any, depth: int = 0, max_depth: int = 5) -> Optional[str]:
+    """Limited depth search to avoid infinite loops"""
+    if depth > max_depth:
+        return None
+    
+    if isinstance(obj, str):
+        if len(obj) > 1000 and not obj.startswith('{'):
+            # Extract base64 from data URL if needed
+            if obj.startswith('data:image'):
+                return obj.split(',')[1] if ',' in obj else obj
+            return obj
+    elif isinstance(obj, dict):
+        # Priority keys
+        for key in ['image_base64', 'image', 'base64', 'enhanced_image']:
+            if key in obj:
+                val = obj[key]
+                if isinstance(val, str) and len(val) > 1000:
+                    if val.startswith('data:image'):
+                        return val.split(',')[1] if ',' in val else val
+                    return val
+        
+        # Check numbered keys
+        for i in range(10):
+            if str(i) in obj:
+                result = find_base64_limited(obj[str(i)], depth + 1, max_depth)
+                if result:
+                    return result
+    
+    return None
+
+
+def process_image(input_base64: str) -> Dict[str, Any]:
+    """Process the wedding ring image"""
+    try:
+        # Clean base64
+        if isinstance(input_base64, str):
+            input_base64 = input_base64.strip()
+            if 'base64,' in input_base64:
+                input_base64 = input_base64.split('base64,')[1]
+            
+            # Remove whitespace
+            input_base64 = ''.join(input_base64.split())
+            
+            # Add padding if needed
+            padding = 4 - len(input_base64) % 4
+            if padding != 4:
+                input_base64 += '=' * padding
+        
+        # Decode
+        image_data = base64.b64decode(input_base64)
+        
+        # Open image
+        img = Image.open(BytesIO(image_data))
+        
+        # Convert to RGB
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Simple enhancement
+        # Brightness
+        enhancer = ImageEnhance.Brightness(img)
+        img = enhancer.enhance(1.18)
+        
+        # Contrast
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(1.15)
+        
+        # Color
+        enhancer = ImageEnhance.Color(img)
+        img = enhancer.enhance(0.95)
+        
+        # Save
+        buffer = BytesIO()
+        img.save(buffer, format='JPEG', quality=92)
+        buffer.seek(0)
+        
+        # Encode without padding for Make.com
+        enhanced_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8').rstrip('=')
+        
+        return {
+            "output": {
+                "enhanced_image": f"data:image/jpeg;base64,{enhanced_base64}",
+                "status": "success",
+                "version": VERSION,
+                "message": "Image enhanced successfully"
+            }
+        }
+        
+    except Exception as e:
+        print(f"ERROR in process_image: {str(e)}")
+        return {
+            "output": {
+                "status": "error",
+                "error": f"Processing error: {str(e)}",
+                "version": VERSION
             }
         }
 
 
 # For RunPod
 if __name__ == "__main__":
-    print(f"Enhancement Handler v{VERSION} loaded successfully")
+    print(f"Enhancement Handler v{VERSION} loaded and ready")
