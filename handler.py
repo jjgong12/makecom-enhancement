@@ -103,7 +103,7 @@ def base64_to_image(base64_string):
     return Image.open(BytesIO(img_data))
 
 def enhance_image_brightness(image):
-    """이미지의 전체적인 색감을 밝고 하얗게 보정 (밸런스 버전)"""
+    """이미지의 전체적인 색감을 밝고 하얗게 보정 (자연스러운 버전)"""
     # RGB로 변환 (RGBA인 경우)
     if image.mode == 'RGBA':
         # 흰색 배경에 합성
@@ -132,8 +132,8 @@ def enhance_image_brightness(image):
     for i in range(3):
         channel = img_array[:, :, i].astype(np.float32) / 255.0
         
-        # 감마 보정 (밝은 톤 강화)
-        channel = np.power(channel, 0.6)  # 감마 0.6 유지
+        # 감마 보정 (밝은 톤 강화) - 0.7로 변경
+        channel = np.power(channel, 0.7)  # 감마 0.6 → 0.7
         
         # 밝은 영역 추가 강화 (적당히)
         channel = np.where(channel > 0.6, 
@@ -144,10 +144,10 @@ def enhance_image_brightness(image):
         channel = np.clip(channel, 0, 1)
         img_array[:, :, i] = (channel * 255).astype(np.uint8)
     
-    # 5단계: 전체적으로 화이트 오버레이 효과 (3%)
-    white_overlay = np.ones_like(img_array) * 255
-    alpha = 0.03  # 3% 흰색 오버레이
-    img_array = (img_array * (1 - alpha) + white_overlay * alpha).astype(np.uint8)
+    # 5단계: 화이트 오버레이 제거 (0%)
+    # white_overlay = np.ones_like(img_array) * 255
+    # alpha = 0.00  # 0% 흰색 오버레이 (제거)
+    # img_array = (img_array * (1 - alpha) + white_overlay * alpha).astype(np.uint8)
     
     # PIL Image로 변환
     enhanced_image = Image.fromarray(img_array)
@@ -222,9 +222,9 @@ def handler(event):
         # 원본 크기 저장
         original_size = image.size
         
-        # 이미지 향상 처리 (밸런스 버전)
+        # 이미지 향상 처리 (자연스러운 버전)
         enhanced_image = enhance_image_brightness(image)
-        print("이미지 향상 처리 완료 (V57 밸런스)")
+        print("이미지 향상 처리 완료 (V58 자연스러운 버전)")
         
         # base64 변환 (padding 제거)
         enhanced_base64 = image_to_base64(enhanced_image)
@@ -236,7 +236,7 @@ def handler(event):
                 "original_size": list(original_size),
                 "enhanced_size": list(enhanced_image.size),
                 "format": "base64_no_padding",
-                "enhancement_applied": "balanced_brightness_whitening_v57"
+                "enhancement_applied": "natural_brightness_whitening_v58"
             }
         }
         
