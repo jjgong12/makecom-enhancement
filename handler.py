@@ -1,148 +1,190 @@
 import runpod
 import base64
-import requests
 from io import BytesIO
 from PIL import Image, ImageEnhance
-import time
+import numpy as np
+import cv2
+import traceback
 
-def brightness_correction(image):
-    """원본 이미지의 전체적인 색감을 밝게 하얗게 보정"""
-    enhancer = ImageEnhance.Brightness(image)
-    brightened = enhancer.enhance(1.3)
-    
-    enhancer = ImageEnhance.Color(brightened)
-    enhanced = enhancer.enhance(0.85)
-    
-    return enhanced
+VERSION = "v53"
 
-def enhance_with_replicate(image_path):
-    """Replicate API를 사용하여 배경 제거 및 품질 향상"""
-    try:
-        # 이미지를 base64로 인코딩
-        if isinstance(image_path, Image.Image):
-            buffered = BytesIO()
-            image_path.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-        else:
-            with open(image_path, "rb") as img_file:
-                img_str = base64.b64encode(img_file.read()).decode()
-        
-        image_uri = f"data:image/png;base64,{img_str}"
-        
-        # Replicate API 호출
-        response = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            headers={
-                "Authorization": "Bearer r8_CjO6q1W0Zh3mDnvtpuI6eBYuLLFqoP22D7cKs",
-                "Content-Type": "application/json"
-            },
-            json={
-                "version": "4067ee2a58f6c161d434a9c077cbc012dd2549b451aa0a3652cf0e7dc6c5da9f",
-                "input": {
-                    "image": image_uri,
-                    "to_remove": ""
-                }
-            }
-        )
-        
-        if response.status_code != 201:
-            print(f"API 요청 실패: {response.status_code}")
-            return None
-            
-        prediction = response.json()
-        prediction_id = prediction['id']
-        
-        # 결과 대기
-        max_attempts = 30
-        for _ in range(max_attempts):
-            time.sleep(1)
-            
-            response = requests.get(
-                f"https://api.replicate.com/v1/predictions/{prediction_id}",
-                headers={"Authorization": "Bearer r8_CjO6q1W0Zh3mDnvtpuI6eBYuLLFqoP22D7cKs"}
-            )
-            
-            result = response.json()
-            
-            if result['status'] == 'succeeded':
-                output_url = result['output']
-                
-                img_response = requests.get(output_url)
-                if img_response.status_code == 200:
-                    return Image.open(BytesIO(img_response.content))
+def find_input_data(event):
+    """Find base64 data from various possible locations"""
+    # Priority order - image_base64 first!
+    direct_paths = [
+        'image_base64', 'image', 'base64', 'imageBase64',
+        'input.image_base64', 'input.image', 'input.base64'
+    ]
+    
+    # Check direct paths
+    for path in direct_paths:
+        keys = path.split('.')
+        value = event
+        try:
+            for key in keys:
+                if isinstance(value, dict):
+                    value = value.get(key)
                 else:
-                    print(f"이미지 다운로드 실패: {img_response.status_code}")
-                    return None
-                    
-            elif result['status'] == 'failed':
-                print("처리 실패")
-                return None
-        
-        print("시간 초과")
-        return None
-        
-    except Exception as e:
-        print(f"Replicate API 오류: {str(e)}")
-        return None
+                    value = None
+                    break
+            if value and isinstance(value, str) and len(value) > 100:
+                print(f"Found image data at: {path}")
+                return value
+        except:
+            continue
+    
+    # Check numbered patterns (Make.com structure)
+    for i in range(10):
+        try:
+            if str(i) in event:
+                node = event[str(i)]
+                if isinstance(node, dict) and 'data' in node:
+                    data = node['data']
+                    if isinstance(data, dict) and 'output' in data:
+                        output = data['output']
+                        if isinstance(output, dict) and 'output' in output:
+                            inner_output = output['output']
+                            if isinstance(inner_output, dict) and 'enhanced_image' in inner_output:
+                                value = inner_output['enhanced_image']
+                                if value and isinstance(value, str) and len(value) > 100:
+                                    print(f"Found at: {i}.data.output.output.enhanced_image")
+                                    return value
+        except:
+            continue
+    
+    # Check job.input structure (RunPod specific)
+    if 'input' in event and isinstance(event['input'], dict):
+        result = find_input_data(event['input'])
+        if result:
+            return result
+    
+    print("No image data found - dumping structure")
+    print(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not dict'}")
+    if 'input' in event:
+        print(f"Input keys: {list(event['input'].keys()) if isinstance(event['input'], dict) else 'Not dict'}")
+    
+    return None
+
+def enhance_professional_style(image):
+    """Professional jewelry photography style enhancement"""
+    # Convert to LAB for better color control
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
+    
+    # Brighten the L channel significantly (professional white background)
+    l_channel = cv2.add(l_channel, 40)
+    l_channel = cv2.normalize(l_channel, None, 0, 255, cv2.NORM_MINMAX)
+    
+    # Apply CLAHE for better contrast
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    l_channel = clahe.apply(l_channel)
+    
+    # Merge back
+    enhanced_lab = cv2.merge([l_channel, a_channel, b_channel])
+    enhanced_bgr = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+    
+    # Convert to PIL for final adjustments
+    pil_img = Image.fromarray(cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB))
+    
+    # Professional style adjustments
+    # Brightness - make it really bright like studio photos
+    enhancer = ImageEnhance.Brightness(pil_img)
+    pil_img = enhancer.enhance(1.25)
+    
+    # Contrast - subtle increase
+    enhancer = ImageEnhance.Contrast(pil_img)
+    pil_img = enhancer.enhance(1.15)
+    
+    # Color - slightly desaturate for clean look
+    enhancer = ImageEnhance.Color(pil_img)
+    pil_img = enhancer.enhance(0.95)
+    
+    # Sharpness - enhance details
+    enhancer = ImageEnhance.Sharpness(pil_img)
+    pil_img = enhancer.enhance(1.2)
+    
+    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 def handler(job):
     """RunPod handler function"""
+    print(f"=== Enhancement Handler {VERSION} Started ===")
+    
     try:
-        job_input = job['input']
+        # Find base64 data
+        img_data = find_input_data(job)
+        if not img_data:
+            print(f"Job structure: {job}")
+            return {
+                "output": {
+                    "error": "No image data found in input",
+                    "success": False,
+                    "version": VERSION
+                }
+            }
         
-        # base64 이미지 가져오기
-        base64_image = job_input.get('image')
-        if not base64_image:
-            return {"output": {"error": "No image provided", "success": False}}
+        print(f"Found image data, length: {len(img_data)}")
         
-        # base64 디코드
+        # Clean base64 data
+        if img_data.startswith('data:'):
+            img_data = img_data.split(',')[1]
+        
+        # Add padding for decoding if needed
+        padding = 4 - (len(img_data) % 4)
+        if padding != 4:
+            img_data += '=' * padding
+        
+        # Decode image
         try:
-            # data:image/xxx;base64, 부분 제거
-            if ',' in base64_image:
-                base64_image = base64_image.split(',')[1]
+            img_bytes = base64.b64decode(img_data)
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
-            image_data = base64.b64decode(base64_image)
-            image = Image.open(BytesIO(image_data))
-            
-            # RGBA로 변환
-            if image.mode != 'RGBA':
-                image = image.convert('RGBA')
+            if img is None:
+                raise ValueError("Failed to decode image")
                 
         except Exception as e:
-            return {"output": {"error": f"Failed to decode image: {str(e)}", "success": False}}
+            print(f"Decode error: {str(e)}")
+            return {
+                "output": {
+                    "error": f"Failed to decode image: {str(e)}",
+                    "success": False,
+                    "version": VERSION
+                }
+            }
         
-        # 1. 먼저 전체적인 색감 보정
-        brightened_image = brightness_correction(image)
+        print(f"Image decoded: {img.shape}")
         
-        # 2. Replicate API로 배경 제거 및 품질 향상
-        enhanced_image = enhance_with_replicate(brightened_image)
+        # Apply professional enhancement
+        enhanced = enhance_professional_style(img)
         
-        if enhanced_image is None:
-            # Replicate 실패 시 보정된 이미지만 반환
-            enhanced_image = brightened_image
+        # Encode result
+        _, buffer = cv2.imencode('.jpg', enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        enhanced_base64 = base64.b64encode(buffer).decode('utf-8')
         
-        # 결과를 base64로 인코딩
-        output_buffer = BytesIO()
-        enhanced_image.save(output_buffer, format='PNG')
-        output_buffer.seek(0)
+        # Remove padding for Make.com
+        enhanced_base64 = enhanced_base64.rstrip('=')
         
-        # Make.com용 - padding 제거
-        enhanced_base64 = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
-        enhanced_base64 = enhanced_base64.rstrip('=')  # padding 제거
+        # Create data URL
+        result_url = f"data:image/jpeg;base64,{enhanced_base64}"
         
         return {
             "output": {
+                "enhanced_image": result_url,
                 "success": True,
-                "enhanced_image": enhanced_base64,
-                "message": "Image enhanced successfully"
+                "version": VERSION,
+                "message": "Professional enhancement applied successfully"
             }
         }
         
     except Exception as e:
+        print(f"Handler error: {str(e)}")
+        print(traceback.format_exc())
         return {
             "output": {
                 "error": str(e),
-                "success": False
+                "success": False,
+                "version": VERSION,
+                "traceback": traceback.format_exc()
             }
         }
 
