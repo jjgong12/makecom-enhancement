@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V72-ImprovedColorDetection"
+VERSION = "V73-ConservativeYellowGold"
 
 def decode_base64_safe(base64_str: str) -> bytes:
     """Safely decode base64 with automatic padding correction"""
@@ -69,27 +69,27 @@ def detect_ring_color(image: Image.Image) -> str:
     rb_ratio = r_mean / (b_mean + 1)  # Red to Blue ratio
     gb_ratio = g_mean / (b_mean + 1)  # Green to Blue ratio
     
-    # Improved color detection logic
-    if avg_saturation < 15 and avg_value > 220:
-        # Very low saturation + high brightness = 무도금화이트
+    # Improved color detection logic - 무도금화이트 우선, 옐로우골드 보수적
+    if avg_saturation < 40 and avg_value > 200:
+        # Wider range for 무도금화이트 (includes slightly warm whites)
         return "무도금화이트"
-    elif avg_saturation < 30:
-        # Low saturation = 화이트골드
+    elif avg_saturation < 50 and avg_value > 180:
+        # Medium saturation + high brightness = 화이트골드
         return "화이트골드"
-    elif avg_hue >= 15 and avg_hue <= 35 and gb_ratio > 1.1:
-        # Hue in yellow range AND green > blue = 옐로우골드
+    elif avg_hue >= 20 and avg_hue <= 35 and avg_saturation > 60 and gb_ratio > 1.2:
+        # Very strict yellow gold - high saturation + clear yellow hue
         return "옐로우골드"
-    elif rg_ratio > 1.15 and avg_hue < 20:
-        # High red ratio with low hue = 로즈골드
+    elif rg_ratio > 1.2 and rb_ratio > 1.3 and avg_hue < 15:
+        # Clear red dominance = 로즈골드
         return "로즈골드"
-    elif gb_ratio > 1.05:
-        # Green slightly higher than blue = 옐로우골드
+    elif avg_saturation > 70 and g_norm > 0.9 and r_norm > 0.9:
+        # Very saturated warm color = 옐로우골드
         return "옐로우골드"
     else:
-        # Default based on warmth
-        if r_norm > 0.95 and g_norm > 0.85:
-            return "옐로우골드"
-        elif r_norm > g_norm and r_norm > b_norm:
+        # Default based on characteristics
+        if avg_saturation < 45:
+            return "무도금화이트"  # Default to 무도금화이트 for low saturation
+        elif r_norm > g_norm * 1.1 and r_norm > b_norm * 1.1:
             return "로즈골드"
         else:
             return "화이트골드"
@@ -182,20 +182,36 @@ def apply_color_enhancement(image: Image.Image, detected_color: str) -> Image.Im
     
     return image
 
+def find_input_data(data):
+    """Find input data recursively"""
+    if isinstance(data, dict):
+        # Check for image data keys
+        for key in ['image', 'image_data', 'base64_image', 'imageBase64', 'enhanced_image']:
+            if key in data and data[key]:
+                return data[key]
+        
+        # Check nested structures
+        if 'input' in data:
+            result = find_input_data(data['input'])
+            if result:
+                return result
+        
+        # Check other common nested keys
+        for key in ['job', 'payload', 'data']:
+            if key in data:
+                result = find_input_data(data[key])
+                if result:
+                    return result
+    
+    return data if isinstance(data, str) else None
+
 def process_enhancement(job):
     """Process enhancement request"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
-        # Extract input
-        job_input = job.get('input', {})
-        
-        # Find image data
-        image_data = None
-        for key in ['image', 'image_data', 'base64_image', 'imageBase64']:
-            if key in job_input:
-                image_data = job_input[key]
-                break
+        # Find image data using recursive search
+        image_data = find_input_data(job)
         
         if not image_data:
             return {
