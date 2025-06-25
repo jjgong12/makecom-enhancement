@@ -1,217 +1,340 @@
 import runpod
+import os
+import sys
+import json
+import time
 import base64
-import requests
+import numpy as np
 from io import BytesIO
 from PIL import Image, ImageEnhance, ImageFilter
-import numpy as np
 import cv2
-import os
 import logging
-import time
+from typing import Dict, Tuple, Optional, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "Enhancement_V68_SIMPLIFIED"
-REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', 'r8_6cksfxEmLxWlYxjW4K1FEbnZMEEmlQw2UeNNY')
+VERSION = "V69-PureWhite"
 
-def decode_base64_image(base64_str):
-    """Decode base64 image with padding fix"""
+def decode_base64_safe(base64_str: str) -> bytes:
+    """Safely decode base64 with automatic padding correction"""
+    # Remove data URI prefix if present
+    if base64_str.startswith('data:'):
+        base64_str = base64_str.split(',')[1]
+    
+    # Remove any whitespace
+    base64_str = base64_str.strip()
+    
+    # Fix padding if necessary
+    padding = 4 - len(base64_str) % 4
+    if padding != 4:
+        base64_str += '=' * padding
+    
     try:
-        # Remove data URI prefix if present
-        if 'data:' in base64_str and 'base64,' in base64_str:
-            base64_str = base64_str.split('base64,')[1]
-        
-        # Fix padding
-        base64_str = base64_str.strip()
-        padding = 4 - len(base64_str) % 4
-        if padding != 4:
-            base64_str += '=' * padding
-            
         return base64.b64decode(base64_str)
     except Exception as e:
         logger.error(f"Base64 decode error: {str(e)}")
-        raise
+        raise ValueError(f"Invalid base64 data: {str(e)}")
 
-def enhance_image(image_data):
-    """Simple enhancement for wedding ring images"""
+def detect_ring_color(image: Image.Image) -> str:
+    """Detect ring color with improved accuracy"""
+    logger.info("Starting color detection...")
+    
+    # Convert to numpy array
+    img_array = np.array(image)
+    height, width = img_array.shape[:2]
+    
+    # Focus on center area (50% of image)
+    center_y, center_x = height // 2, width // 2
+    crop_size = min(height, width) // 2
+    
+    y1 = max(0, center_y - crop_size // 2)
+    y2 = min(height, center_y + crop_size // 2)
+    x1 = max(0, center_x - crop_size // 2)
+    x2 = min(width, center_x + crop_size // 2)
+    
+    center_region = img_array[y1:y2, x1:x2]
+    
+    # Convert to HSV for better color detection
+    hsv = cv2.cvtColor(center_region, cv2.COLOR_RGB2HSV)
+    
+    # Calculate color metrics
+    avg_saturation = np.mean(hsv[:, :, 1])
+    avg_value = np.mean(hsv[:, :, 2])
+    
+    # Convert to RGB for color tone analysis
+    rgb_center = center_region.astype(float)
+    r_mean = np.mean(rgb_center[:, :, 0])
+    g_mean = np.mean(rgb_center[:, :, 1])
+    b_mean = np.mean(rgb_center[:, :, 2])
+    
+    # Normalize RGB values
+    max_rgb = max(r_mean, g_mean, b_mean)
+    if max_rgb > 0:
+        r_norm = r_mean / max_rgb
+        g_norm = g_mean / max_rgb
+        b_norm = b_mean / max_rgb
+    else:
+        r_norm = g_norm = b_norm = 1.0
+    
+    logger.info(f"Color metrics - Sat: {avg_saturation:.1f}, Val: {avg_value:.1f}")
+    logger.info(f"RGB normalized: R={r_norm:.2f}, G={g_norm:.2f}, B={b_norm:.2f}")
+    
+    # Detection logic
+    if avg_saturation < 25:  # Low saturation
+        if avg_value > 200:  # Very bright
+            color = "무도금화이트"
+        else:
+            color = "화이트골드"
+    elif r_norm > 0.95 and g_norm > 0.85 and g_norm < 0.95:  # Warm tones
+        if avg_saturation > 40:
+            color = "로즈골드"
+        else:
+            color = "옐로우골드"
+    elif abs(r_norm - g_norm) < 0.1 and abs(g_norm - b_norm) < 0.1:  # Neutral
+        color = "화이트골드"
+    else:
+        # Default based on warmth
+        warmth = (r_norm + g_norm) / 2 - b_norm
+        if warmth > 0.1:
+            color = "옐로우골드"
+        else:
+            color = "화이트골드"
+    
+    logger.info(f"Detected color: {color}")
+    return color
+
+def create_center_focus_mask(image: Image.Image, focus_strength: float = 0.3) -> np.ndarray:
+    """Create a center focus mask for subtle vignetting"""
+    width, height = image.size
+    
+    # Create radial gradient
+    y, x = np.ogrid[:height, :width]
+    center_x, center_y = width / 2, height / 2
+    
+    # Calculate distance from center
+    dist = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+    max_dist = np.sqrt(center_x**2 + center_y**2) * 0.7
+    
+    # Create smooth gradient mask
+    mask = 1 - (dist / max_dist) * focus_strength
+    mask = np.clip(mask, 1 - focus_strength, 1)
+    
+    # Apply gaussian blur for smooth transition
+    mask = cv2.GaussianBlur(mask, (51, 51), 0)
+    
+    return mask
+
+def enhance_wedding_ring_image(image_input: Union[str, bytes], mask_type: str = "none") -> Tuple[str, str]:
+    """Enhanced wedding ring image processing for V69"""
     try:
+        # Handle different input types
+        if isinstance(image_input, str):
+            if image_input.startswith('http'):
+                # URL input - not implemented in this version
+                raise ValueError("URL input not supported")
+            else:
+                # Base64 input
+                image_bytes = decode_base64_safe(image_input)
+        else:
+            # Direct bytes input
+            image_bytes = image_input
+        
         # Open image
-        image = Image.open(BytesIO(image_data)).convert('RGB')
-        logger.info(f"Image size: {image.size}")
+        image = Image.open(BytesIO(image_bytes))
+        original_mode = image.mode
         
-        # Convert to numpy for LAB processing
+        # Convert to RGB if needed
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        logger.info(f"Processing image: {image.size}, mode: {original_mode}")
+        
+        # Step 1: Detect ring color from original
+        detected_color = detect_ring_color(image)
+        
+        # Step 2: Basic enhancement
+        # Overall brightness adjustment
+        brightness = ImageEnhance.Brightness(image)
+        if detected_color == "무도금화이트":
+            image = brightness.enhance(1.15)  # Brighter for pure white
+        else:
+            image = brightness.enhance(1.08)
+        
+        # Gentle contrast
+        contrast = ImageEnhance.Contrast(image)
+        image = contrast.enhance(1.05)
+        
+        # Slight color enhancement
+        color = ImageEnhance.Color(image)
+        if detected_color == "무도금화이트":
+            image = color.enhance(0.7)  # Reduce saturation for pure white
+        else:
+            image = color.enhance(1.02)
+        
+        # Step 3: Create center focus
         img_array = np.array(image)
+        focus_mask = create_center_focus_mask(image, focus_strength=0.2)
         
-        # LAB color space for better brightness control
-        lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
-        l, a, b = cv2.split(lab)
+        # Apply center focus
+        for i in range(3):
+            img_array[:, :, i] = img_array[:, :, i] * focus_mask
         
-        # Enhance L channel (brightness)
-        l = cv2.multiply(l, 1.1)
-        l = np.clip(l, 0, 255).astype(np.uint8)
+        image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Merge and convert back
-        enhanced_lab = cv2.merge([l, a, b])
-        enhanced_rgb = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
-        enhanced_image = Image.fromarray(enhanced_rgb)
+        # Step 4: Color-specific enhancements
+        if detected_color == "무도금화이트":
+            # Pure white enhancement
+            # Convert to LAB for better white control
+            img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2LAB)
+            l, a, b = cv2.split(img_cv)
+            
+            # Increase lightness significantly
+            l = cv2.multiply(l, 1.15)
+            l = np.clip(l, 0, 255)
+            
+            # Reduce color channels for pure white
+            a = cv2.multiply(a, 0.7)
+            b = cv2.multiply(b, 0.7)
+            
+            img_cv = cv2.merge([l, a, b])
+            img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_LAB2RGB)
+            image = Image.fromarray(img_rgb)
+            
+            # Additional brightness for pure white
+            brightness = ImageEnhance.Brightness(image)
+            image = brightness.enhance(1.1)
+            
+            # Remove any remaining yellow tint
+            img_array = np.array(image)
+            # Boost blue channel slightly to counteract yellow
+            img_array[:, :, 2] = np.clip(img_array[:, :, 2] * 1.05, 0, 255)
+            image = Image.fromarray(img_array.astype(np.uint8))
+            
+        elif detected_color == "옐로우골드":
+            # Enhance golden tones
+            img_array = np.array(image)
+            img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.05, 0, 255)
+            img_array[:, :, 1] = np.clip(img_array[:, :, 1] * 1.03, 0, 255)
+            image = Image.fromarray(img_array.astype(np.uint8))
+            
+        elif detected_color == "로즈골드":
+            # Enhance rose tones
+            img_array = np.array(image)
+            img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.08, 0, 255)
+            image = Image.fromarray(img_array.astype(np.uint8))
         
-        # PIL adjustments
-        enhancer = ImageEnhance.Brightness(enhanced_image)
-        enhanced_image = enhancer.enhance(1.03)
+        # Step 5: Final sharpening
+        image = image.filter(ImageFilter.UnsharpMask(radius=1, percent=50, threshold=3))
         
-        enhancer = ImageEnhance.Contrast(enhanced_image)
-        enhanced_image = enhancer.enhance(1.05)
+        # Create thumbnail
+        thumbnail = create_thumbnail(image, detected_color)
         
-        enhancer = ImageEnhance.Color(enhanced_image)
-        enhanced_image = enhancer.enhance(1.02)
+        # Convert to base64
+        # Enhanced image
+        buffered = BytesIO()
+        image.save(buffered, format="JPEG", quality=95)
+        enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
-        # Light sharpening
-        enhanced_image = enhanced_image.filter(ImageFilter.UnsharpMask(radius=1, percent=30, threshold=3))
-        
-        # Save to base64
-        output_buffer = BytesIO()
-        enhanced_image.save(output_buffer, format='PNG', quality=95)
-        enhanced_base64 = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
+        # Thumbnail
+        thumb_buffered = BytesIO()
+        thumbnail.save(thumb_buffered, format="JPEG", quality=95)
+        thumbnail_base64 = base64.b64encode(thumb_buffered.getvalue()).decode('utf-8')
         
         # Remove padding for Make.com
-        return enhanced_base64.rstrip('=')
+        enhanced_base64 = enhanced_base64.rstrip('=')
+        thumbnail_base64 = thumbnail_base64.rstrip('=')
+        
+        return enhanced_base64, thumbnail_base64
         
     except Exception as e:
         logger.error(f"Enhancement error: {str(e)}")
         raise
 
-def remove_background_replicate(image_base64, mask_type):
-    """Remove background using Replicate API"""
-    try:
-        if mask_type == "none":
-            return None
-            
-        headers = {
-            'Authorization': f'Token {REPLICATE_API_TOKEN}',
-            'Content-Type': 'application/json',
-        }
+def create_thumbnail(image: Image.Image, detected_color: str) -> Image.Image:
+    """Create a simple 400x400 thumbnail"""
+    # Center crop to square
+    width, height = image.size
+    size = min(width, height)
+    left = (width - size) // 2
+    top = (height - size) // 2
+    right = left + size
+    bottom = top + size
+    
+    thumbnail = image.crop((left, top, right, bottom))
+    thumbnail = thumbnail.resize((400, 400), Image.Resampling.LANCZOS)
+    
+    return thumbnail
+
+def find_input_data(data):
+    """Recursively find input data in nested structure"""
+    if isinstance(data, dict):
+        # Direct input
+        if 'image' in data or 'image_url' in data or 'image_base64' in data:
+            return data
         
-        # Prepare image with data URI
-        image_with_prefix = f"data:image/png;base64,{image_base64}"
+        # Nested input
+        if 'input' in data:
+            return find_input_data(data['input'])
         
-        # Select model
-        if mask_type == "person":
-            model_version = "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003"
-            model_input = {
-                "image": image_with_prefix,
-                "model": "u2netp",
-                "return_mask": False,
-                "alpha_matting": True,
-                "alpha_matting_foreground_threshold": 240,
-                "alpha_matting_background_threshold": 10,
-                "alpha_matting_erode_size": 10
-            }
-        else:
-            model_version = "lucataco/remove-bg:95fcc2a26d3899cd6c2691c900465aaeff466285a65c14638cc5f36f34befaf1"
-            model_input = {"image": image_with_prefix}
-        
-        # Create prediction
-        response = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            json={"version": model_version, "input": model_input},
-            headers=headers
-        )
-        response.raise_for_status()
-        
-        prediction_id = response.json()['id']
-        
-        # Poll for result
-        for attempt in range(30):
-            time.sleep(2)
-            
-            result = requests.get(
-                f"https://api.replicate.com/v1/predictions/{prediction_id}",
-                headers=headers
-            ).json()
-            
-            if result['status'] == 'succeeded':
-                output_url = result.get('output')
-                if output_url:
-                    img_data = requests.get(output_url).content
-                    return base64.b64encode(img_data).decode('utf-8').rstrip('=')
-                return None
-                
-            elif result['status'] == 'failed':
-                logger.error(f"Replicate failed: {result.get('error')}")
-                return None
-        
-        return None
-        
-    except Exception as e:
-        logger.error(f"Replicate error: {str(e)}")
-        return None
+        # Try other keys
+        for key in ['job', 'payload', 'data']:
+            if key in data:
+                result = find_input_data(data[key])
+                if result:
+                    return result
+    
+    return data
 
 def handler(job):
-    """Main handler function"""
+    """RunPod handler function"""
     start_time = time.time()
     
     try:
-        # Extract input - simplified search
+        logger.info(f"[{VERSION}] Job received")
+        logger.info(f"Job structure: {json.dumps(job, indent=2)[:500]}...")
+        
+        # Extract input
         job_input = job.get('input', {})
+        input_data = find_input_data(job_input)
         
-        # Find image in common locations
+        logger.info(f"Processing with input keys: {list(input_data.keys()) if isinstance(input_data, dict) else 'non-dict input'}")
+        
+        # Get image input
         image_input = None
-        mask_type = 'none'
-        
-        # Direct check
-        if isinstance(job_input, dict):
-            image_input = job_input.get('image') or job_input.get('image_base64') or job_input.get('base64_image')
-            mask_type = job_input.get('mask_type', 'none').lower()
-        elif isinstance(job_input, str):
-            image_input = job_input
-        
-        # Check nested input
-        if not image_input and isinstance(job_input, dict) and 'input' in job_input:
-            nested = job_input['input']
-            if isinstance(nested, dict):
-                image_input = nested.get('image') or nested.get('image_base64') or nested.get('base64_image')
-                mask_type = nested.get('mask_type', mask_type).lower()
+        if isinstance(input_data, dict):
+            image_input = input_data.get('image') or input_data.get('image_base64') or input_data.get('image_url')
+        else:
+            image_input = input_data
         
         if not image_input:
             raise ValueError("No image provided")
         
-        logger.info(f"Processing with mask_type: {mask_type}")
+        # Process image
+        enhanced_base64, thumbnail_base64 = enhance_wedding_ring_image(image_input)
         
-        # Decode and enhance image
-        image_data = decode_base64_image(image_input)
-        enhanced_base64 = enhance_image(image_data)
+        # Calculate processing time
+        processing_time = time.time() - start_time
         
-        # Optional background removal
-        masked_base64 = None
-        if mask_type != "none":
-            masked_base64 = remove_background_replicate(enhanced_base64, mask_type)
-            if not masked_base64:
-                masked_base64 = enhanced_base64
-        
-        # Prepare response
+        # Return result - V69 no mask data
         result = {
             "output": {
                 "enhanced_image": enhanced_base64,
-                "thumbnail": enhanced_base64,  # Same as enhanced for simplicity
-                "mask_type": mask_type,
-                "processing_time": f"{time.time() - start_time:.2f}s",
-                "has_mask": mask_type != "none",
-                "success": True,
-                "version": VERSION
+                "thumbnail": thumbnail_base64,
+                "processing_time": f"{processing_time:.2f}s",
+                "version": VERSION,
+                "success": True
             }
         }
         
-        if masked_base64 and mask_type != "none":
-            result["output"]["masked_image"] = masked_base64
+        logger.info(f"Successfully processed in {processing_time:.2f}s")
         
-        logger.info(f"Completed in {time.time() - start_time:.2f}s")
         return result
         
     except Exception as e:
         logger.error(f"Handler error: {str(e)}")
-        return {
+        error_response = {
             "output": {
                 "error": str(e),
                 "success": False,
@@ -219,6 +342,7 @@ def handler(job):
                 "version": VERSION
             }
         }
+        return error_response
 
 # RunPod handler
 runpod.serverless.start({"handler": handler})
