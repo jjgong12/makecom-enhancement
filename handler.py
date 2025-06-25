@@ -6,7 +6,7 @@ from PIL import Image, ImageEnhance
 import cv2
 import traceback
 
-VERSION = "enhancement_v47"
+VERSION = "enhancement_v48"
 print(f"{VERSION} starting...")
 
 def find_input_data(event):
@@ -75,27 +75,37 @@ def enhance_handler(event):
         if img.mode != 'RGB':
             img = img.convert('RGB')
         
-        # Simple enhancement - same for all images
-        # This makes the overall image brighter and cleaner
+        # Simple enhancement for all images
+        # Step 1: Brightness (make overall brighter)
         enhancer = ImageEnhance.Brightness(img)
-        img = enhancer.enhance(1.2)  # 20% brighter
+        img = enhancer.enhance(1.18)
         
+        # Step 2: Contrast (make details pop)
         enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(1.1)  # 10% more contrast
+        img = enhancer.enhance(1.12)
         
+        # Step 3: Color (slight saturation boost)
         enhancer = ImageEnhance.Color(img)
-        img = enhancer.enhance(1.05)  # 5% more vivid
+        img = enhancer.enhance(1.05)
         
-        # Convert to numpy for background brightening
+        # Step 4: Background whitening
         img_np = np.array(img)
         
-        # Make background whiter
-        # Simple approach: brighten pixels that are already bright
-        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-        bright_mask = gray > 180  # Bright areas (likely background)
+        # Simple background brightening
+        # Convert to LAB for better brightness control
+        lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
         
-        # Brighten background areas
-        img_np[bright_mask] = np.minimum(img_np[bright_mask] * 1.1, 255).astype(np.uint8)
+        # Brighten the L channel (especially bright areas)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        
+        # Increase overall brightness
+        l = cv2.add(l, 15)  # Add brightness
+        
+        # Merge channels
+        lab = cv2.merge([l, a, b])
+        img_np = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
         
         # Convert back to PIL
         enhanced_img = Image.fromarray(img_np)
@@ -105,11 +115,12 @@ def enhance_handler(event):
         enhanced_img.save(output_buffer, format='JPEG', quality=95)
         enhanced_bytes = output_buffer.getvalue()
         
-        # Encode to base64 and remove padding
+        # Encode to base64 and remove padding for Make.com
         enhanced_base64 = base64.b64encode(enhanced_bytes).decode('utf-8')
         enhanced_base64 = enhanced_base64.rstrip('=')
         
         print(f"{VERSION} completed successfully")
+        print(f"Original size: {img.width}x{img.height}")
         
         return {
             "output": {
