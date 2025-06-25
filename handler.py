@@ -15,25 +15,110 @@ from typing import Dict, Any, Optional, Tuple
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+VERSION = "Enhancement_V67_MULTI_PATH"
+
 # Get API keys from environment variable first, then fallback
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', 'r8_6cksfxEmLxWlYxjW4K1FEbnZMEEmlQw2UeNNY')
-THUMBNAIL_API_KEY = os.environ.get('THUMBNAIL_API_KEY', '')  # Thumbnail API key from environment
+THUMBNAIL_API_KEY = os.environ.get('THUMBNAIL_API_KEY', '')
 
 def find_input_data(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract input data from nested structure"""
-    if isinstance(job_input, dict):
-        if 'input' in job_input:
-            return find_input_data(job_input['input'])
-        elif 'image' in job_input or 'mask_type' in job_input:
-            return job_input
-    return job_input
+    """Extract input data from nested structure with multiple path support"""
+    logger.info("Searching for input data...")
+    
+    # V67: Enhanced path searching
+    def search_for_image(data, depth=0, max_depth=10):
+        if depth > max_depth:
+            return None
+            
+        if isinstance(data, dict):
+            # Direct image keys
+            image_keys = ['image', 'img', 'photo', 'picture', 'base64', 'base64_image', 
+                         'image_base64', 'imageBase64', 'image_data', 'imageData',
+                         'file', 'attachment', 'media', 'content', 'data',
+                         'enhanced_image', 'original_image', 'raw_image']
+            
+            # Check direct keys first
+            for key in image_keys:
+                if key in data:
+                    value = data[key]
+                    if isinstance(value, str) and len(value) > 100:
+                        logger.info(f"Found image at key: {key}")
+                        return {'image': value, 'mask_type': data.get('mask_type', 'none')}
+            
+            # Check for mask_type with image
+            if 'mask_type' in data:
+                for key in image_keys:
+                    if key in data and isinstance(data[key], str):
+                        logger.info(f"Found image with mask_type at key: {key}")
+                        return {'image': data[key], 'mask_type': data['mask_type']}
+            
+            # Recursive search
+            for key, value in data.items():
+                result = search_for_image(value, depth + 1)
+                if result:
+                    return result
+                    
+        elif isinstance(data, list):
+            for item in data:
+                result = search_for_image(item, depth + 1)
+                if result:
+                    return result
+                    
+        elif isinstance(data, str) and len(data) > 100:
+            # Might be raw base64
+            logger.info("Found potential raw base64 string")
+            return {'image': data, 'mask_type': 'none'}
+            
+        return None
+    
+    # Try multiple approaches
+    # 1. Direct search in job_input
+    result = search_for_image(job_input)
+    if result:
+        return result
+    
+    # 2. Check common nested paths
+    common_paths = [
+        ['input'],
+        ['data'],
+        ['body'],
+        ['payload'],
+        ['request'],
+        ['parameters'],
+        ['args'],
+        ['job', 'input'],
+        ['data', 'input'],
+        ['body', 'data'],
+        ['payload', 'data']
+    ]
+    
+    for path in common_paths:
+        current = job_input
+        for key in path:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                break
+        else:
+            result = search_for_image(current)
+            if result:
+                logger.info(f"Found input at path: {'.'.join(path)}")
+                return result
+    
+    # 3. If job_input is string, might be the image itself
+    if isinstance(job_input, str) and len(job_input) > 100:
+        logger.info("Job input is raw base64 string")
+        return {'image': job_input, 'mask_type': 'none'}
+    
+    logger.warning("No image found in input")
+    return {}
 
 def decode_base64_safe(base64_str: str) -> bytes:
     """Safely decode base64 with automatic padding correction"""
     try:
         # Remove data URI prefix if present
-        if base64_str.startswith('data:'):
-            base64_str = base64_str.split(',')[1]
+        if 'data:' in base64_str and 'base64,' in base64_str:
+            base64_str = base64_str.split('base64,')[1]
         
         # Remove any whitespace
         base64_str = base64_str.strip()
@@ -63,7 +148,7 @@ def create_gradient_mask(shape: Tuple[int, int], center: Tuple[int, int], radius
 def enhance_wedding_ring_image(image_input: str, mask_type: str = "none") -> Tuple[str, str]:
     """Enhance wedding ring image with adjusted background preservation"""
     try:
-        # V65: Use safe base64 decoding with padding fix
+        # V67: Use safe base64 decoding with padding fix
         logger.info("Decoding base64 image...")
         image_data = decode_base64_safe(image_input)
         
@@ -142,7 +227,7 @@ def enhance_wedding_ring_image(image_input: str, mask_type: str = "none") -> Tup
         final_image.save(enhanced_buffer, format='PNG', quality=95)
         enhanced_base64 = base64.b64encode(enhanced_buffer.getvalue()).decode('utf-8')
         
-        # V65: Remove padding for Make.com compatibility
+        # V67: Remove padding for Make.com compatibility
         enhanced_base64_no_padding = enhanced_base64.rstrip('=')
         
         # For thumbnail, use the same image (no separate processing needed)
@@ -164,7 +249,7 @@ def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optio
             'Content-Type': 'application/json',
         }
         
-        # V65: Ensure no padding for Replicate API
+        # V67: Ensure no padding for Replicate API
         image_base64_clean = image_base64.rstrip('=')
         
         # Add data URI prefix for Replicate
@@ -223,7 +308,7 @@ def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optio
                     
                     # Convert to base64
                     result_base64 = base64.b64encode(img_response.content).decode('utf-8')
-                    # V65: Remove padding for consistency
+                    # V67: Remove padding for consistency
                     result_base64 = result_base64.rstrip('=')
                     logger.info("Background removal successful")
                     return result_base64
@@ -278,7 +363,14 @@ def handler(job):
     try:
         # Extract input from nested structure
         job_input = job.get('input', {})
+        
+        # V67: Try to find input data with enhanced search
         input_data = find_input_data(job_input)
+        
+        # If not found, try the whole job
+        if not input_data or 'image' not in input_data:
+            logger.info("Trying to find image in entire job structure...")
+            input_data = find_input_data(job)
         
         logger.info(f"Processing with input keys: {list(input_data.keys())}")
         
@@ -288,9 +380,9 @@ def handler(job):
         
         # Validate inputs
         if not image_input:
-            raise ValueError("No image provided")
+            raise ValueError("No image provided - searched all possible paths")
         
-        # V65: Log base64 info for debugging
+        # V67: Log base64 info for debugging
         if isinstance(image_input, str):
             logger.info(f"Input image length: {len(image_input)}")
             if image_input.startswith('data:'):
@@ -325,7 +417,8 @@ def handler(job):
                 "mask_type": mask_type,
                 "processing_time": f"{processing_time:.2f}s",
                 "has_mask": mask_type != "none",
-                "success": True
+                "success": True,
+                "version": VERSION
             }
         }
         
@@ -343,7 +436,8 @@ def handler(job):
             "output": {
                 "error": str(e),
                 "success": False,
-                "processing_time": f"{time.time() - start_time:.2f}s"
+                "processing_time": f"{time.time() - start_time:.2f}s",
+                "version": VERSION
             }
         }
         return error_response
