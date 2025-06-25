@@ -15,8 +15,9 @@ from typing import Dict, Any, Optional, Tuple
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Get API key from environment variable first, then fallback
+# Get API keys from environment variable first, then fallback
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', 'r8_6cksfxEmLxWlYxjW4K1FEbnZMEEmlQw2UeNNY')
+THUMBNAIL_API_KEY = os.environ.get('THUMBNAIL_API_KEY', '')  # Thumbnail API key from environment
 
 def find_input_data(job_input: Dict[str, Any]) -> Dict[str, Any]:
     """Extract input data from nested structure"""
@@ -26,6 +27,26 @@ def find_input_data(job_input: Dict[str, Any]) -> Dict[str, Any]:
         elif 'image' in job_input or 'mask_type' in job_input:
             return job_input
     return job_input
+
+def decode_base64_safe(base64_str: str) -> bytes:
+    """Safely decode base64 with automatic padding correction"""
+    try:
+        # Remove data URI prefix if present
+        if base64_str.startswith('data:'):
+            base64_str = base64_str.split(',')[1]
+        
+        # Remove any whitespace
+        base64_str = base64_str.strip()
+        
+        # Fix padding if needed
+        padding = 4 - len(base64_str) % 4
+        if padding != 4:
+            base64_str += '=' * padding
+            
+        return base64.b64decode(base64_str)
+    except Exception as e:
+        logger.error(f"Base64 decode error: {str(e)}")
+        raise
 
 def create_gradient_mask(shape: Tuple[int, int], center: Tuple[int, int], radius: int) -> np.ndarray:
     """Create a gradient mask for smooth blending"""
@@ -42,12 +63,13 @@ def create_gradient_mask(shape: Tuple[int, int], center: Tuple[int, int], radius
 def enhance_wedding_ring_image(image_input: str, mask_type: str = "none") -> Tuple[str, str]:
     """Enhance wedding ring image with adjusted background preservation"""
     try:
-        # Decode base64 image
-        if image_input.startswith('data:'):
-            image_input = image_input.split(',')[1]
+        # V64: Use safe base64 decoding with padding fix
+        logger.info("Decoding base64 image...")
+        image_data = decode_base64_safe(image_input)
         
-        image_data = base64.b64decode(image_input)
+        # Open image
         image = Image.open(BytesIO(image_data)).convert('RGB')
+        logger.info(f"Image opened successfully: {image.size}")
         
         # Create numpy array for processing
         img_array = np.array(image)
@@ -120,12 +142,15 @@ def enhance_wedding_ring_image(image_input: str, mask_type: str = "none") -> Tup
         final_image.save(enhanced_buffer, format='PNG', quality=95)
         enhanced_base64 = base64.b64encode(enhanced_buffer.getvalue()).decode('utf-8')
         
+        # V64: Remove padding for Make.com compatibility
+        enhanced_base64_no_padding = enhanced_base64.rstrip('=')
+        
         # For thumbnail, use the same image (no separate processing needed)
-        thumbnail_base64 = enhanced_base64
+        thumbnail_base64 = enhanced_base64_no_padding
         
         logger.info("Image enhancement completed successfully")
         
-        return enhanced_base64, thumbnail_base64
+        return enhanced_base64_no_padding, thumbnail_base64
         
     except Exception as e:
         logger.error(f"Enhancement error: {str(e)}")
@@ -139,12 +164,11 @@ def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optio
             'Content-Type': 'application/json',
         }
         
-        # Ensure proper base64 format
-        if image_base64.startswith('data:'):
-            image_base64 = image_base64.split(',')[1]
+        # V64: Ensure no padding for Replicate API
+        image_base64_clean = image_base64.rstrip('=')
         
         # Add data URI prefix for Replicate
-        image_with_prefix = f"data:image/png;base64,{image_base64}"
+        image_with_prefix = f"data:image/png;base64,{image_base64_clean}"
         
         # Create prediction
         create_url = "https://api.replicate.com/v1/predictions"
@@ -199,6 +223,8 @@ def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optio
                     
                     # Convert to base64
                     result_base64 = base64.b64encode(img_response.content).decode('utf-8')
+                    # V64: Remove padding for consistency
+                    result_base64 = result_base64.rstrip('=')
                     logger.info("Background removal successful")
                     return result_base64
                 else:
@@ -263,6 +289,14 @@ def handler(job):
         # Validate inputs
         if not image_input:
             raise ValueError("No image provided")
+        
+        # V64: Log base64 info for debugging
+        if isinstance(image_input, str):
+            logger.info(f"Input image length: {len(image_input)}")
+            if image_input.startswith('data:'):
+                logger.info("Image has data URI prefix")
+            else:
+                logger.info("Image is raw base64")
         
         # Log processing start
         logger.info(f"Starting enhancement with mask_type: {mask_type}")
