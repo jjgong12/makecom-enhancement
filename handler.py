@@ -2,128 +2,29 @@ import runpod
 import base64
 import requests
 from io import BytesIO
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter
 import numpy as np
 import cv2
-import json
 import os
 import logging
 import time
-from typing import Dict, Any, Optional, Tuple
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "Enhancement_V67_MULTI_PATH"
-
-# Get API keys from environment variable first, then fallback
+VERSION = "Enhancement_V68_SIMPLIFIED"
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', 'r8_6cksfxEmLxWlYxjW4K1FEbnZMEEmlQw2UeNNY')
-THUMBNAIL_API_KEY = os.environ.get('THUMBNAIL_API_KEY', '')
 
-def find_input_data(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract input data from nested structure with multiple path support"""
-    logger.info("Searching for input data...")
-    
-    # V67: Enhanced path searching
-    def search_for_image(data, depth=0, max_depth=10):
-        if depth > max_depth:
-            return None
-            
-        if isinstance(data, dict):
-            # Direct image keys
-            image_keys = ['image', 'img', 'photo', 'picture', 'base64', 'base64_image', 
-                         'image_base64', 'imageBase64', 'image_data', 'imageData',
-                         'file', 'attachment', 'media', 'content', 'data',
-                         'enhanced_image', 'original_image', 'raw_image']
-            
-            # Check direct keys first
-            for key in image_keys:
-                if key in data:
-                    value = data[key]
-                    if isinstance(value, str) and len(value) > 100:
-                        logger.info(f"Found image at key: {key}")
-                        return {'image': value, 'mask_type': data.get('mask_type', 'none')}
-            
-            # Check for mask_type with image
-            if 'mask_type' in data:
-                for key in image_keys:
-                    if key in data and isinstance(data[key], str):
-                        logger.info(f"Found image with mask_type at key: {key}")
-                        return {'image': data[key], 'mask_type': data['mask_type']}
-            
-            # Recursive search
-            for key, value in data.items():
-                result = search_for_image(value, depth + 1)
-                if result:
-                    return result
-                    
-        elif isinstance(data, list):
-            for item in data:
-                result = search_for_image(item, depth + 1)
-                if result:
-                    return result
-                    
-        elif isinstance(data, str) and len(data) > 100:
-            # Might be raw base64
-            logger.info("Found potential raw base64 string")
-            return {'image': data, 'mask_type': 'none'}
-            
-        return None
-    
-    # Try multiple approaches
-    # 1. Direct search in job_input
-    result = search_for_image(job_input)
-    if result:
-        return result
-    
-    # 2. Check common nested paths
-    common_paths = [
-        ['input'],
-        ['data'],
-        ['body'],
-        ['payload'],
-        ['request'],
-        ['parameters'],
-        ['args'],
-        ['job', 'input'],
-        ['data', 'input'],
-        ['body', 'data'],
-        ['payload', 'data']
-    ]
-    
-    for path in common_paths:
-        current = job_input
-        for key in path:
-            if isinstance(current, dict) and key in current:
-                current = current[key]
-            else:
-                break
-        else:
-            result = search_for_image(current)
-            if result:
-                logger.info(f"Found input at path: {'.'.join(path)}")
-                return result
-    
-    # 3. If job_input is string, might be the image itself
-    if isinstance(job_input, str) and len(job_input) > 100:
-        logger.info("Job input is raw base64 string")
-        return {'image': job_input, 'mask_type': 'none'}
-    
-    logger.warning("No image found in input")
-    return {}
-
-def decode_base64_safe(base64_str: str) -> bytes:
-    """Safely decode base64 with automatic padding correction"""
+def decode_base64_image(base64_str):
+    """Decode base64 image with padding fix"""
     try:
         # Remove data URI prefix if present
         if 'data:' in base64_str and 'base64,' in base64_str:
             base64_str = base64_str.split('base64,')[1]
         
-        # Remove any whitespace
+        # Fix padding
         base64_str = base64_str.strip()
-        
-        # Fix padding if needed
         padding = 4 - len(base64_str) % 4
         if padding != 4:
             base64_str += '=' * padding
@@ -133,132 +34,69 @@ def decode_base64_safe(base64_str: str) -> bytes:
         logger.error(f"Base64 decode error: {str(e)}")
         raise
 
-def create_gradient_mask(shape: Tuple[int, int], center: Tuple[int, int], radius: int) -> np.ndarray:
-    """Create a gradient mask for smooth blending"""
-    mask = np.zeros(shape, dtype=np.float32)
-    y, x = np.ogrid[:shape[0], :shape[1]]
-    distance = np.sqrt((x - center[0])**2 + (y - center[1])**2)
-    
-    # Create smooth gradient
-    mask = 1 - np.clip(distance / radius, 0, 1)
-    mask = np.power(mask, 2)  # Smooth falloff
-    
-    return mask
-
-def enhance_wedding_ring_image(image_input: str, mask_type: str = "none") -> Tuple[str, str]:
-    """Enhance wedding ring image with adjusted background preservation"""
+def enhance_image(image_data):
+    """Simple enhancement for wedding ring images"""
     try:
-        # V67: Use safe base64 decoding with padding fix
-        logger.info("Decoding base64 image...")
-        image_data = decode_base64_safe(image_input)
-        
         # Open image
         image = Image.open(BytesIO(image_data)).convert('RGB')
-        logger.info(f"Image opened successfully: {image.size}")
+        logger.info(f"Image size: {image.size}")
         
-        # Create numpy array for processing
+        # Convert to numpy for LAB processing
         img_array = np.array(image)
-        original_array = img_array.copy()
         
-        # Detect ring region (center area)
-        height, width = img_array.shape[:2]
-        center_x, center_y = width // 2, height // 2
+        # LAB color space for better brightness control
+        lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
         
-        # Convert to LAB for better color manipulation
-        lab_image = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
-        l_channel, a_channel, b_channel = cv2.split(lab_image)
+        # Enhance L channel (brightness)
+        l = cv2.multiply(l, 1.1)
+        l = np.clip(l, 0, 255).astype(np.uint8)
         
-        # Create mask for ring area (more focused)
-        ring_mask = create_gradient_mask((height, width), (center_x, center_y), min(width, height) // 3)
-        
-        # Separate enhancement for ring and background
-        # Ring area - stronger enhancement
-        ring_l = l_channel.copy()
-        ring_enhancement = 1.15  # Reduced from 1.25
-        ring_l = cv2.multiply(ring_l, ring_enhancement)
-        ring_l = np.clip(ring_l, 0, 255)
-        
-        # Background area - minimal enhancement
-        bg_enhancement = 1.05  # Reduced from 1.15
-        bg_l = cv2.multiply(l_channel, bg_enhancement)
-        bg_l = np.clip(bg_l, 0, 255)
-        
-        # Blend ring and background
-        enhanced_l = ring_l * ring_mask + bg_l * (1 - ring_mask)
-        enhanced_l = enhanced_l.astype(np.uint8)
-        
-        # Merge channels
-        enhanced_lab = cv2.merge([enhanced_l, a_channel, b_channel])
+        # Merge and convert back
+        enhanced_lab = cv2.merge([l, a, b])
         enhanced_rgb = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
-        
-        # Convert back to PIL
         enhanced_image = Image.fromarray(enhanced_rgb)
         
-        # Apply subtle adjustments
-        # Reduce brightness increase
+        # PIL adjustments
         enhancer = ImageEnhance.Brightness(enhanced_image)
-        enhanced_image = enhancer.enhance(1.03)  # Reduced from 1.08
+        enhanced_image = enhancer.enhance(1.03)
         
-        # Reduce contrast for softer look
         enhancer = ImageEnhance.Contrast(enhanced_image)
-        enhanced_image = enhancer.enhance(1.05)  # Reduced from 1.12
+        enhanced_image = enhancer.enhance(1.05)
         
-        # Very subtle color enhancement
         enhancer = ImageEnhance.Color(enhanced_image)
-        enhanced_image = enhancer.enhance(1.02)  # Reduced from 1.05
+        enhanced_image = enhancer.enhance(1.02)
         
-        # Apply very light sharpening only to ring area
-        # Create sharpened version
-        sharpened = enhanced_image.filter(ImageFilter.UnsharpMask(radius=1, percent=30, threshold=3))
+        # Light sharpening
+        enhanced_image = enhanced_image.filter(ImageFilter.UnsharpMask(radius=1, percent=30, threshold=3))
         
-        # Blend sharpened ring area with original background
-        sharpened_array = np.array(sharpened)
-        enhanced_array = np.array(enhanced_image)
+        # Save to base64
+        output_buffer = BytesIO()
+        enhanced_image.save(output_buffer, format='PNG', quality=95)
+        enhanced_base64 = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
         
-        # Use ring mask for selective sharpening
-        final_array = sharpened_array * ring_mask[:, :, np.newaxis] + enhanced_array * (1 - ring_mask[:, :, np.newaxis])
-        final_array = final_array.astype(np.uint8)
-        
-        # Final image
-        final_image = Image.fromarray(final_array)
-        
-        # Save enhanced image
-        enhanced_buffer = BytesIO()
-        final_image.save(enhanced_buffer, format='PNG', quality=95)
-        enhanced_base64 = base64.b64encode(enhanced_buffer.getvalue()).decode('utf-8')
-        
-        # V67: Remove padding for Make.com compatibility
-        enhanced_base64_no_padding = enhanced_base64.rstrip('=')
-        
-        # For thumbnail, use the same image (no separate processing needed)
-        thumbnail_base64 = enhanced_base64_no_padding
-        
-        logger.info("Image enhancement completed successfully")
-        
-        return enhanced_base64_no_padding, thumbnail_base64
+        # Remove padding for Make.com
+        return enhanced_base64.rstrip('=')
         
     except Exception as e:
         logger.error(f"Enhancement error: {str(e)}")
         raise
 
-def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optional[str]:
+def remove_background_replicate(image_base64, mask_type):
     """Remove background using Replicate API"""
     try:
+        if mask_type == "none":
+            return None
+            
         headers = {
             'Authorization': f'Token {REPLICATE_API_TOKEN}',
             'Content-Type': 'application/json',
         }
         
-        # V67: Ensure no padding for Replicate API
-        image_base64_clean = image_base64.rstrip('=')
+        # Prepare image with data URI
+        image_with_prefix = f"data:image/png;base64,{image_base64}"
         
-        # Add data URI prefix for Replicate
-        image_with_prefix = f"data:image/png;base64,{image_base64_clean}"
-        
-        # Create prediction
-        create_url = "https://api.replicate.com/v1/predictions"
-        
-        # Set model based on mask type
+        # Select model
         if mask_type == "person":
             model_version = "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003"
             model_input = {
@@ -270,169 +108,110 @@ def remove_background_with_replicate(image_base64: str, mask_type: str) -> Optio
                 "alpha_matting_background_threshold": 10,
                 "alpha_matting_erode_size": 10
             }
-        else:  # general or none
+        else:
             model_version = "lucataco/remove-bg:95fcc2a26d3899cd6c2691c900465aaeff466285a65c14638cc5f36f34befaf1"
             model_input = {"image": image_with_prefix}
         
-        create_data = {
-            "version": model_version,
-            "input": model_input
-        }
-        
-        logger.info(f"Creating prediction with {mask_type} model...")
-        response = requests.post(create_url, json=create_data, headers=headers)
+        # Create prediction
+        response = requests.post(
+            "https://api.replicate.com/v1/predictions",
+            json={"version": model_version, "input": model_input},
+            headers=headers
+        )
         response.raise_for_status()
         
         prediction_id = response.json()['id']
-        get_url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
         
         # Poll for result
-        max_attempts = 30
-        for attempt in range(max_attempts):
+        for attempt in range(30):
             time.sleep(2)
             
-            response = requests.get(get_url, headers=headers)
-            response.raise_for_status()
+            result = requests.get(
+                f"https://api.replicate.com/v1/predictions/{prediction_id}",
+                headers=headers
+            ).json()
             
-            result = response.json()
-            status = result['status']
-            
-            logger.info(f"Attempt {attempt + 1}: Status = {status}")
-            
-            if status == 'succeeded':
-                output = result.get('output')
-                if output:
-                    # Download the result image
-                    img_response = requests.get(output)
-                    img_response.raise_for_status()
-                    
-                    # Convert to base64
-                    result_base64 = base64.b64encode(img_response.content).decode('utf-8')
-                    # V67: Remove padding for consistency
-                    result_base64 = result_base64.rstrip('=')
-                    logger.info("Background removal successful")
-                    return result_base64
-                else:
-                    logger.error("No output in successful prediction")
-                    return None
-                    
-            elif status == 'failed':
-                error = result.get('error', 'Unknown error')
-                logger.error(f"Prediction failed: {error}")
+            if result['status'] == 'succeeded':
+                output_url = result.get('output')
+                if output_url:
+                    img_data = requests.get(output_url).content
+                    return base64.b64encode(img_data).decode('utf-8').rstrip('=')
+                return None
+                
+            elif result['status'] == 'failed':
+                logger.error(f"Replicate failed: {result.get('error')}")
                 return None
         
-        logger.error("Timeout waiting for prediction")
         return None
         
     except Exception as e:
-        logger.error(f"Replicate API error: {str(e)}")
+        logger.error(f"Replicate error: {str(e)}")
         return None
-
-def detect_wedding_rings(image: Image.Image) -> bool:
-    """Simple detection to check if image likely contains wedding rings"""
-    try:
-        # Convert to grayscale
-        gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-        
-        # Apply Gaussian blur
-        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
-        
-        # Detect circles (rings)
-        circles = cv2.HoughCircles(
-            blurred,
-            cv2.HOUGH_GRADIENT,
-            dp=1,
-            minDist=50,
-            param1=50,
-            param2=30,
-            minRadius=10,
-            maxRadius=100
-        )
-        
-        # If circles detected, likely wedding rings
-        return circles is not None
-        
-    except Exception as e:
-        logger.error(f"Ring detection error: {str(e)}")
-        return True  # Default to true to process image
 
 def handler(job):
     """Main handler function"""
     start_time = time.time()
     
     try:
-        # Extract input from nested structure
+        # Extract input - simplified search
         job_input = job.get('input', {})
         
-        # V67: Try to find input data with enhanced search
-        input_data = find_input_data(job_input)
+        # Find image in common locations
+        image_input = None
+        mask_type = 'none'
         
-        # If not found, try the whole job
-        if not input_data or 'image' not in input_data:
-            logger.info("Trying to find image in entire job structure...")
-            input_data = find_input_data(job)
+        # Direct check
+        if isinstance(job_input, dict):
+            image_input = job_input.get('image') or job_input.get('image_base64') or job_input.get('base64_image')
+            mask_type = job_input.get('mask_type', 'none').lower()
+        elif isinstance(job_input, str):
+            image_input = job_input
         
-        logger.info(f"Processing with input keys: {list(input_data.keys())}")
+        # Check nested input
+        if not image_input and isinstance(job_input, dict) and 'input' in job_input:
+            nested = job_input['input']
+            if isinstance(nested, dict):
+                image_input = nested.get('image') or nested.get('image_base64') or nested.get('base64_image')
+                mask_type = nested.get('mask_type', mask_type).lower()
         
-        # Get parameters
-        image_input = input_data.get('image')
-        mask_type = input_data.get('mask_type', 'none').lower()
-        
-        # Validate inputs
         if not image_input:
-            raise ValueError("No image provided - searched all possible paths")
+            raise ValueError("No image provided")
         
-        # V67: Log base64 info for debugging
-        if isinstance(image_input, str):
-            logger.info(f"Input image length: {len(image_input)}")
-            if image_input.startswith('data:'):
-                logger.info("Image has data URI prefix")
-            else:
-                logger.info("Image is raw base64")
+        logger.info(f"Processing with mask_type: {mask_type}")
         
-        # Log processing start
-        logger.info(f"Starting enhancement with mask_type: {mask_type}")
+        # Decode and enhance image
+        image_data = decode_base64_image(image_input)
+        enhanced_base64 = enhance_image(image_data)
         
-        # Enhance image
-        enhanced_base64, thumbnail_base64 = enhance_wedding_ring_image(image_input, mask_type)
-        
-        # Handle background removal if needed
+        # Optional background removal
         masked_base64 = None
         if mask_type != "none":
-            logger.info(f"Removing background with mask_type: {mask_type}")
-            masked_base64 = remove_background_with_replicate(enhanced_base64, mask_type)
-            
+            masked_base64 = remove_background_replicate(enhanced_base64, mask_type)
             if not masked_base64:
-                logger.warning("Background removal failed, using enhanced image")
                 masked_base64 = enhanced_base64
         
-        # Calculate processing time
-        processing_time = time.time() - start_time
-        
-        # Prepare response - MUST return {"output": {...}}
+        # Prepare response
         result = {
             "output": {
                 "enhanced_image": enhanced_base64,
-                "thumbnail": thumbnail_base64,
+                "thumbnail": enhanced_base64,  # Same as enhanced for simplicity
                 "mask_type": mask_type,
-                "processing_time": f"{processing_time:.2f}s",
+                "processing_time": f"{time.time() - start_time:.2f}s",
                 "has_mask": mask_type != "none",
                 "success": True,
                 "version": VERSION
             }
         }
         
-        # Add masked image if background was removed
         if masked_base64 and mask_type != "none":
             result["output"]["masked_image"] = masked_base64
         
-        logger.info(f"Successfully processed in {processing_time:.2f}s")
-        
+        logger.info(f"Completed in {time.time() - start_time:.2f}s")
         return result
         
     except Exception as e:
         logger.error(f"Handler error: {str(e)}")
-        error_response = {
+        return {
             "output": {
                 "error": str(e),
                 "success": False,
@@ -440,7 +219,6 @@ def handler(job):
                 "version": VERSION
             }
         }
-        return error_response
 
 # RunPod handler
 runpod.serverless.start({"handler": handler})
