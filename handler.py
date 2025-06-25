@@ -6,12 +6,13 @@ from PIL import Image, ImageEnhance
 import cv2
 import traceback
 
-
-VERSION = "enhancement_v50"
+VERSION = "enhancement_v51"
 print(f"{VERSION} starting...")
 
 def find_input_data(event):
     """Find base64 data from various possible locations"""
+    print(f"Searching for image in event with keys: {list(event.keys())}")
+    
     # Check direct paths first
     direct_paths = [
         'image_base64', 'image', 'base64', 'imageBase64',
@@ -34,11 +35,31 @@ def find_input_data(event):
         except:
             continue
     
-    # Check numbered patterns
+    # Check numbered patterns in input
+    if 'input' in event and isinstance(event['input'], dict):
+        for i in range(10):
+            # Check input.{i}.data.output.output.enhanced_image
+            if str(i) in event['input']:
+                try:
+                    node = event['input'][str(i)]
+                    if isinstance(node, dict) and 'data' in node:
+                        data = node['data']
+                        if isinstance(data, dict) and 'output' in data:
+                            output = data['output']
+                            if isinstance(output, dict) and 'output' in output:
+                                inner_output = output['output']
+                                if isinstance(inner_output, dict) and 'enhanced_image' in inner_output:
+                                    value = inner_output['enhanced_image']
+                                    if value and isinstance(value, str):
+                                        print(f"Found image data at: input.{i}.data.output.output.enhanced_image")
+                                        return value
+                except:
+                    continue
+    
+    # Check root level numbered patterns
     for i in range(10):
-        try:
-            # Pattern 1: {i}.data.output.output.enhanced_image
-            if str(i) in event:
+        if str(i) in event:
+            try:
                 node = event[str(i)]
                 if isinstance(node, dict) and 'data' in node:
                     data = node['data']
@@ -48,33 +69,58 @@ def find_input_data(event):
                             inner_output = output['output']
                             if isinstance(inner_output, dict) and 'enhanced_image' in inner_output:
                                 value = inner_output['enhanced_image']
-                                if value and isinstance(value, str) and len(value) > 100:
+                                if value and isinstance(value, str):
                                     print(f"Found image data at: {i}.data.output.output.enhanced_image")
                                     return value
-        except:
-            continue
+            except:
+                continue
     
-    # Check input dict
-    if 'input' in event and isinstance(event['input'], dict):
-        return find_input_data(event['input'])
+    # Deep search as last resort
+    def search_dict(d, depth=0, max_depth=5):
+        if depth > max_depth or not isinstance(d, dict):
+            return None
+            
+        for key in ['image_base64', 'image', 'base64', 'imageBase64']:
+            if key in d:
+                value = d[key]
+                if isinstance(value, str) and len(value) > 100:
+                    return value
+        
+        for key, value in d.items():
+            if isinstance(value, dict):
+                result = search_dict(value, depth + 1, max_depth)
+                if result:
+                    return result
+        
+        return None
     
-    print("No image data found in any known location")
+    result = search_dict(event)
+    if result:
+        print("Found image data through deep search")
+        return result
+    
+    print(f"No image data found. Full event structure: {event}")
     return None
 
 def enhance_handler(event):
     print(f"=== {VERSION} Handler Started ===")
     print(f"Event keys: {list(event.keys())}")
+    if 'input' in event and isinstance(event['input'], dict):
+        print(f"Input keys: {list(event['input'].keys())}")
     
     try:
         # Find base64 data
         img_data = find_input_data(event)
         if not img_data:
-            print(f"Event structure: {event}")
             return {
                 "output": {
                     "error": "No base64 image data found",
                     "status": "error",
-                    "version": VERSION
+                    "version": VERSION,
+                    "debug_info": {
+                        "event_keys": list(event.keys()),
+                        "input_keys": list(event.get('input', {}).keys()) if 'input' in event else None
+                    }
                 }
             }
         
