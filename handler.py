@@ -6,7 +6,14 @@ import time
 from io import BytesIO
 from PIL import Image, ImageEnhance, ImageOps
 import numpy as np
+import replicate
+import os
 import cv2
+
+# Replicate API 설정
+REPLICATE_API_TOKEN = "r8_8pH3riHZWKr6UwhUjVqHoNDrWqpOdek2nwdRa"
+os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
+print(f"Replicate API Token 설정됨: {REPLICATE_API_TOKEN[:10]}...")
 
 def find_input_data(data):
     """재귀적으로 모든 가능한 경로에서 입력 데이터 찾기"""
@@ -39,12 +46,12 @@ def find_input_data(data):
             else:
                 return current
     
-    # 재귀적 탐색
-    def recursive_search(obj, target_keys=['input', 'url', 'image_url', 'imageUrl']):
+    # 재귀적 탐색 - image_base64도 찾기
+    def recursive_search(obj, target_keys=['input', 'url', 'image_url', 'imageUrl', 'image_base64', 'imageBase64']):
         if isinstance(obj, dict):
             for key in target_keys:
                 if key in obj:
-                    return obj[key]
+                    return obj[key] if key == 'input' else {key: obj[key]}
             
             for value in obj.values():
                 result = recursive_search(value, target_keys)
@@ -89,71 +96,60 @@ def download_image_from_url(url):
             else:
                 raise
 
-def enhance_image(image):
-    """이미지 향상 처리 - 밝고 깨끗한 느낌으로"""
-    img_array = np.array(image)
+def base64_to_image(base64_string):
+    """Base64 문자열을 PIL Image로 변환"""
+    # padding 복원
+    padding = 4 - len(base64_string) % 4
+    if padding != 4:
+        base64_string += '=' * padding
     
-    # 1. 전체적인 밝기 증가
-    brightness_enhancer = ImageEnhance.Brightness(image)
-    image = brightness_enhancer.enhance(1.3)
+    # data URL 형식 처리
+    if ',' in base64_string:
+        base64_string = base64_string.split(',')[1]
     
-    # 2. LAB 색공간에서 명도 조절
-    img_array = np.array(image)
-    lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
-    l, a, b = cv2.split(lab)
+    img_data = base64.b64decode(base64_string)
+    return Image.open(BytesIO(img_data))
+
+def remove_background_with_replicate(image):
+    """Replicate API를 사용하여 배경 제거"""
+    # PIL Image를 base64로 변환
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    img_base64 = base64.b64encode(buffered.getvalue()).decode()
     
-    # L 채널(명도) 향상
-    l = cv2.add(l, 30)
-    l = np.clip(l, 0, 255)
+    # Replicate 모델 실행
+    model = replicate.models.get("cjwbw/rembg")
+    version = model.versions.get("fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003")
     
-    # 다시 합치기
-    lab = cv2.merge([l, a, b])
-    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+    input_data = {
+        "image": f"data:image/png;base64,{img_base64}"
+    }
     
-    # 3. 하이라이트 부분 더 밝게
-    hsv = cv2.cvtColor(enhanced, cv2.COLOR_RGB2HSV).astype(np.float32)
-    h, s, v = cv2.split(hsv)
+    print("Replicate API 호출 중...")
+    output = version.predict(**input_data)
     
-    # 밝은 부분을 더 밝게
-    v = np.where(v > 180, v * 1.1, v)
-    v = np.clip(v, 0, 255)
-    
-    # 채도 약간 감소 (더 깨끗한 느낌)
-    s = s * 0.85
-    
-    hsv = cv2.merge([h, s, v]).astype(np.uint8)
-    enhanced = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-    
-    # 4. 감마 보정으로 전체적으로 밝게
-    gamma = 0.8
-    inv_gamma = 1.0 / gamma
-    table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
-    enhanced = cv2.LUT(enhanced, table)
-    
-    # 5. 약간의 블러로 부드럽게
-    enhanced = cv2.GaussianBlur(enhanced, (3, 3), 0)
-    
-    # 6. 샤프닝
-    kernel = np.array([[-1,-1,-1],
-                       [-1, 9,-1],
-                       [-1,-1,-1]])
-    enhanced = cv2.filter2D(enhanced, -1, kernel)
-    
-    # PIL Image로 변환
-    result_image = Image.fromarray(enhanced)
-    
-    # 7. 최종 밝기와 대비 미세 조정
-    brightness = ImageEnhance.Brightness(result_image)
-    result_image = brightness.enhance(1.1)
-    
-    contrast = ImageEnhance.Contrast(result_image)
-    result_image = contrast.enhance(1.05)
-    
-    return result_image
+    # 결과 다운로드
+    if isinstance(output, str) and output.startswith('http'):
+        response = requests.get(output)
+        return Image.open(BytesIO(response.content))
+    elif isinstance(output, str) and 'base64,' in output:
+        img_data = output.split('base64,')[1]
+        return Image.open(BytesIO(base64.b64decode(img_data)))
+    else:
+        # 이미 PIL Image인 경우
+        return output
 
 def detect_ring_color(image):
     """반지 색상 감지 - 무도금화이트 우선 감지"""
     img_array = np.array(image)
+    
+    # RGB인 경우만 처리 (RGBA는 RGB로 변환)
+    if len(img_array.shape) == 3 and img_array.shape[2] == 4:
+        # 흰색 배경에 합성
+        rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+        rgb_image.paste(image, mask=image.split()[3])
+        img_array = np.array(rgb_image)
+    
     hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
     
     # 이미지 중앙 부분만 분석 (반지가 있을 가능성이 높은 부분)
@@ -204,6 +200,133 @@ def detect_ring_color(image):
     
     return color_map.get(detected_color, '무도금화이트')
 
+def apply_color_specific_enhancement(image, color):
+    """색상별 특화 보정 적용"""
+    enhanced = image.copy()
+    
+    if color == '옐로우골드':
+        # 옐로우골드: 따뜻한 톤 강화, 광택 증가
+        brightness = ImageEnhance.Brightness(enhanced)
+        enhanced = brightness.enhance(1.2)
+        
+        # 노란색 채널 강화
+        img_array = np.array(enhanced)
+        hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+        h, s, v = cv2.split(hsv)
+        
+        # 노란색 영역의 채도 증가
+        yellow_mask = cv2.inRange(h, 20, 30)
+        s = np.where(yellow_mask > 0, np.minimum(s * 1.3, 255), s).astype(np.uint8)
+        
+        hsv = cv2.merge([h, s, v])
+        enhanced = Image.fromarray(cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB))
+        
+    elif color == '로즈골드':
+        # 로즈골드: 핑크톤 강화, 부드러운 광택
+        img_array = np.array(enhanced)
+        hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+        h, s, v = cv2.split(hsv)
+        
+        # 붉은 톤 영역 강화
+        rose_mask = cv2.inRange(h, 0, 15)
+        s = np.where(rose_mask > 0, np.minimum(s * 1.2, 255), s).astype(np.uint8)
+        v = np.where(rose_mask > 0, np.minimum(v * 1.1, 255), v).astype(np.uint8)
+        
+        hsv = cv2.merge([h, s, v])
+        enhanced = Image.fromarray(cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB))
+        
+    elif color == '화이트골드':
+        # 화이트골드: 차가운 톤, 메탈릭 광택
+        brightness = ImageEnhance.Brightness(enhanced)
+        enhanced = brightness.enhance(1.15)
+        
+        contrast = ImageEnhance.Contrast(enhanced)
+        enhanced = contrast.enhance(1.1)
+        
+        # 약간의 블루 톤 추가
+        img_array = np.array(enhanced)
+        img_array[:, :, 2] = np.minimum(img_array[:, :, 2] * 1.05, 255).astype(np.uint8)
+        enhanced = Image.fromarray(img_array)
+        
+    else:  # 무도금화이트
+        # 무도금화이트: 순백색 강조, 밝기 최대화
+        brightness = ImageEnhance.Brightness(enhanced)
+        enhanced = brightness.enhance(1.25)
+        
+        # 채도 감소로 더 하얗게
+        color_enhancer = ImageEnhance.Color(enhanced)
+        enhanced = color_enhancer.enhance(0.7)
+    
+    # 공통: 샤프니스 증가
+    sharpness = ImageEnhance.Sharpness(enhanced)
+    enhanced = sharpness.enhance(1.5)
+    
+    return enhanced
+
+def create_thumbnail_with_color(image, detected_color, size=(1000, 1300)):
+    """1000x1300 썸네일 생성 with 색상별 보정"""
+    print(f"썸네일 생성 시작 - 색상: {detected_color}")
+    
+    # 배경이 제거된 이미지 처리
+    img_array = np.array(image)
+    
+    # 알파 채널이 있는지 확인
+    if img_array.shape[2] == 4:
+        # 알파 채널을 사용하여 객체의 경계 찾기
+        alpha = img_array[:, :, 3]
+        coords = cv2.findNonZero(alpha)
+        x, y, w, h = cv2.boundingRect(coords)
+        
+        # 객체 주변에 여백 추가 (15%)
+        padding = int(max(w, h) * 0.15)
+        x = max(0, x - padding)
+        y = max(0, y - padding)
+        w = min(img_array.shape[1] - x, w + 2 * padding)
+        h = min(img_array.shape[0] - y, h + 2 * padding)
+        
+        # 1000:1300 비율로 맞추기
+        target_ratio = 1000 / 1300  # 0.769
+        current_ratio = w / h
+        
+        if current_ratio > target_ratio:
+            # 너무 넓음 - 높이를 늘려야 함
+            new_h = int(w / target_ratio)
+            diff = new_h - h
+            y = max(0, y - diff // 2)
+            h = new_h
+        else:
+            # 너무 높음 - 너비를 늘려야 함
+            new_w = int(h * target_ratio)
+            diff = new_w - w
+            x = max(0, x - diff // 2)
+            w = new_w
+        
+        # 경계 체크
+        x = max(0, x)
+        y = max(0, y)
+        w = min(img_array.shape[1] - x, w)
+        h = min(img_array.shape[0] - y, h)
+        
+        # 크롭
+        cropped = img_array[y:y+h, x:x+w]
+        cropped_img = Image.fromarray(cropped)
+    else:
+        cropped_img = image
+    
+    # 리사이즈
+    thumbnail = cropped_img.resize(size, Image.Resampling.LANCZOS)
+    
+    # 흰색 배경 추가
+    if thumbnail.mode == 'RGBA':
+        background = Image.new('RGB', size, (255, 255, 255))
+        background.paste(thumbnail, (0, 0), thumbnail)
+        thumbnail = background
+    
+    # 색상별 디테일 보정 적용
+    thumbnail = apply_color_specific_enhancement(thumbnail, detected_color)
+    
+    return thumbnail
+
 def image_to_base64(image, format='JPEG'):
     """PIL Image를 base64 문자열로 변환"""
     buffered = BytesIO()
@@ -223,9 +346,9 @@ def image_to_base64(image, format='JPEG'):
     return img_base64_no_padding
 
 def handler(event):
-    """Enhancement 핸들러 함수"""
+    """Thumbnail 핸들러 함수"""
     try:
-        print("Enhancement 이벤트 수신:", json.dumps(event, indent=2)[:500])
+        print("Thumbnail 이벤트 수신:", json.dumps(event, indent=2)[:500])
         
         # 입력 데이터 찾기
         input_data = find_input_data(event)
@@ -233,45 +356,61 @@ def handler(event):
         if not input_data:
             raise ValueError("입력 데이터를 찾을 수 없습니다")
         
-        # URL 추출
-        image_url = None
+        # 이미지 소스 확인 (URL 또는 Base64)
+        image = None
+        
+        # Base64 입력 처리
         if isinstance(input_data, dict):
-            image_url = input_data.get('url') or input_data.get('image_url') or input_data.get('imageUrl')
+            if 'image_base64' in input_data or 'imageBase64' in input_data:
+                base64_str = input_data.get('image_base64') or input_data.get('imageBase64')
+                print("Base64 이미지 입력 감지")
+                image = base64_to_image(base64_str)
+            elif 'url' in input_data or 'image_url' in input_data or 'imageUrl' in input_data:
+                image_url = input_data.get('url') or input_data.get('image_url') or input_data.get('imageUrl')
+                print(f"URL 입력 감지: {image_url}")
+                image = download_image_from_url(image_url)
         elif isinstance(input_data, str):
-            image_url = input_data
+            # 문자열인 경우 URL로 가정
+            if input_data.startswith('http'):
+                print(f"URL 문자열 입력: {input_data}")
+                image = download_image_from_url(input_data)
+            else:
+                # Base64 문자열로 가정
+                print("Base64 문자열 입력 감지")
+                image = base64_to_image(input_data)
         
-        if not image_url:
-            raise ValueError(f"이미지 URL을 찾을 수 없습니다. 입력: {input_data}")
+        if not image:
+            raise ValueError(f"이미지를 로드할 수 없습니다. 입력: {input_data}")
         
-        print(f"이미지 URL: {image_url}")
+        print(f"이미지 로드 완료: {image.size}")
         
-        # 이미지 다운로드
-        image = download_image_from_url(image_url)
-        print(f"이미지 다운로드 완료: {image.size}")
-        
-        # 색상 감지
+        # 색상 감지 (배경 제거 전에 원본에서)
         detected_color = detect_ring_color(image)
         print(f"감지된 반지 색상: {detected_color}")
         
-        # 이미지 향상
-        enhanced_image = enhance_image(image)
-        print("이미지 향상 완료")
+        # 배경 제거
+        no_bg_image = remove_background_with_replicate(image)
+        print("배경 제거 완료")
+        
+        # 썸네일 생성 (색상 정보 전달)
+        thumbnail = create_thumbnail_with_color(no_bg_image, detected_color)
+        print(f"썸네일 생성 완료: {thumbnail.size}")
         
         # base64 변환 (padding 제거)
-        enhanced_base64 = image_to_base64(enhanced_image)
+        thumbnail_base64 = image_to_base64(thumbnail)
         
         # 중첩된 output 구조로 반환
         return {
             "output": {
-                "enhanced_image": enhanced_base64,
+                "thumbnail": thumbnail_base64,
+                "size": list(thumbnail.size),
                 "detected_color": detected_color,
-                "original_size": image.size,
                 "format": "base64_no_padding"
             }
         }
         
     except Exception as e:
-        print(f"Enhancement 오류 발생: {str(e)}")
+        print(f"Thumbnail 오류 발생: {str(e)}")
         import traceback
         traceback.print_exc()
         
