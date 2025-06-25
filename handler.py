@@ -6,16 +6,18 @@ from typing import Dict, Any, Optional, Tuple
 from PIL import Image, ImageEnhance
 import numpy as np
 
-VERSION = "43"
+VERSION = "44"
 
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     """
     RunPod serverless handler for wedding ring image enhancement
-    v43: Optimized for speed while maintaining quality
+    v44: Fixed base64 handling and response structure
     """
     print(f"Enhancement Handler v{VERSION} starting...")
+    print(f"Event type: {type(event)}")
+    print(f"Event keys: {list(event.keys()) if isinstance(event, dict) else 'Not a dict'}")
     
-    enhancement_handler = EnhancementHandlerV43()
+    enhancement_handler = EnhancementHandlerV44()
     
     try:
         # Find base64 input using recursive search
@@ -23,12 +25,15 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         
         if not input_base64:
             print("ERROR: No base64 data found")
-            print(f"Event keys: {list(event.keys())}")
-            print(f"Event structure (first 500 chars): {str(event)[:500]}")
+            print(f"Full event (first 1000 chars): {str(event)[:1000]}")
             return enhancement_handler.create_error_response("No base64 input data found")
+        
+        print(f"Found base64 data, length: {len(input_base64)}")
         
         # Process the image
         result = enhancement_handler.process_image(input_base64)
+        
+        print(f"Result keys: {list(result.get('output', {}).keys())}")
         return result
         
     except Exception as e:
@@ -37,12 +42,13 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         return enhancement_handler.create_error_response(f"Handler error: {str(e)}")
 
 
-class EnhancementHandlerV43:
+class EnhancementHandlerV44:
     def __init__(self):
         self.version = VERSION
         self.priority_keys = [
             'image_base64', 'image', 'base64', 'image_data',
-            'input_image', 'input', 'data', 'enhanced_image'
+            'input_image', 'input', 'data', 'enhanced_image',
+            'imageBase64', 'base64Image', 'img'
         ]
     
     def find_string_recursive(self, obj: Any, path: str = "", depth: int = 0, max_depth: int = 10) -> Optional[str]:
@@ -54,11 +60,14 @@ class EnhancementHandlerV43:
             # Check if it's a data URL
             if obj.startswith('data:image'):
                 print(f"Found data URL at path: {path}")
-                return obj.split(',')[1] if ',' in obj else obj
+                base64_part = obj.split(',')[1] if ',' in obj else obj
+                return base64_part
             # Check if it's likely base64 (long string)
-            elif len(obj) > 1000 and not obj.startswith('{'):
-                print(f"Found potential base64 at path: {path}")
-                return obj
+            elif len(obj) > 1000:
+                # Check if it's not JSON
+                if not obj.strip().startswith('{') and not obj.strip().startswith('['):
+                    print(f"Found potential base64 at path: {path}, length: {len(obj)}")
+                    return obj
         
         elif isinstance(obj, dict):
             # Check priority keys first
@@ -93,36 +102,57 @@ class EnhancementHandlerV43:
     
     def decode_base64_safe(self, base64_str: str) -> bytes:
         """Safely decode base64 with automatic padding fix"""
-        # Clean the input
-        base64_str = base64_str.strip()
-        
-        # Remove data URL prefix if present
-        if 'base64,' in base64_str:
-            base64_str = base64_str.split('base64,')[1]
-        
-        # Add padding if needed
-        padding = 4 - len(base64_str) % 4
-        if padding != 4:
-            base64_str += '=' * padding
-        
-        return base64.b64decode(base64_str)
+        try:
+            # Clean the input
+            base64_str = base64_str.strip()
+            
+            # Remove any whitespace or newlines
+            base64_str = ''.join(base64_str.split())
+            
+            # Remove data URL prefix if present
+            if 'base64,' in base64_str:
+                base64_str = base64_str.split('base64,')[1]
+            
+            # Try to decode as is first
+            try:
+                return base64.b64decode(base64_str)
+            except:
+                pass
+            
+            # Add padding if needed
+            padding = 4 - len(base64_str) % 4
+            if padding != 4:
+                base64_str += '=' * padding
+                print(f"Added {padding} padding characters")
+            
+            return base64.b64decode(base64_str)
+            
+        except Exception as e:
+            print(f"Base64 decode error: {str(e)}")
+            print(f"Base64 string first 100 chars: {base64_str[:100]}")
+            raise
     
     def encode_base64_no_padding(self, data: bytes) -> str:
         """Encode to base64 without padding for Make.com compatibility"""
+        # CRITICAL: Remove padding for Make.com
         return base64.b64encode(data).decode('utf-8').rstrip('=')
     
     def process_image(self, input_base64: str) -> Dict[str, Any]:
-        """Process the wedding ring image with optimized enhancement"""
+        """Process the wedding ring image with simple enhancement"""
         try:
             # Decode base64
+            print("Decoding base64...")
             image_data = self.decode_base64_safe(input_base64)
+            print(f"Decoded image data length: {len(image_data)}")
             
             # Open image
             img = Image.open(BytesIO(image_data))
+            print(f"Image opened: {img.size}, mode: {img.mode}")
             
             # Convert to RGB if needed
             if img.mode != 'RGB':
                 img = img.convert('RGB')
+                print("Converted to RGB")
             
             # Simple but effective enhancement (based on v31 success)
             # Brightness
@@ -137,67 +167,36 @@ class EnhancementHandlerV43:
             enhancer = ImageEnhance.Color(img)
             img = enhancer.enhance(0.95)  # 5% less saturated
             
-            # Optional: Add subtle background blend if needed
-            # This is fast and doesn't affect performance much
-            if self.should_apply_background_blend(img):
-                img = self.apply_quick_background_blend(img)
+            print("Enhancement applied")
             
-            # Save to buffer
+            # Save to buffer with high quality
             buffer = BytesIO()
             img.save(buffer, format='JPEG', quality=92, optimize=True)
             buffer.seek(0)
             
-            # Encode without padding
+            # Encode without padding - CRITICAL FOR MAKE.COM
             enhanced_base64 = self.encode_base64_no_padding(buffer.getvalue())
+            print(f"Enhanced base64 length: {len(enhanced_base64)}")
+            print(f"Last 3 chars of base64: '{enhanced_base64[-3:]}'")  # Should NOT be '='
             
             # Return with correct structure
-            return {
+            result = {
                 "output": {
                     "enhanced_image": f"data:image/jpeg;base64,{enhanced_base64}",
                     "status": "success",
                     "version": self.version,
-                    "message": "Image enhanced successfully (optimized)"
+                    "original_size": f"{img.width}x{img.height}",
+                    "message": "Image enhanced successfully"
                 }
             }
             
+            print("Returning success response")
+            return result
+            
         except Exception as e:
             print(f"ERROR in process_image: {str(e)}")
+            print(f"Traceback: {traceback.format_exc()}")
             return self.create_error_response(f"Processing error: {str(e)}")
-    
-    def should_apply_background_blend(self, img: Image.Image) -> bool:
-        """Quick check if background blend would be beneficial"""
-        # Sample corners to check if background is too dark/gray
-        width, height = img.size
-        corners = [
-            img.getpixel((10, 10)),
-            img.getpixel((width-10, 10)),
-            img.getpixel((10, height-10)),
-            img.getpixel((width-10, height-10))
-        ]
-        
-        avg_brightness = sum(sum(c) / 3 for c in corners) / 4
-        return avg_brightness < 200  # If corners are dark, apply blend
-    
-    def apply_quick_background_blend(self, img: Image.Image) -> Image.Image:
-        """Quick background blend without heavy processing"""
-        # Create a subtle gradient overlay
-        width, height = img.size
-        
-        # Create beige overlay
-        overlay = Image.new('RGB', (width, height), (245, 243, 240))
-        
-        # Quick mask based on brightness
-        img_array = np.array(img)
-        gray = np.mean(img_array, axis=2)
-        
-        # Simple threshold mask
-        mask = (gray < 200).astype(np.uint8) * 30  # 30/255 = ~12% blend
-        mask = Image.fromarray(mask, 'L')
-        
-        # Apply blend
-        img = Image.composite(overlay, img, mask)
-        
-        return img
     
     def create_error_response(self, error_message: str) -> Dict[str, Any]:
         """Create error response with correct structure"""
@@ -208,6 +207,7 @@ class EnhancementHandlerV43:
                 "version": self.version
             }
         }
+
 
 # For RunPod
 if __name__ == "__main__":
