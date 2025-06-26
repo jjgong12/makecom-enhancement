@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V81-NoDuplicate"
+VERSION = "V82-GoogleFix"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -183,23 +183,28 @@ def detect_ring_color(image: Image.Image) -> str:
         return "화이트골드"
 
 def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> Image.Image:
-    """Simple color-specific enhancement - fixed for true white"""
+    """Simple color-specific enhancement - ULTRA WHITE for unplated"""
     
     if detected_color == "무도금화이트":
-        # TRUE WHITE - almost pure white
+        # ULTRA WHITE - maximum whiteness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.25)  # Much brighter
+        image = brightness.enhance(1.35)  # Even brighter
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.2)  # Remove most color
+        image = color.enhance(0.1)  # Almost no color (10% only)
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(0.95)  # Softer contrast
+        image = contrast.enhance(0.9)  # Softer contrast
         
-        # Additional whitening
+        # Heavy whitening
         img_array = np.array(image)
-        img_array = img_array * 0.7 + 255 * 0.3  # Mix with pure white
+        # Mix 50% with pure white
+        img_array = img_array * 0.5 + 255 * 0.5
         image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # Additional brightness boost
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.1)
         
     elif detected_color == "옐로우골드":
         brightness = ImageEnhance.Brightness(image)
@@ -243,7 +248,7 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - with duplicate detection"""
+    """Enhancement processing - with Google Script compatibility"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -324,7 +329,7 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.05)
         
-        # 4. Apply color-specific enhancement (fixed for true white)
+        # 4. Apply color-specific enhancement (ULTRA WHITE for unplated)
         image = apply_color_enhancement_simple(image, detected_color)
         
         # 5. Light sharpening
@@ -341,9 +346,11 @@ def process_enhancement(job):
         
         logger.info("Enhancement completed successfully")
         
+        # IMPORTANT: Return ONLY base64 without data URL prefix for Google Script
         return {
             "output": {
-                "enhanced_image": f"data:image/png;base64,{enhanced_base64_no_padding}",
+                "enhanced_image": enhanced_base64_no_padding,  # NO prefix!
+                "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",  # For other uses
                 "detected_color": detected_color,
                 "original_size": list(image.size),
                 "version": VERSION,
