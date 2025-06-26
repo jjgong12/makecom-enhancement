@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V84-Brighter"
+VERSION = "V85-CenterFocus"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -229,6 +229,30 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
     
     return image
 
+def apply_center_focus(image: Image.Image) -> Image.Image:
+    """Apply subtle center brightening to focus on ring"""
+    width, height = image.size
+    
+    # Create radial gradient
+    x = np.linspace(-1, 1, width)
+    y = np.linspace(-1, 1, height)
+    X, Y = np.meshgrid(x, y)
+    
+    # Distance from center
+    distance = np.sqrt(X**2 + Y**2)
+    
+    # Create center focus mask (brighter in center, normal at edges)
+    # Use smoother gradient to avoid visible gradation
+    focus_mask = 1 + 0.08 * np.exp(-distance**2 * 0.8)  # Very subtle, smooth gradient
+    focus_mask = np.clip(focus_mask, 1.0, 1.08)  # Max 8% increase in center
+    
+    # Apply focus
+    img_array = np.array(image)
+    for i in range(3):
+        img_array[:, :, i] = np.clip(img_array[:, :, i] * focus_mask, 0, 255)
+    
+    return Image.fromarray(img_array.astype(np.uint8))
+
 def calculate_image_hash(image: Image.Image) -> str:
     """Calculate a simple hash to detect duplicate images"""
     # Resize to small size for fast comparison
@@ -315,10 +339,10 @@ def process_enhancement(job):
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
-        # Basic enhancement - BRIGHTER V84
-        # 1. Brightness (increased)
+        # Basic enhancement - REDUCED for V85 (less gradient effect)
+        # 1. Brightness (reduced from V84)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.18)  # Increased from 1.12
+        image = brightness.enhance(1.14)  # Reduced from 1.18
         
         # 2. Contrast
         contrast = ImageEnhance.Contrast(image)
@@ -331,13 +355,16 @@ def process_enhancement(job):
         # 4. Apply color-specific enhancement (ULTRA PURE WHITE for unplated)
         image = apply_color_enhancement_simple(image, detected_color)
         
-        # 5. Light sharpening
+        # 5. Apply center focus (subtle brightening on ring)
+        image = apply_center_focus(image)
+        
+        # 6. Light sharpening
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.3)
         
-        # 6. Additional overall brightness boost for V84
+        # 7. Very minimal overall brightness boost for V85 (reduced)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.05)  # Extra 5% brightness
+        image = brightness.enhance(1.02)  # Reduced from 1.05
         
         # Save to base64
         buffered = BytesIO()
