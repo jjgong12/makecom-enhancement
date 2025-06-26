@@ -12,21 +12,30 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V77-SimpleStable"
+VERSION = "V78-FixedDictError"
 
 def find_input_data(data):
-    """간단하고 안정적인 입력 데이터 찾기 - V56 스타일"""
+    """Find actual image data - returns the base64 string, not dict"""
     
-    # 전체 구조 로깅 (디버깅용)
+    # Log structure for debugging
     logger.info(f"Input structure: {json.dumps(data, indent=2)[:500]}...")
     
-    # 직접 접근 시도
+    # Direct access attempts
     if isinstance(data, dict):
-        # 최상위 레벨 체크
-        if 'input' in data:
-            return data['input']
+        # Check for direct image data keys
+        image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
+                     'imageBase64', 'image_base64', 'base64']
         
-        # 일반적인 RunPod 구조들
+        for key in image_keys:
+            if key in data and data[key]:
+                # Return the actual string, not the dict
+                return data[key]
+        
+        # Check for 'input' key
+        if 'input' in data:
+            return find_input_data(data['input'])
+        
+        # Common RunPod paths
         common_paths = [
             ['job', 'input'],
             ['data', 'input'],
@@ -43,45 +52,55 @@ def find_input_data(data):
                 else:
                     break
             else:
-                return current
+                # If we got through the whole path, check if it's a string or dict
+                if isinstance(current, str):
+                    return current
+                elif isinstance(current, dict):
+                    # Extract image data from the dict
+                    for img_key in image_keys:
+                        if img_key in current and current[img_key]:
+                            return current[img_key]
     
-    # 재귀적 탐색 - 간단한 버전
-    def simple_search(obj):
+    # If data is already a string, return it
+    elif isinstance(data, str):
+        return data
+    
+    # Recursive search with proper extraction
+    def recursive_search(obj):
         if isinstance(obj, dict):
-            # 이미지 관련 키들 확인
+            # Check image keys first
             image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
                          'imageBase64', 'image_base64', 'base64']
             
             for key in image_keys:
-                if key in obj and obj[key]:
+                if key in obj and obj[key] and isinstance(obj[key], str):
                     return obj[key]
             
-            # input 키가 있으면 재귀
-            if 'input' in obj:
-                return simple_search(obj['input'])
-            
-            # 숫자 키 확인 (Make.com의 '4' 같은 경우)
+            # Check numeric keys (Make.com)
             for key in obj:
                 if key.isdigit():
-                    result = simple_search(obj[key])
+                    result = recursive_search(obj[key])
                     if result:
                         return result
             
-            # data, output 등 확인
-            for key in ['data', 'output', 'payload']:
+            # Check other common keys
+            for key in ['input', 'data', 'output', 'payload']:
                 if key in obj:
-                    result = simple_search(obj[key])
+                    result = recursive_search(obj[key])
                     if result:
                         return result
         
         return None
     
-    result = simple_search(data)
+    result = recursive_search(data)
     logger.info(f"Found data: {str(result)[:100]}..." if result else "No data found")
     return result
 
 def decode_base64_safe(base64_str: str) -> bytes:
     """Safely decode base64 with automatic padding correction"""
+    if not isinstance(base64_str, str):
+        raise ValueError(f"Expected string, got {type(base64_str)}")
+    
     if base64_str.startswith('data:'):
         base64_str = base64_str.split(',')[1]
     
@@ -162,26 +181,26 @@ def detect_ring_color(image: Image.Image) -> str:
         return "무도금화이트"
 
 def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> Image.Image:
-    """간단한 색상별 보정 - 파란색 부스트 없음"""
+    """Simple color-specific enhancement - no blue boost"""
     
     if detected_color == "무도금화이트":
-        # 순수한 하얀색 보정 - PIL만 사용
-        # Step 1: 강한 밝기 증가
+        # Pure white enhancement - PIL only
+        # Step 1: Strong brightness increase
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.2)
         
-        # Step 2: 채도를 크게 낮춤
+        # Step 2: Moderate saturation reduction (not too much)
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.2)
+        image = color.enhance(0.5)  # Changed from 0.2 to 0.5 to maintain some color
         
-        # Step 3: 약간의 대비 조정
+        # Step 3: Slight contrast adjustment
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.05)
         
-        # NO BLUE BOOST - 파란색 부스트 없음
+        # NO BLUE BOOST - no LAB conversion
         
     elif detected_color == "옐로우골드":
-        # 순금색 보정
+        # Pure gold enhancement
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)
         
@@ -189,17 +208,17 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
         image = color.enhance(1.1)
         
     elif detected_color == "로즈골드":
-        # 로즈골드 보정
+        # Rose gold enhancement
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.05)
         
-        # 살짝 따뜻한 톤
+        # Slight warm tone
         img_array = np.array(image)
         img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.03, 0, 255)
         image = Image.fromarray(img_array)
         
     elif detected_color == "화이트골드":
-        # 화이트골드 보정
+        # White gold enhancement
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.1)
         
@@ -209,11 +228,11 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
     return image
 
 def process_enhancement(job):
-    """Enhancement 처리 - 간단하고 안정적인 버전"""
+    """Enhancement processing - stable version"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
-        # Find image data - 간단한 방법 사용
+        # Find image data - now properly extracts string from dict
         image_data = find_input_data(job)
         
         if not image_data:
@@ -221,6 +240,17 @@ def process_enhancement(job):
             return {
                 "output": {
                     "error": "No image data found",
+                    "status": "error",
+                    "version": VERSION
+                }
+            }
+        
+        # Ensure we have a string
+        if not isinstance(image_data, str):
+            logger.error(f"Image data is not a string: {type(image_data)}")
+            return {
+                "output": {
+                    "error": f"Image data must be a string, got {type(image_data)}",
                     "status": "error",
                     "version": VERSION
                 }
@@ -245,7 +275,7 @@ def process_enhancement(job):
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
-        # Basic enhancement - V56 스타일
+        # Basic enhancement - V56 style
         # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.12)
@@ -258,7 +288,7 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.05)
         
-        # 4. Apply color-specific enhancement (간단한 버전)
+        # 4. Apply color-specific enhancement
         image = apply_color_enhancement_simple(image, detected_color)
         
         # 5. Light sharpening
