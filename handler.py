@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V82-GoogleFix"
+VERSION = "V83-UltraWhite"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -183,28 +183,27 @@ def detect_ring_color(image: Image.Image) -> str:
         return "화이트골드"
 
 def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> Image.Image:
-    """Simple color-specific enhancement - ULTRA WHITE for unplated"""
+    """Simple color-specific enhancement - ULTRA PURE WHITE for unplated"""
     
     if detected_color == "무도금화이트":
-        # ULTRA WHITE - maximum whiteness
+        # ULTRA PURE WHITE - maximum whiteness V83
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.35)  # Even brighter
+        image = brightness.enhance(1.4)  # More brightness
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.1)  # Almost no color (10% only)
+        image = color.enhance(0.05)  # Almost zero color (5% only)
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(0.9)  # Softer contrast
+        image = contrast.enhance(0.85)  # Even softer contrast
         
-        # Heavy whitening
+        # Heavier whitening - 60% white mixing
         img_array = np.array(image)
-        # Mix 50% with pure white
-        img_array = img_array * 0.5 + 255 * 0.5
+        img_array = img_array * 0.4 + 255 * 0.6  # 60% white
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Additional brightness boost
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.1)
+        image = brightness.enhance(1.15)  # More boost
         
     elif detected_color == "옐로우골드":
         brightness = ImageEnhance.Brightness(image)
@@ -329,7 +328,7 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.05)
         
-        # 4. Apply color-specific enhancement (ULTRA WHITE for unplated)
+        # 4. Apply color-specific enhancement (ULTRA PURE WHITE for unplated)
         image = apply_color_enhancement_simple(image, detected_color)
         
         # 5. Light sharpening
