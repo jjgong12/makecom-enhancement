@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V87-MinimalWhiteOverlay"
+VERSION = "V88-5PercentWhiteOnly"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -191,38 +191,38 @@ def detect_ring_color(image: Image.Image) -> str:
             return "화이트골드"
 
 def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> Image.Image:
-    """Simple color-specific enhancement - MINIMAL WHITE OVERLAY"""
+    """Simple color-specific enhancement - ONLY 5% WHITE OVERLAY"""
     
     if detected_color == "무도금화이트":
-        # MINIMAL WHITE EFFECT for V87 - Really tiny amount!
+        # ULTRA MINIMAL WHITE EFFECT for V88 - Only 5%!
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.15)  # Moderate brightness
+        image = brightness.enhance(1.12)  # Slightly reduced
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.2)  # Keep some color
+        image = color.enhance(0.3)  # Keep more color than before
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(0.95)  # Very soft contrast
+        image = contrast.enhance(1.0)  # No contrast change
         
-        # MINIMAL white mixing - only 10%!
+        # ULTRA MINIMAL white mixing - only 5%!
         img_array = np.array(image)
-        img_array = img_array * 0.9 + 255 * 0.1  # Only 10% white overlay
+        img_array = img_array * 0.95 + 255 * 0.05  # Only 5% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Small additional boost
+        # Very small additional boost
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.05)  # Very small boost
+        image = brightness.enhance(1.03)  # Tiny boost
         
     elif detected_color == "옐로우골드":
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.06)  # Slightly reduced
+        image = brightness.enhance(1.06)
         
         color = ImageEnhance.Color(image)
         image = color.enhance(1.1)
         
     elif detected_color == "로즈골드":
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.03)  # Reduced
+        image = brightness.enhance(1.03)
         
         img_array = np.array(image)
         img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.02, 0, 255)
@@ -230,7 +230,7 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
         
     elif detected_color == "화이트골드":
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)  # Slightly reduced
+        image = brightness.enhance(1.08)
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.9)
@@ -250,9 +250,9 @@ def apply_center_focus(image: Image.Image) -> Image.Image:
     distance = np.sqrt(X**2 + Y**2)
     
     # Create center focus mask (brighter in center, normal at edges)
-    # REDUCED effect for V87
-    focus_mask = 1 + 0.05 * np.exp(-distance**2 * 0.8)  # Reduced from 0.08 to 0.05
-    focus_mask = np.clip(focus_mask, 1.0, 1.05)  # Max 5% increase in center
+    # REDUCED effect for V88
+    focus_mask = 1 + 0.04 * np.exp(-distance**2 * 0.8)  # Reduced from 0.05 to 0.04
+    focus_mask = np.clip(focus_mask, 1.0, 1.04)  # Max 4% increase in center
     
     # Apply focus
     img_array = np.array(image)
@@ -347,31 +347,30 @@ def process_enhancement(job):
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
-        # Basic enhancement - FURTHER REDUCED for V87
-        # 1. Brightness (significantly reduced)
+        # Basic enhancement - V88 settings
+        # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)  # Reduced from 1.14
+        image = brightness.enhance(1.08)
         
-        # 2. Contrast (slightly reduced)
+        # 2. Contrast
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.05)  # Reduced from 1.08
+        image = contrast.enhance(1.05)
         
-        # 3. Color (slightly reduced)
+        # 3. Color
         color = ImageEnhance.Color(image)
-        image = color.enhance(1.03)  # Reduced from 1.05
+        image = color.enhance(1.03)
         
-        # 4. Apply color-specific enhancement (MINIMAL white overlay - 10%!)
+        # 4. Apply color-specific enhancement (ONLY 5% white overlay!)
         image = apply_color_enhancement_simple(image, detected_color)
         
         # 5. Apply center focus (REDUCED effect)
         image = apply_center_focus(image)
         
-        # 6. Light sharpening (reduced)
+        # 6. Light sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.2)  # Reduced from 1.3
+        image = sharpness.enhance(1.2)
         
-        # 7. NO additional brightness boost for V87
-        # Removed the final brightness.enhance(1.02)
+        # 7. NO additional brightness boost
         
         # Save to base64
         buffered = BytesIO()
