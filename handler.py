@@ -12,7 +12,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V80-FastOptimized"
+VERSION = "V81-NoDuplicate"
+
+# Global cache to prevent duplicate processing
+PROCESSED_IMAGES = {}
 
 def find_input_data(data):
     """Find input data - optimized for speed"""
@@ -110,7 +113,7 @@ def decode_base64_safe(base64_str: str) -> bytes:
     return base64.b64decode(base64_str)
 
 def detect_ring_color(image: Image.Image) -> str:
-    """Ultra-conservative yellow gold detection - only pure gold colors"""
+    """Improved color detection - better white gold vs unplated white distinction"""
     img_array = np.array(image)
     height, width = img_array.shape[:2]
     
@@ -152,38 +155,51 @@ def detect_ring_color(image: Image.Image) -> str:
     rb_ratio = r_mean / (b_mean + 1)
     gb_ratio = g_mean / (b_mean + 1)
     
+    # Color variance (how different are RGB channels)
+    rgb_variance = np.var([r_mean, g_mean, b_mean])
+    
     # ULTRA-CONSERVATIVE YELLOW GOLD
-    is_pure_gold = (
-        avg_hue >= 25 and avg_hue <= 32 and
+    if (avg_hue >= 25 and avg_hue <= 32 and
         avg_saturation > 80 and
         avg_value > 120 and avg_value < 200 and
         gb_ratio > 1.4 and
         r_mean > 180 and g_mean > 140 and
-        b_mean < 100
-    )
-    
-    if is_pure_gold:
+        b_mean < 100):
         return "옐로우골드"
+    
+    # ROSE GOLD
     elif rg_ratio > 1.2 and rb_ratio > 1.3 and avg_hue < 15:
         return "로즈골드"
-    elif avg_saturation < 50 and avg_value > 180 and b_norm > r_norm:
-        return "화이트골드"
-    else:
+    
+    # WHITE GOLD vs UNPLATED WHITE distinction
+    # White gold: has some warmth/color, metallic sheen
+    # Unplated white: very low saturation, high brightness, almost pure white
+    elif avg_saturation < 15 and avg_value > 200 and rgb_variance < 50:
+        # Very low saturation + very high brightness + low variance = unplated white
         return "무도금화이트"
+    
+    else:
+        # Everything else is white gold (has some color/warmth)
+        return "화이트골드"
 
 def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> Image.Image:
-    """Simple color-specific enhancement - no blue boost"""
+    """Simple color-specific enhancement - fixed for true white"""
     
     if detected_color == "무도금화이트":
-        # Pure white enhancement
+        # TRUE WHITE - almost pure white
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.18)
+        image = brightness.enhance(1.25)  # Much brighter
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.6)
+        image = color.enhance(0.2)  # Remove most color
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.05)
+        image = contrast.enhance(0.95)  # Softer contrast
+        
+        # Additional whitening
+        img_array = np.array(image)
+        img_array = img_array * 0.7 + 255 * 0.3  # Mix with pure white
+        image = Image.fromarray(img_array.astype(np.uint8))
         
     elif detected_color == "옐로우골드":
         brightness = ImageEnhance.Brightness(image)
@@ -209,8 +225,25 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
     
     return image
 
+def calculate_image_hash(image: Image.Image) -> str:
+    """Calculate a simple hash to detect duplicate images"""
+    # Resize to small size for fast comparison
+    small = image.resize((8, 8), Image.Resampling.LANCZOS)
+    pixels = list(small.getdata())
+    avg = sum(sum(pixel) for pixel in pixels) / len(pixels) / 3
+    
+    # Create binary hash
+    hash_str = ""
+    for pixel in pixels:
+        if sum(pixel) / 3 > avg:
+            hash_str += "1"
+        else:
+            hash_str += "0"
+    
+    return hash_str
+
 def process_enhancement(job):
-    """Enhancement processing - optimized version"""
+    """Enhancement processing - with duplicate detection"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -236,6 +269,29 @@ def process_enhancement(job):
                 }
             }
         
+        # Check for duplicate processing
+        image_preview = image_data[:100]  # First 100 chars as quick check
+        current_time = time.time()
+        
+        # Clean old entries (older than 60 seconds)
+        global PROCESSED_IMAGES
+        PROCESSED_IMAGES = {k: v for k, v in PROCESSED_IMAGES.items() 
+                          if current_time - v < 60}
+        
+        # Check if recently processed
+        if image_preview in PROCESSED_IMAGES:
+            logger.warning("Duplicate image detected, skipping processing")
+            return {
+                "output": {
+                    "error": "Duplicate processing detected",
+                    "status": "duplicate",
+                    "version": VERSION
+                }
+            }
+        
+        # Mark as processed
+        PROCESSED_IMAGES[image_preview] = current_time
+        
         # Decode image
         image_bytes = decode_base64_safe(image_data)
         image = Image.open(BytesIO(image_bytes))
@@ -251,7 +307,7 @@ def process_enhancement(job):
         
         logger.info(f"Image loaded: {image.size}")
         
-        # Detect color
+        # Detect color with improved logic
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
@@ -268,7 +324,7 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.05)
         
-        # 4. Apply color-specific enhancement
+        # 4. Apply color-specific enhancement (fixed for true white)
         image = apply_color_enhancement_simple(image, detected_color)
         
         # 5. Light sharpening
