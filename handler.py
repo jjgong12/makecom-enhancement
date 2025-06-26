@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V85-CenterFocus"
+VERSION = "V86-ReducedBrightness"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -113,7 +113,7 @@ def decode_base64_safe(base64_str: str) -> bytes:
     return base64.b64decode(base64_str)
 
 def detect_ring_color(image: Image.Image) -> str:
-    """Improved color detection - better white gold vs unplated white distinction"""
+    """Improved color detection - CONSERVATIVE white gold, BROAD unplated white"""
     img_array = np.array(image)
     height, width = img_array.shape[:2]
     
@@ -171,58 +171,66 @@ def detect_ring_color(image: Image.Image) -> str:
     elif rg_ratio > 1.2 and rb_ratio > 1.3 and avg_hue < 15:
         return "로즈골드"
     
-    # WHITE GOLD vs UNPLATED WHITE distinction
-    # White gold: has some warmth/color, metallic sheen
-    # Unplated white: very low saturation, high brightness, almost pure white
-    elif avg_saturation < 15 and avg_value > 200 and rgb_variance < 50:
-        # Very low saturation + very high brightness + low variance = unplated white
+    # EXPANDED UNPLATED WHITE DETECTION
+    # More generous criteria for unplated white
+    elif avg_saturation < 25 and avg_value > 180 and rgb_variance < 100:
+        # Expanded: saturation < 25 (was 15), value > 180 (was 200), variance < 100 (was 50)
         return "무도금화이트"
     
-    else:
-        # Everything else is white gold (has some color/warmth)
+    # CONSERVATIVE WHITE GOLD
+    # Only truly white metals with very low saturation
+    elif avg_saturation < 10 and avg_value > 200 and rgb_variance < 30:
+        # Very strict: must be almost pure white
         return "화이트골드"
+    
+    else:
+        # Default to unplated white for anything else whitish
+        if avg_saturation < 40 and avg_value > 150:
+            return "무도금화이트"
+        else:
+            return "화이트골드"
 
 def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> Image.Image:
-    """Simple color-specific enhancement - ULTRA PURE WHITE for unplated"""
+    """Simple color-specific enhancement - REDUCED WHITE OVERLAY"""
     
     if detected_color == "무도금화이트":
-        # ULTRA PURE WHITE - maximum whiteness V83
+        # REDUCED WHITE EFFECT for V86
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.4)  # More brightness
+        image = brightness.enhance(1.25)  # Reduced from 1.4
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.05)  # Almost zero color (5% only)
+        image = color.enhance(0.1)  # Slightly more color than before
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(0.85)  # Even softer contrast
+        image = contrast.enhance(0.9)  # Soft contrast
         
-        # Heavier whitening - 60% white mixing
+        # REDUCED white mixing - 30% instead of 60%
         img_array = np.array(image)
-        img_array = img_array * 0.4 + 255 * 0.6  # 60% white
+        img_array = img_array * 0.7 + 255 * 0.3  # Only 30% white
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Additional brightness boost
+        # Smaller additional boost
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.15)  # More boost
+        image = brightness.enhance(1.08)  # Reduced from 1.15
         
     elif detected_color == "옐로우골드":
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)
+        image = brightness.enhance(1.06)  # Slightly reduced
         
         color = ImageEnhance.Color(image)
         image = color.enhance(1.1)
         
     elif detected_color == "로즈골드":
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.05)
+        image = brightness.enhance(1.03)  # Reduced
         
         img_array = np.array(image)
-        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.03, 0, 255)
+        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.02, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
     elif detected_color == "화이트골드":
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.1)
+        image = brightness.enhance(1.08)  # Slightly reduced
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.9)
@@ -242,9 +250,9 @@ def apply_center_focus(image: Image.Image) -> Image.Image:
     distance = np.sqrt(X**2 + Y**2)
     
     # Create center focus mask (brighter in center, normal at edges)
-    # Use smoother gradient to avoid visible gradation
-    focus_mask = 1 + 0.08 * np.exp(-distance**2 * 0.8)  # Very subtle, smooth gradient
-    focus_mask = np.clip(focus_mask, 1.0, 1.08)  # Max 8% increase in center
+    # REDUCED effect for V86
+    focus_mask = 1 + 0.05 * np.exp(-distance**2 * 0.8)  # Reduced from 0.08 to 0.05
+    focus_mask = np.clip(focus_mask, 1.0, 1.05)  # Max 5% increase in center
     
     # Apply focus
     img_array = np.array(image)
@@ -339,32 +347,31 @@ def process_enhancement(job):
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
-        # Basic enhancement - REDUCED for V85 (less gradient effect)
-        # 1. Brightness (reduced from V84)
+        # Basic enhancement - FURTHER REDUCED for V86
+        # 1. Brightness (significantly reduced)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.14)  # Reduced from 1.18
+        image = brightness.enhance(1.08)  # Reduced from 1.14
         
-        # 2. Contrast
+        # 2. Contrast (slightly reduced)
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.08)
+        image = contrast.enhance(1.05)  # Reduced from 1.08
         
-        # 3. Color
+        # 3. Color (slightly reduced)
         color = ImageEnhance.Color(image)
-        image = color.enhance(1.05)
+        image = color.enhance(1.03)  # Reduced from 1.05
         
-        # 4. Apply color-specific enhancement (ULTRA PURE WHITE for unplated)
+        # 4. Apply color-specific enhancement (REDUCED white overlay)
         image = apply_color_enhancement_simple(image, detected_color)
         
-        # 5. Apply center focus (subtle brightening on ring)
+        # 5. Apply center focus (REDUCED effect)
         image = apply_center_focus(image)
         
-        # 6. Light sharpening
+        # 6. Light sharpening (reduced)
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.3)
+        image = sharpness.enhance(1.2)  # Reduced from 1.3
         
-        # 7. Very minimal overall brightness boost for V85 (reduced)
-        brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.02)  # Reduced from 1.05
+        # 7. NO additional brightness boost for V86
+        # Removed the final brightness.enhance(1.02)
         
         # Save to base64
         buffered = BytesIO()
