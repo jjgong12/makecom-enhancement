@@ -12,88 +12,105 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V78-FixedDictError"
+VERSION = "V79-StableInput"
 
 def find_input_data(data):
-    """Find actual image data - returns the base64 string, not dict"""
+    """Find input data with Make.com compatibility - ultra stable"""
     
-    # Log structure for debugging
-    logger.info(f"Input structure: {json.dumps(data, indent=2)[:500]}...")
+    # Log full structure
+    logger.info(f"Full input data: {json.dumps(data, indent=2)[:1000]}...")
     
-    # Direct access attempts
+    # If already a string, return it
+    if isinstance(data, str):
+        return data
+    
+    # Direct key access
     if isinstance(data, dict):
-        # Check for direct image data keys
+        # Priority 1: Direct image keys
         image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
-                     'imageBase64', 'image_base64', 'base64']
+                     'imageBase64', 'image_base64', 'base64', 'img', 'photo']
         
         for key in image_keys:
-            if key in data and data[key]:
-                # Return the actual string, not the dict
+            if key in data and data[key] and isinstance(data[key], str):
+                logger.info(f"Found image in key: {key}")
                 return data[key]
         
-        # Check for 'input' key
+        # Priority 2: Check 'input' key
         if 'input' in data:
-            return find_input_data(data['input'])
+            result = find_input_data(data['input'])
+            if result:
+                return result
         
-        # Common RunPod paths
-        common_paths = [
+        # Priority 3: Check numeric keys (Make.com style)
+        for key in data:
+            if key.isdigit():
+                logger.info(f"Checking numeric key: {key}")
+                result = find_input_data(data[key])
+                if result:
+                    return result
+        
+        # Priority 4: Common RunPod/API paths
+        paths_to_check = [
             ['job', 'input'],
             ['data', 'input'],
             ['payload', 'input'],
             ['body', 'input'],
-            ['request', 'input']
+            ['request', 'input'],
+            ['data', 'output', 'output', 'enhanced_image'],  # Make.com nested path
+            ['4', 'data', 'output', 'output', 'enhanced_image'],  # Make.com with number
         ]
         
-        for path in common_paths:
+        for path in paths_to_check:
             current = data
+            success = True
             for key in path:
                 if isinstance(current, dict) and key in current:
                     current = current[key]
                 else:
+                    success = False
                     break
-            else:
-                # If we got through the whole path, check if it's a string or dict
-                if isinstance(current, str):
-                    return current
-                elif isinstance(current, dict):
-                    # Extract image data from the dict
-                    for img_key in image_keys:
-                        if img_key in current and current[img_key]:
-                            return current[img_key]
-    
-    # If data is already a string, return it
-    elif isinstance(data, str):
-        return data
-    
-    # Recursive search with proper extraction
-    def recursive_search(obj):
-        if isinstance(obj, dict):
-            # Check image keys first
-            image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
-                         'imageBase64', 'image_base64', 'base64']
             
-            for key in image_keys:
-                if key in obj and obj[key] and isinstance(obj[key], str):
+            if success and isinstance(current, str):
+                logger.info(f"Found via path: {' -> '.join(path)}")
+                return current
+    
+    # Deep recursive search as last resort
+    def deep_search(obj, depth=0):
+        if depth > 10:  # Prevent infinite recursion
+            return None
+            
+        if isinstance(obj, str) and len(obj) > 100:  # Likely base64
+            return obj
+            
+        if isinstance(obj, dict):
+            # Check all image-related keys first
+            for key in ['enhanced_image', 'image', 'image_data', 'base64_image', 
+                       'imageBase64', 'image_base64', 'base64', 'img', 'photo']:
+                if key in obj and isinstance(obj[key], str) and len(obj[key]) > 100:
                     return obj[key]
             
-            # Check numeric keys (Make.com)
-            for key in obj:
-                if key.isdigit():
-                    result = recursive_search(obj[key])
-                    if result:
-                        return result
-            
-            # Check other common keys
-            for key in ['input', 'data', 'output', 'payload']:
-                if key in obj:
-                    result = recursive_search(obj[key])
-                    if result:
-                        return result
+            # Then check all other keys
+            for key, value in obj.items():
+                result = deep_search(value, depth + 1)
+                if result:
+                    return result
+                    
+        elif isinstance(obj, list):
+            for item in obj:
+                result = deep_search(item, depth + 1)
+                if result:
+                    return result
         
         return None
     
-    result = recursive_search(data)
-    logger.info(f"Found data: {str(result)[:100]}..." if result else "No data found")
+    # Try deep search
+    result = deep_search(data)
+    
+    if result:
+        logger.info(f"Found via deep search: {result[:100]}...")
+    else:
+        logger.error("No image data found anywhere!")
+        
     return result
 
 def decode_base64_safe(base64_str: str) -> bytes:
@@ -101,10 +118,14 @@ def decode_base64_safe(base64_str: str) -> bytes:
     if not isinstance(base64_str, str):
         raise ValueError(f"Expected string, got {type(base64_str)}")
     
+    # Remove data URL prefix if present
     if base64_str.startswith('data:'):
         base64_str = base64_str.split(',')[1]
     
+    # Clean the string
     base64_str = base64_str.strip()
+    
+    # Add padding if needed
     padding = 4 - len(base64_str) % 4
     if padding != 4:
         base64_str += '=' * padding
@@ -185,13 +206,13 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
     
     if detected_color == "무도금화이트":
         # Pure white enhancement - PIL only
-        # Step 1: Strong brightness increase
+        # Step 1: Moderate brightness increase
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.2)
+        image = brightness.enhance(1.18)
         
-        # Step 2: Moderate saturation reduction (not too much)
+        # Step 2: Balanced saturation reduction
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.5)  # Changed from 0.2 to 0.5 to maintain some color
+        image = color.enhance(0.6)  # Keep some color
         
         # Step 3: Slight contrast adjustment
         contrast = ImageEnhance.Contrast(image)
@@ -215,7 +236,7 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
         # Slight warm tone
         img_array = np.array(image)
         img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.03, 0, 255)
-        image = Image.fromarray(img_array)
+        image = Image.fromarray(img_array.astype(np.uint8))
         
     elif detected_color == "화이트골드":
         # White gold enhancement
@@ -232,7 +253,7 @@ def process_enhancement(job):
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
-        # Find image data - now properly extracts string from dict
+        # Find image data - ultra stable version
         image_data = find_input_data(job)
         
         if not image_data:
@@ -241,7 +262,8 @@ def process_enhancement(job):
                 "output": {
                     "error": "No image data found",
                     "status": "error",
-                    "version": VERSION
+                    "version": VERSION,
+                    "debug_input": str(job)[:500]
                 }
             }
         
@@ -275,7 +297,7 @@ def process_enhancement(job):
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
-        # Basic enhancement - V56 style
+        # Basic enhancement
         # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.12)
