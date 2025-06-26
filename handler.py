@@ -12,7 +12,73 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V76-PerfectRecursive"
+VERSION = "V77-SimpleStable"
+
+def find_input_data(data):
+    """간단하고 안정적인 입력 데이터 찾기 - V56 스타일"""
+    
+    # 전체 구조 로깅 (디버깅용)
+    logger.info(f"Input structure: {json.dumps(data, indent=2)[:500]}...")
+    
+    # 직접 접근 시도
+    if isinstance(data, dict):
+        # 최상위 레벨 체크
+        if 'input' in data:
+            return data['input']
+        
+        # 일반적인 RunPod 구조들
+        common_paths = [
+            ['job', 'input'],
+            ['data', 'input'],
+            ['payload', 'input'],
+            ['body', 'input'],
+            ['request', 'input']
+        ]
+        
+        for path in common_paths:
+            current = data
+            for key in path:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    break
+            else:
+                return current
+    
+    # 재귀적 탐색 - 간단한 버전
+    def simple_search(obj):
+        if isinstance(obj, dict):
+            # 이미지 관련 키들 확인
+            image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
+                         'imageBase64', 'image_base64', 'base64']
+            
+            for key in image_keys:
+                if key in obj and obj[key]:
+                    return obj[key]
+            
+            # input 키가 있으면 재귀
+            if 'input' in obj:
+                return simple_search(obj['input'])
+            
+            # 숫자 키 확인 (Make.com의 '4' 같은 경우)
+            for key in obj:
+                if key.isdigit():
+                    result = simple_search(obj[key])
+                    if result:
+                        return result
+            
+            # data, output 등 확인
+            for key in ['data', 'output', 'payload']:
+                if key in obj:
+                    result = simple_search(obj[key])
+                    if result:
+                        return result
+        
+        return None
+    
+    result = simple_search(data)
+    logger.info(f"Found data: {str(result)[:100]}..." if result else "No data found")
+    return result
 
 def decode_base64_safe(base64_str: str) -> bytes:
     """Safely decode base64 with automatic padding correction"""
@@ -95,164 +161,70 @@ def detect_ring_color(image: Image.Image) -> str:
     else:
         return "무도금화이트"
 
-def apply_center_focus(image: Image.Image, strength: float = 0.1) -> Image.Image:
-    """Apply subtle center focus vignette"""
-    width, height = image.size
-    
-    # Create radial gradient mask
-    mask = Image.new('L', (width, height), 0)
-    
-    for y in range(height):
-        for x in range(width):
-            # Distance from center
-            dx = (x - width/2) / (width/2)
-            dy = (y - height/2) / (height/2)
-            dist = np.sqrt(dx**2 + dy**2)
-            
-            # Smooth falloff
-            brightness = int(255 * (1 - strength * min(1, dist**1.5)))
-            mask.putpixel((x, y), brightness)
-    
-    # Apply mask
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=50))
-    enhancer = ImageEnhance.Brightness(image)
-    bright_image = enhancer.enhance(1.0 + strength * 0.3)
-    
-    return Image.composite(bright_image, image, mask)
-
-def apply_color_enhancement(image: Image.Image, detected_color: str) -> Image.Image:
-    """Apply color-specific enhancement"""
-    img_array = np.array(image)
+def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> Image.Image:
+    """간단한 색상별 보정 - 파란색 부스트 없음"""
     
     if detected_color == "무도금화이트":
-        # Strong white enhancement for pure white look
-        # Convert to LAB
-        lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB).astype(np.float32)
-        
-        # Increase lightness more
-        lab[:, :, 0] = np.clip(lab[:, :, 0] * 1.15, 0, 255)
-        
-        # Reduce color channels significantly (pure white)
-        lab[:, :, 1] = lab[:, :, 1] * 0.5  # Reduce a channel
-        lab[:, :, 2] = lab[:, :, 2] * 0.5  # Reduce b channel
-        
-        # Convert back
-        lab = lab.astype(np.uint8)
-        img_array = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
-        
-        # Additional brightness boost
-        image = Image.fromarray(img_array)
+        # 순수한 하얀색 보정 - PIL만 사용
+        # Step 1: 강한 밝기 증가
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.15)
+        image = brightness.enhance(1.2)
         
-        # Reduce saturation to near zero
+        # Step 2: 채도를 크게 낮춤
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.3)
+        image = color.enhance(0.2)
         
-        # Slight blue boost to remove yellow tint
-        img_array = np.array(image)
-        img_array[:, :, 2] = np.clip(img_array[:, :, 2] * 1.08, 0, 255)
-        image = Image.fromarray(img_array)
+        # Step 3: 약간의 대비 조정
+        contrast = ImageEnhance.Contrast(image)
+        image = contrast.enhance(1.05)
+        
+        # NO BLUE BOOST - 파란색 부스트 없음
         
     elif detected_color == "옐로우골드":
-        # Only for pure gold colors - warm enhancement
-        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.05, 0, 255)  # Red
-        img_array[:, :, 1] = np.clip(img_array[:, :, 1] * 1.03, 0, 255)  # Green
-        image = Image.fromarray(img_array)
-        
+        # 순금색 보정
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)
         
-    elif detected_color == "로즈골드":
-        # Pink tone enhancement
-        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.06, 0, 255)  # Red
-        img_array[:, :, 2] = np.clip(img_array[:, :, 2] * 0.96, 0, 255)  # Less blue
-        image = Image.fromarray(img_array)
+        color = ImageEnhance.Color(image)
+        image = color.enhance(1.1)
         
+    elif detected_color == "로즈골드":
+        # 로즈골드 보정
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.05)
         
-    elif detected_color == "화이트골드":
-        # Cool metallic enhancement
-        img_array[:, :, 2] = np.clip(img_array[:, :, 2] * 1.03, 0, 255)  # Blue
-        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 0.98, 0, 255)  # Less red
+        # 살짝 따뜻한 톤
+        img_array = np.array(image)
+        img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.03, 0, 255)
         image = Image.fromarray(img_array)
         
+    elif detected_color == "화이트골드":
+        # 화이트골드 보정
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.1)
+        
+        color = ImageEnhance.Color(image)
+        image = color.enhance(0.9)
     
     return image
 
-def find_enhanced_image_data(data, path="root"):
-    """Recursively find enhanced_image data from any structure - V76 Perfect"""
-    logger.info(f"Searching in path: {path}")
-    
-    if data is None:
-        return None
-    
-    # If it's a string, it might be our image data
-    if isinstance(data, str):
-        if len(data) > 100:  # Likely base64 data
-            logger.info(f"Found potential image data at {path} (string)")
-            return data
-        return None
-    
-    # If it's a dict, check all possible keys
-    if isinstance(data, dict):
-        # Direct image keys
-        image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
-                     'imageBase64', 'image_base64', 'base64']
-        
-        for key in image_keys:
-            if key in data and data[key]:
-                logger.info(f"Found image data at {path}.{key}")
-                return data[key]
-        
-        # Special handling for numbered keys (like '4')
-        for key in data:
-            if key.isdigit() or key in ['input', 'data', 'output', 'payload', 'job']:
-                result = find_enhanced_image_data(data[key], f"{path}.{key}")
-                if result:
-                    return result
-        
-        # Try all other keys
-        for key, value in data.items():
-            if key not in image_keys:
-                result = find_enhanced_image_data(value, f"{path}.{key}")
-                if result:
-                    return result
-    
-    # If it's a list, check all items
-    if isinstance(data, list):
-        for i, item in enumerate(data):
-            result = find_enhanced_image_data(item, f"{path}[{i}]")
-            if result:
-                return result
-    
-    return None
-
 def process_enhancement(job):
-    """Process enhancement request"""
+    """Enhancement 처리 - 간단하고 안정적인 버전"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info(f"Input structure: {json.dumps(job, indent=2)[:500]}...")  # Log first 500 chars
     
     try:
-        # Find image data using perfect recursive search
-        image_data = find_enhanced_image_data(job)
+        # Find image data - 간단한 방법 사용
+        image_data = find_input_data(job)
         
         if not image_data:
-            # Log the entire structure for debugging
-            logger.error(f"No image data found. Full structure: {json.dumps(job, indent=2)}")
+            logger.error("No image data found in input")
             return {
                 "output": {
-                    "error": "No image data found in input",
+                    "error": "No image data found",
                     "status": "error",
-                    "version": VERSION,
-                    "searched_structure": json.dumps(job, indent=2)[:1000]
+                    "version": VERSION
                 }
             }
-        
-        logger.info(f"Found image data, length: {len(image_data)}")
         
         # Decode image
         image_bytes = decode_base64_safe(image_data)
@@ -267,41 +239,41 @@ def process_enhancement(job):
             else:
                 image = image.convert('RGB')
         
-        logger.info(f"Original image: {image.size}")
+        logger.info(f"Image loaded: {image.size}")
         
-        # Detect color FIRST with ultra-conservative logic
+        # Detect color
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
-        # Basic enhancement - brighter overall
+        # Basic enhancement - V56 스타일
+        # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.12)
         
+        # 2. Contrast
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.08)
         
+        # 3. Color
         color = ImageEnhance.Color(image)
         image = color.enhance(1.05)
         
-        # Apply color-specific enhancement
-        image = apply_color_enhancement(image, detected_color)
+        # 4. Apply color-specific enhancement (간단한 버전)
+        image = apply_color_enhancement_simple(image, detected_color)
         
-        # Apply subtle center focus
-        image = apply_center_focus(image, strength=0.1)
-        
-        # Light sharpening
+        # 5. Light sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.4)
+        image = sharpness.enhance(1.3)
         
         # Save to base64
         buffered = BytesIO()
-        image.save(buffered, format="PNG", optimize=True)
+        image.save(buffered, format="PNG", optimize=True, quality=95)
         enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
         # Remove padding for Make.com
         enhanced_base64_no_padding = enhanced_base64.rstrip('=')
         
-        logger.info(f"Enhancement completed successfully")
+        logger.info("Enhancement completed successfully")
         
         return {
             "output": {
@@ -316,14 +288,15 @@ def process_enhancement(job):
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         import traceback
-        logger.error(traceback.format_exc())
+        error_trace = traceback.format_exc()
+        logger.error(error_trace)
         
         return {
             "output": {
                 "error": str(e),
                 "status": "error",
                 "version": VERSION,
-                "traceback": traceback.format_exc()
+                "traceback": error_trace
             }
         }
 
