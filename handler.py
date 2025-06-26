@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V83-UltraWhite"
+VERSION = "V84-Brighter"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -315,10 +315,10 @@ def process_enhancement(job):
         detected_color = detect_ring_color(image)
         logger.info(f"Detected color: {detected_color}")
         
-        # Basic enhancement
-        # 1. Brightness
+        # Basic enhancement - BRIGHTER V84
+        # 1. Brightness (increased)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.12)
+        image = brightness.enhance(1.18)  # Increased from 1.12
         
         # 2. Contrast
         contrast = ImageEnhance.Contrast(image)
@@ -334,6 +334,10 @@ def process_enhancement(job):
         # 5. Light sharpening
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.3)
+        
+        # 6. Additional overall brightness boost for V84
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.05)  # Extra 5% brightness
         
         # Save to base64
         buffered = BytesIO()
