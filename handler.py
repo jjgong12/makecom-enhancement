@@ -12,104 +12,83 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V79-StableInput"
+VERSION = "V80-FastOptimized"
 
 def find_input_data(data):
-    """Find input data with Make.com compatibility - ultra stable"""
+    """Find input data - optimized for speed"""
     
-    # Log full structure
-    logger.info(f"Full input data: {json.dumps(data, indent=2)[:1000]}...")
-    
-    # If already a string, return it
+    # Fast return if already a string
     if isinstance(data, str):
         return data
     
-    # Direct key access
+    # Direct key access without logging
     if isinstance(data, dict):
         # Priority 1: Direct image keys
         image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
-                     'imageBase64', 'image_base64', 'base64', 'img', 'photo']
+                     'imageBase64', 'image_base64', 'base64']
         
         for key in image_keys:
-            if key in data and data[key] and isinstance(data[key], str):
-                logger.info(f"Found image in key: {key}")
+            if key in data and isinstance(data[key], str) and len(data[key]) > 100:
                 return data[key]
         
         # Priority 2: Check 'input' key
         if 'input' in data:
-            result = find_input_data(data['input'])
-            if result:
-                return result
+            if isinstance(data['input'], str):
+                return data['input']
+            elif isinstance(data['input'], dict):
+                # Check image keys in input
+                for key in image_keys:
+                    if key in data['input'] and isinstance(data['input'][key], str):
+                        return data['input'][key]
         
-        # Priority 3: Check numeric keys (Make.com style)
-        for key in data:
-            if key.isdigit():
-                logger.info(f"Checking numeric key: {key}")
+        # Priority 3: Check numeric keys (Make.com) - limit to single digits
+        for i in range(10):  # Only check 0-9
+            key = str(i)
+            if key in data:
                 result = find_input_data(data[key])
                 if result:
                     return result
         
-        # Priority 4: Common RunPod/API paths
-        paths_to_check = [
-            ['job', 'input'],
-            ['data', 'input'],
-            ['payload', 'input'],
-            ['body', 'input'],
-            ['request', 'input'],
-            ['data', 'output', 'output', 'enhanced_image'],  # Make.com nested path
-            ['4', 'data', 'output', 'output', 'enhanced_image'],  # Make.com with number
-        ]
+        # Priority 4: Specific paths only
+        # Direct path checking without loop
+        if 'job' in data and isinstance(data['job'], dict) and 'input' in data['job']:
+            result = find_input_data(data['job']['input'])
+            if result:
+                return result
         
-        for path in paths_to_check:
-            current = data
-            success = True
-            for key in path:
-                if isinstance(current, dict) and key in current:
-                    current = current[key]
-                else:
-                    success = False
-                    break
-            
-            if success and isinstance(current, str):
-                logger.info(f"Found via path: {' -> '.join(path)}")
-                return current
+        # Make.com specific path
+        if '4' in data and isinstance(data['4'], dict):
+            if 'data' in data['4'] and isinstance(data['4']['data'], dict):
+                if 'output' in data['4']['data'] and isinstance(data['4']['data']['output'], dict):
+                    if 'output' in data['4']['data']['output'] and isinstance(data['4']['data']['output']['output'], dict):
+                        if 'enhanced_image' in data['4']['data']['output']['output']:
+                            return data['4']['data']['output']['output']['enhanced_image']
     
-    # Deep recursive search as last resort
-    def deep_search(obj, depth=0):
-        if depth > 10:  # Prevent infinite recursion
+    # Limited recursive search
+    def quick_search(obj, depth=0):
+        if depth > 3:  # Limit depth to 3
             return None
             
-        if isinstance(obj, str) and len(obj) > 100:  # Likely base64
+        if isinstance(obj, str) and len(obj) > 100:
             return obj
             
         if isinstance(obj, dict):
-            # Check all image-related keys first
-            for key in ['enhanced_image', 'image', 'image_data', 'base64_image', 
-                       'imageBase64', 'image_base64', 'base64', 'img', 'photo']:
-                if key in obj and isinstance(obj[key], str) and len(obj[key]) > 100:
-                    return obj[key]
-            
-            # Then check all other keys
-            for key, value in obj.items():
-                result = deep_search(value, depth + 1)
-                if result:
-                    return result
-                    
-        elif isinstance(obj, list):
-            for item in obj:
-                result = deep_search(item, depth + 1)
-                if result:
-                    return result
+            # Only check specific keys
+            for key in ['enhanced_image', 'image', 'image_data', 'input', 'data', 'output']:
+                if key in obj:
+                    if isinstance(obj[key], str) and len(obj[key]) > 100:
+                        return obj[key]
+                    else:
+                        result = quick_search(obj[key], depth + 1)
+                        if result:
+                            return result
         
         return None
     
-    # Try deep search
-    result = deep_search(data)
+    result = quick_search(data)
     
-    if result:
-        logger.info(f"Found via deep search: {result[:100]}...")
-    else:
-        logger.error("No image data found anywhere!")
+    if not result:
+        logger.error("No image data found!")
         
     return result
 
@@ -122,10 +101,8 @@ def decode_base64_safe(base64_str: str) -> bytes:
     if base64_str.startswith('data:'):
         base64_str = base64_str.split(',')[1]
     
-    # Clean the string
+    # Clean and add padding
     base64_str = base64_str.strip()
-    
-    # Add padding if needed
     padding = 4 - len(base64_str) % 4
     if padding != 4:
         base64_str += '=' * padding
@@ -148,7 +125,7 @@ def detect_ring_color(image: Image.Image) -> str:
     
     center_region = img_array[y1:y2, x1:x2]
     
-    # Convert to HSV for better color analysis
+    # Convert to HSV
     hsv = cv2.cvtColor(center_region, cv2.COLOR_RGB2HSV)
     
     # Calculate average values
@@ -171,33 +148,26 @@ def detect_ring_color(image: Image.Image) -> str:
         r_norm = g_norm = b_norm = 1.0
     
     # Calculate color ratios
-    rg_ratio = r_mean / (g_mean + 1)  # Red to Green ratio
-    rb_ratio = r_mean / (b_mean + 1)  # Red to Blue ratio
-    gb_ratio = g_mean / (b_mean + 1)  # Green to Blue ratio
+    rg_ratio = r_mean / (g_mean + 1)
+    rb_ratio = r_mean / (b_mean + 1)
+    gb_ratio = g_mean / (b_mean + 1)
     
-    # ULTRA-CONSERVATIVE YELLOW GOLD - Only pure gold colors
-    # Must have ALL conditions met for yellow gold
+    # ULTRA-CONSERVATIVE YELLOW GOLD
     is_pure_gold = (
-        avg_hue >= 25 and avg_hue <= 32 and  # Very narrow hue range for pure gold
-        avg_saturation > 80 and  # Very high saturation required
-        avg_value > 120 and avg_value < 200 and  # Not too bright, not too dark
-        gb_ratio > 1.4 and  # Strong green/blue ratio
-        r_mean > 180 and g_mean > 140 and  # High red and green values
-        b_mean < 100  # Low blue for pure gold
+        avg_hue >= 25 and avg_hue <= 32 and
+        avg_saturation > 80 and
+        avg_value > 120 and avg_value < 200 and
+        gb_ratio > 1.4 and
+        r_mean > 180 and g_mean > 140 and
+        b_mean < 100
     )
     
     if is_pure_gold:
         return "옐로우골드"
-    
-    # Rose gold detection - clear pink/red tones
     elif rg_ratio > 1.2 and rb_ratio > 1.3 and avg_hue < 15:
         return "로즈골드"
-    
-    # White gold - cool metallic
     elif avg_saturation < 50 and avg_value > 180 and b_norm > r_norm:
         return "화이트골드"
-    
-    # DEFAULT: 무도금화이트 for everything else
     else:
         return "무도금화이트"
 
@@ -205,23 +175,17 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
     """Simple color-specific enhancement - no blue boost"""
     
     if detected_color == "무도금화이트":
-        # Pure white enhancement - PIL only
-        # Step 1: Moderate brightness increase
+        # Pure white enhancement
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.18)
         
-        # Step 2: Balanced saturation reduction
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.6)  # Keep some color
+        image = color.enhance(0.6)
         
-        # Step 3: Slight contrast adjustment
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.05)
         
-        # NO BLUE BOOST - no LAB conversion
-        
     elif detected_color == "옐로우골드":
-        # Pure gold enhancement
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)
         
@@ -229,17 +193,14 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
         image = color.enhance(1.1)
         
     elif detected_color == "로즈골드":
-        # Rose gold enhancement
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.05)
         
-        # Slight warm tone
         img_array = np.array(image)
         img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.03, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
     elif detected_color == "화이트골드":
-        # White gold enhancement
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.1)
         
@@ -249,27 +210,24 @@ def apply_color_enhancement_simple(image: Image.Image, detected_color: str) -> I
     return image
 
 def process_enhancement(job):
-    """Enhancement processing - stable version"""
+    """Enhancement processing - optimized version"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
-        # Find image data - ultra stable version
+        # Find image data - fast version
         image_data = find_input_data(job)
         
         if not image_data:
-            logger.error("No image data found in input")
             return {
                 "output": {
                     "error": "No image data found",
                     "status": "error",
-                    "version": VERSION,
-                    "debug_input": str(job)[:500]
+                    "version": VERSION
                 }
             }
         
         # Ensure we have a string
         if not isinstance(image_data, str):
-            logger.error(f"Image data is not a string: {type(image_data)}")
             return {
                 "output": {
                     "error": f"Image data must be a string, got {type(image_data)}",
