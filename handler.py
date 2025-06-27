@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V96-2.0PercentWhiteOverlay"
+VERSION = "V97-2.0PercentWhiteOverlay-Color0.7"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -181,7 +181,7 @@ def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, 
         image = brightness.enhance(1.08)
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.5)  # Keep more color
+        image = color.enhance(0.7)  # Keep more color
         
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.0)  # No contrast change
