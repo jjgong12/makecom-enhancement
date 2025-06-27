@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V104-CenterCrop90Percent"
+VERSION = "V105-20PercentWhiteOverlay"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -179,13 +179,13 @@ def detect_if_unplated_white(filename: str) -> bool:
     return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Simple enhancement - 10% WHITE OVERLAY with adjusted settings"""
+    """Simple enhancement - 20% WHITE OVERLAY with adjusted settings"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
     if is_unplated_white:
-        # V104: Keep 10% WHITE but adjust other settings
-        logger.info("Applying unplated white enhancement (10% white overlay)")
+        # V105: 20% WHITE OVERLAY
+        logger.info("Applying unplated white enhancement (20% white overlay)")
         
         # First brightness adjustment
         brightness = ImageEnhance.Brightness(image)
@@ -199,9 +199,9 @@ def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, 
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(0.98)
         
-        # 10% white mixing
+        # 20% white mixing
         img_array = np.array(image)
-        img_array = img_array * 0.90 + 255 * 0.10  # Keep 10% white overlay
+        img_array = img_array * 0.80 + 255 * 0.20  # 20% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Final brightness boost
@@ -389,7 +389,7 @@ def process_enhancement(job):
         # 4. Apply background whitening
         image = apply_background_whitening(image)
         
-        # 5. Apply color-specific enhancement (10% white overlay with adjusted settings)
+        # 5. Apply color-specific enhancement (20% white overlay with adjusted settings)
         image = apply_color_enhancement_simple(image, is_unplated_white, filename)
         
         # 6. Apply center focus
