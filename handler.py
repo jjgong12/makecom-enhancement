@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V111-5PercentWhiteOverlay-UnifiedBrightness"
+VERSION = "V112-10PercentWhiteOverlay-CleanBackground"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -225,14 +225,14 @@ def detect_if_unplated_white(filename: str) -> bool:
     return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Enhanced with 5% WHITE OVERLAY and unified brightness settings"""
+    """Enhanced with 10% WHITE OVERLAY and unified brightness settings"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
-    # V111: Unified brightness settings for ALL colors
+    # V112: Unified brightness settings for ALL colors
     # First brightness adjustment (same for all)
     brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.14)  # Increased for V111
+    image = brightness.enhance(1.14)  # Same for all colors
     
     # Color adjustment (same for all)
     color = ImageEnhance.Color(image)
@@ -244,17 +244,17 @@ def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, 
     
     # Apply white overlay ONLY for unplated white
     if is_unplated_white:
-        # V111: 5% white overlay
-        logger.info("Applying unplated white enhancement (5% white overlay)")
+        # V112: 10% white overlay
+        logger.info("Applying unplated white enhancement (10% white overlay)")
         img_array = np.array(image)
-        img_array = img_array * 0.95 + 255 * 0.05  # 5% white overlay
+        img_array = img_array * 0.90 + 255 * 0.10  # 10% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
     else:
         logger.info("Standard enhancement (no white overlay)")
     
     # Final brightness boost (same for all)
     brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.05)  # Increased for V111
+    image = brightness.enhance(1.05)  # Same for all colors
     
     return image
 
@@ -281,28 +281,6 @@ def apply_center_focus(image: Image.Image) -> Image.Image:
     
     return Image.fromarray(img_array.astype(np.uint8))
 
-def apply_background_whitening(image: Image.Image) -> Image.Image:
-    """Apply background whitening effect"""
-    img_array = np.array(image)
-    
-    # Create a subtle vignette that brightens the edges
-    height, width = img_array.shape[:2]
-    x = np.linspace(-1, 1, width)
-    y = np.linspace(-1, 1, height)
-    X, Y = np.meshgrid(x, y)
-    
-    # Distance from center
-    distance = np.sqrt(X**2 + Y**2)
-    
-    # Invert for edge brightening (brighter at edges)
-    edge_mask = np.clip(distance * 0.5, 0, 1)  # 0 at center, 1 at edges
-    
-    # Apply white overlay to edges
-    for i in range(3):
-        img_array[:, :, i] = img_array[:, :, i] * (1 - edge_mask * 0.08) + 255 * edge_mask * 0.08
-    
-    return Image.fromarray(img_array.astype(np.uint8))
-
 def calculate_image_hash(image: Image.Image) -> str:
     """Calculate a simple hash to detect duplicate images"""
     # Resize to small size for fast comparison
@@ -321,7 +299,7 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - V111 with unified brightness"""
+    """Enhancement processing - V112 with clean background"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input data type: {type(job)}")
     
@@ -409,10 +387,10 @@ def process_enhancement(job):
         detected_type = "무도금화이트" if is_unplated_white else "기타색상"
         logger.info(f"Final detection - Type: {detected_type}, Filename: {filename}")
         
-        # Basic enhancement - brighter for V111
+        # Basic enhancement - V112
         # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.10)  # Increased from 1.09
+        image = brightness.enhance(1.10)
         
         # 2. Contrast
         contrast = ImageEnhance.Contrast(image)
@@ -422,13 +400,12 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.03)
         
-        # 4. Apply background whitening
-        image = apply_background_whitening(image)
+        # 4. REMOVED apply_background_whitening() - causes gradient background
         
-        # 5. Apply color-specific enhancement (5% white overlay for unplated)
+        # 5. Apply color-specific enhancement (10% white overlay for unplated)
         image = apply_color_enhancement_simple(image, is_unplated_white, filename)
         
-        # 6. Apply center focus
+        # 6. Apply center focus (keep this for product emphasis)
         image = apply_center_focus(image)
         
         # 7. Light sharpening
