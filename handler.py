@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V102-5.0PercentWhiteOverlay-Color0.9"
+VERSION = "V103-10PercentWhiteOverlay"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -169,31 +169,31 @@ def detect_if_unplated_white(filename: str) -> bool:
     return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Simple enhancement - 5.0% WHITE OVERLAY ONLY FOR UNPLATED WHITE (ac_, bc_ patterns)"""
+    """Simple enhancement - 10% WHITE OVERLAY ONLY FOR UNPLATED WHITE (ac_, bc_ patterns)"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
     if is_unplated_white:
-        # V102: 5.0% WHITE EFFECT with Color 0.90
-        logger.info("Applying unplated white enhancement (5.0% white overlay)")
+        # V103: 10% WHITE EFFECT
+        logger.info("Applying unplated white enhancement (10% white overlay)")
         
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.10)  # Increased from 1.08 to 1.10
+        image = brightness.enhance(1.12)  # Increased from 1.10
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.90)  # Reduced saturation
+        image = color.enhance(0.85)  # Reduced saturation more
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.0)  # No contrast change
+        image = contrast.enhance(0.95)  # Slight contrast reduction
         
-        # V102: 5.0% white mixing (increased from 3.0%)
+        # V103: 10% white mixing (doubled from 5%)
         img_array = np.array(image)
-        img_array = img_array * 0.95 + 255 * 0.05  # 5.0% white overlay
+        img_array = img_array * 0.90 + 255 * 0.10  # 10% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Very tiny additional boost
+        # Additional brightness boost
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.02)  # Slightly more boost
+        image = brightness.enhance(1.03)
         
     else:
         # For all other colors (a_, b_ patterns) - NO white overlay, just slight enhancement
@@ -227,6 +227,28 @@ def apply_center_focus(image: Image.Image) -> Image.Image:
     img_array = np.array(image)
     for i in range(3):
         img_array[:, :, i] = np.clip(img_array[:, :, i] * focus_mask, 0, 255)
+    
+    return Image.fromarray(img_array.astype(np.uint8))
+
+def apply_background_whitening(image: Image.Image) -> Image.Image:
+    """Apply background whitening effect"""
+    img_array = np.array(image)
+    
+    # Create a subtle vignette that brightens the edges
+    height, width = img_array.shape[:2]
+    x = np.linspace(-1, 1, width)
+    y = np.linspace(-1, 1, height)
+    X, Y = np.meshgrid(x, y)
+    
+    # Distance from center
+    distance = np.sqrt(X**2 + Y**2)
+    
+    # Invert for edge brightening (brighter at edges)
+    edge_mask = np.clip(distance * 0.5, 0, 1)  # 0 at center, 1 at edges
+    
+    # Apply white overlay to edges
+    for i in range(3):
+        img_array[:, :, i] = img_array[:, :, i] * (1 - edge_mask * 0.08) + 255 * edge_mask * 0.08
     
     return Image.fromarray(img_array.astype(np.uint8))
 
@@ -341,13 +363,16 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.03)
         
-        # 4. Apply color-specific enhancement (5.0% white overlay only for ac_, bc_ filenames)
+        # 4. Apply background whitening
+        image = apply_background_whitening(image)
+        
+        # 5. Apply color-specific enhancement (10% white overlay only for ac_, bc_ filenames)
         image = apply_color_enhancement_simple(image, is_unplated_white, filename)
         
-        # 5. Apply center focus
+        # 6. Apply center focus
         image = apply_center_focus(image)
         
-        # 6. Light sharpening
+        # 7. Light sharpening
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.2)
         
