@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V115-30PercentWhiteOverlay-ReducedBrightness"
+VERSION = "V116-28PercentWhiteOverlay-APattternBrightness"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -202,59 +202,119 @@ def decode_base64_safe(base64_str: str) -> bytes:
         except:
             raise e
 
-def detect_if_unplated_white(filename: str) -> bool:
-    """Check if filename indicates unplated white (ONLY ac_ or bc_ patterns)"""
+def detect_pattern_type(filename: str) -> str:
+    """Detect pattern type: 'ac_bc' for unplated white, 'a_only' for a_ pattern, 'other' for rest"""
     if not filename:
         logger.warning("No filename found, defaulting to standard enhancement")
-        return False
+        return "other"
     
     # Convert to lowercase for case-insensitive check
     filename_lower = filename.lower()
     logger.info(f"Checking filename pattern: {filename_lower}")
     
-    # Check ONLY for ac_ or bc_ patterns (NOT just c_)
     import re
-    # Pattern: specifically ac_ or bc_
+    
+    # Check for ac_ or bc_ patterns (unplated white)
     pattern_ac_bc = re.search(r'(ac_|bc_)', filename_lower)
     
-    is_unplated = bool(pattern_ac_bc)
+    # Check for a_ pattern (NOT ac_)
+    pattern_a_only = re.search(r'(?<!a)(?<!b)a_', filename_lower)
     
-    logger.info(f"Pattern check - ac_/bc_: {bool(pattern_ac_bc)}")
-    logger.info(f"Is unplated white: {is_unplated}")
-    
-    return is_unplated
-
-def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Enhanced with 30% WHITE OVERLAY and reduced brightness settings"""
-    
-    logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
-    
-    # V115: Reduced brightness for 30% white overlay
-    # First brightness adjustment (reduced for higher white overlay)
-    brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.04)  # Reduced from 1.06
-    
-    # Color adjustment (same for all)
-    color = ImageEnhance.Color(image)
-    image = color.enhance(0.92)
-    
-    # Contrast (same for all)
-    contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.0)
-    
-    # Apply white overlay ONLY for unplated white
-    if is_unplated_white:
-        # V115: 30% white overlay
-        logger.info("Applying unplated white enhancement (30% white overlay)")
-        img_array = np.array(image)
-        img_array = img_array * 0.70 + 255 * 0.30  # 30% white overlay
-        image = Image.fromarray(img_array.astype(np.uint8))
+    if pattern_ac_bc:
+        logger.info("Pattern detected: ac_ or bc_ (unplated white)")
+        return "ac_bc"
+    elif pattern_a_only:
+        logger.info("Pattern detected: a_ only")
+        return "a_only"
     else:
-        logger.info("Standard enhancement (no white overlay)")
+        logger.info("Pattern detected: other")
+        return "other"
+
+def apply_color_enhancement_simple(image: Image.Image, pattern_type: str, filename: str) -> Image.Image:
+    """Enhanced with different settings based on pattern type"""
     
-    # Final brightness boost (reduced for higher white overlay)
-    brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.00)  # Reduced from 1.01
+    logger.info(f"Applying enhancement - Filename: {filename}, Pattern type: {pattern_type}")
+    
+    if pattern_type == "ac_bc":
+        # V116: 28% white overlay for ac_ and bc_ patterns
+        logger.info("Applying unplated white enhancement (28% white overlay)")
+        
+        # First brightness adjustment
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.04)
+        
+        # Color adjustment
+        color = ImageEnhance.Color(image)
+        image = color.enhance(0.92)
+        
+        # Contrast
+        contrast = ImageEnhance.Contrast(image)
+        image = contrast.enhance(1.0)
+        
+        # Apply 28% white overlay
+        img_array = np.array(image)
+        img_array = img_array * 0.72 + 255 * 0.28  # 28% white overlay
+        image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # Final brightness
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.00)
+        
+    elif pattern_type == "a_only":
+        # V116: Enhanced brightness and center focus for a_ pattern
+        logger.info("Applying a_ pattern enhancement (increased brightness + center focus)")
+        
+        # Increased brightness for a_ pattern
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.08)  # Higher brightness
+        
+        # Color adjustment
+        color = ImageEnhance.Color(image)
+        image = color.enhance(0.94)  # Slightly more color
+        
+        # Contrast
+        contrast = ImageEnhance.Contrast(image)
+        image = contrast.enhance(1.02)  # Slight contrast boost
+        
+        # Apply subtle center focus for a_ pattern
+        width, height = image.size
+        x = np.linspace(-1, 1, width)
+        y = np.linspace(-1, 1, height)
+        X, Y = np.meshgrid(x, y)
+        distance = np.sqrt(X**2 + Y**2)
+        
+        # Slightly stronger center focus for a_ pattern
+        focus_mask = 1 + 0.06 * np.exp(-distance**2 * 0.7)
+        focus_mask = np.clip(focus_mask, 1.0, 1.06)
+        
+        img_array = np.array(image)
+        for i in range(3):
+            img_array[:, :, i] = np.clip(img_array[:, :, i] * focus_mask, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # Final brightness boost
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.02)
+        
+    else:
+        # Standard enhancement for other patterns
+        logger.info("Standard enhancement (no white overlay)")
+        
+        # Standard brightness
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.04)
+        
+        # Color adjustment
+        color = ImageEnhance.Color(image)
+        image = color.enhance(0.92)
+        
+        # Contrast
+        contrast = ImageEnhance.Contrast(image)
+        image = contrast.enhance(1.0)
+        
+        # Final brightness
+        brightness = ImageEnhance.Brightness(image)
+        image = brightness.enhance(1.00)
     
     return image
 
@@ -299,7 +359,7 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - V115 with 30% white overlay and reduced brightness"""
+    """Enhancement processing - V116 with pattern-based enhancement"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input data type: {type(job)}")
     
@@ -382,13 +442,21 @@ def process_enhancement(job):
         
         logger.info(f"Image loaded: {image.size}")
         
-        # Check if unplated white based on filename
-        is_unplated_white = detect_if_unplated_white(filename)
-        detected_type = "무도금화이트" if is_unplated_white else "기타색상"
+        # Detect pattern type
+        pattern_type = detect_pattern_type(filename)
+        
+        # Set detected type for output
+        if pattern_type == "ac_bc":
+            detected_type = "무도금화이트"
+        elif pattern_type == "a_only":
+            detected_type = "a_패턴"
+        else:
+            detected_type = "기타색상"
+        
         logger.info(f"Final detection - Type: {detected_type}, Filename: {filename}")
         
-        # Basic enhancement - V115 with reduced brightness
-        # 1. Brightness (reduced)
+        # Basic enhancement - V116
+        # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)  # Reduced from 1.10
         
@@ -402,11 +470,12 @@ def process_enhancement(job):
         
         # 4. REMOVED apply_background_whitening() - causes gradient background
         
-        # 5. Apply color-specific enhancement (30% white overlay for unplated)
-        image = apply_color_enhancement_simple(image, is_unplated_white, filename)
+        # 5. Apply pattern-specific enhancement
+        image = apply_color_enhancement_simple(image, pattern_type, filename)
         
-        # 6. Apply center focus (keep this for product emphasis)
-        image = apply_center_focus(image)
+        # 6. Apply center focus (already applied for a_ pattern in color enhancement)
+        if pattern_type != "a_only":
+            image = apply_center_focus(image)
         
         # 7. Light sharpening
         sharpness = ImageEnhance.Sharpness(image)
@@ -428,6 +497,7 @@ def process_enhancement(job):
                 "enhanced_image": enhanced_base64_no_padding,
                 "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",
                 "detected_type": detected_type,
+                "pattern_type": pattern_type,
                 "filename": filename,
                 "original_size": list(image.size),
                 "version": VERSION,
