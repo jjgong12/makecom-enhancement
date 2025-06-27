@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V113-20PercentWhiteOverlay-AdjustedBrightness"
+VERSION = "V114-25PercentWhiteOverlay-FurtherReducedBrightness"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -225,14 +225,14 @@ def detect_if_unplated_white(filename: str) -> bool:
     return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Enhanced with 20% WHITE OVERLAY and adjusted brightness settings"""
+    """Enhanced with 25% WHITE OVERLAY and further reduced brightness settings"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
-    # V113: Adjusted brightness for 20% white overlay
-    # First brightness adjustment (reduced for higher white overlay)
+    # V114: Further reduced brightness for 25% white overlay
+    # First brightness adjustment (further reduced for higher white overlay)
     brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.10)  # Reduced from 1.14
+    image = brightness.enhance(1.06)  # Further reduced from 1.10
     
     # Color adjustment (same for all)
     color = ImageEnhance.Color(image)
@@ -244,17 +244,17 @@ def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, 
     
     # Apply white overlay ONLY for unplated white
     if is_unplated_white:
-        # V113: 20% white overlay
-        logger.info("Applying unplated white enhancement (20% white overlay)")
+        # V114: 25% white overlay
+        logger.info("Applying unplated white enhancement (25% white overlay)")
         img_array = np.array(image)
-        img_array = img_array * 0.80 + 255 * 0.20  # 20% white overlay
+        img_array = img_array * 0.75 + 255 * 0.25  # 25% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
     else:
         logger.info("Standard enhancement (no white overlay)")
     
-    # Final brightness boost (reduced for higher white overlay)
+    # Final brightness boost (further reduced for higher white overlay)
     brightness = ImageEnhance.Brightness(image)
-    image = brightness.enhance(1.03)  # Reduced from 1.05
+    image = brightness.enhance(1.01)  # Further reduced from 1.03
     
     return image
 
@@ -299,7 +299,7 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - V113 with 20% white overlay"""
+    """Enhancement processing - V114 with 25% white overlay"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input data type: {type(job)}")
     
@@ -387,7 +387,7 @@ def process_enhancement(job):
         detected_type = "무도금화이트" if is_unplated_white else "기타색상"
         logger.info(f"Final detection - Type: {detected_type}, Filename: {filename}")
         
-        # Basic enhancement - V113
+        # Basic enhancement - V114
         # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.10)
@@ -402,7 +402,7 @@ def process_enhancement(job):
         
         # 4. REMOVED apply_background_whitening() - causes gradient background
         
-        # 5. Apply color-specific enhancement (20% white overlay for unplated)
+        # 5. Apply color-specific enhancement (25% white overlay for unplated)
         image = apply_color_enhancement_simple(image, is_unplated_white, filename)
         
         # 6. Apply center focus (keep this for product emphasis)
