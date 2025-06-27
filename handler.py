@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V97-2.0PercentWhiteOverlay-Color0.7"
+VERSION = "V99-1.0PercentWhiteOverlay-Color0.9"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -169,26 +169,26 @@ def detect_if_unplated_white(filename: str) -> bool:
     return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Simple enhancement - 2.0% WHITE OVERLAY ONLY FOR UNPLATED WHITE (ac_, bc_ patterns)"""
+    """Simple enhancement - 1.0% WHITE OVERLAY ONLY FOR UNPLATED WHITE (ac_, bc_ patterns)"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
     if is_unplated_white:
-        # UPDATED TO 2.0% WHITE EFFECT FOR V96!
-        logger.info("Applying unplated white enhancement (2.0% white overlay)")
+        # V99: 1.0% WHITE EFFECT with Color 0.90
+        logger.info("Applying unplated white enhancement (1.0% white overlay)")
         
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.7)  # Keep more color
+        image = color.enhance(0.90)  # Keep most color
         
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.0)  # No contrast change
         
-        # UPDATED: 2.0% white mixing
+        # V99: 1.0% white mixing
         img_array = np.array(image)
-        img_array = img_array * 0.98 + 255 * 0.02  # 2.0% white overlay
+        img_array = img_array * 0.99 + 255 * 0.01  # 1.0% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Very tiny additional boost
@@ -341,7 +341,7 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.03)
         
-        # 4. Apply color-specific enhancement (2.0% white overlay only for ac_, bc_ filenames)
+        # 4. Apply color-specific enhancement (1.0% white overlay only for ac_, bc_ filenames)
         image = apply_color_enhancement_simple(image, is_unplated_white, filename)
         
         # 5. Apply center focus
