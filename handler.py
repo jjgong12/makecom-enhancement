@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V99-1.0PercentWhiteOverlay-Color0.9"
+VERSION = "V100-1.0PercentWhiteOverlay-Color0.95"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -174,19 +174,19 @@ def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, 
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
     if is_unplated_white:
-        # V99: 1.0% WHITE EFFECT with Color 0.90
+        # V100: 1.0% WHITE EFFECT with Color 0.95 (changed from 0.90)
         logger.info("Applying unplated white enhancement (1.0% white overlay)")
         
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.90)  # Keep most color
+        image = color.enhance(0.95)  # Changed from 0.90 to 0.95
         
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.0)  # No contrast change
         
-        # V99: 1.0% white mixing
+        # V100: 1.0% white mixing
         img_array = np.array(image)
         img_array = img_array * 0.99 + 255 * 0.01  # 1.0% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
