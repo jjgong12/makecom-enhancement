@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V92-FilenameBasedDetection"
+VERSION = "V93-FixedFilenameDetection"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -95,28 +95,37 @@ def find_input_data(data):
         
     return result
 
-def find_filename(data):
-    """Extract filename from input data"""
+def find_filename(data, depth=0):
+    """Extract filename from input data - IMPROVED for Make.com"""
+    if depth > 5:  # Prevent infinite recursion
+        return None
+        
     if isinstance(data, dict):
-        # Check common filename keys
-        filename_keys = ['filename', 'file_name', 'name', 'fileName', 'file']
+        # Check common filename keys - EXPANDED LIST
+        filename_keys = ['filename', 'file_name', 'name', 'fileName', 'file', 
+                        'originalName', 'original_name', 'image_name', 'imageName']
+        
+        # Log the keys at current level for debugging
+        if depth == 0:
+            logger.info(f"Top level keys: {list(data.keys())[:20]}")  # First 20 keys
         
         for key in filename_keys:
             if key in data and isinstance(data[key], str):
+                logger.info(f"Found filename at key '{key}': {data[key]}")
                 return data[key]
         
-        # Check in input
-        if 'input' in data and isinstance(data['input'], dict):
-            for key in filename_keys:
-                if key in data['input'] and isinstance(data['input'][key], str):
-                    return data['input'][key]
-        
-        # Check in nested structures
-        if 'job' in data and isinstance(data['job'], dict):
-            if 'input' in data['job'] and isinstance(data['job']['input'], dict):
-                for key in filename_keys:
-                    if key in data['job']['input'] and isinstance(data['job']['input'][key], str):
-                        return data['job']['input'][key]
+        # Deep recursive search through ALL keys
+        for key, value in data.items():
+            if isinstance(value, dict):
+                result = find_filename(value, depth + 1)
+                if result:
+                    return result
+            elif isinstance(value, list) and len(value) > 0:
+                for item in value:
+                    if isinstance(item, dict):
+                        result = find_filename(item, depth + 1)
+                        if result:
+                            return result
     
     return None
 
@@ -140,49 +149,55 @@ def decode_base64_safe(base64_str: str) -> bytes:
 def detect_if_unplated_white(filename: str) -> bool:
     """Check if filename indicates unplated white (contains 'c')"""
     if not filename:
+        logger.warning("No filename found, defaulting to standard enhancement")
         return False
     
     # Convert to lowercase for case-insensitive check
     filename_lower = filename.lower()
+    logger.info(f"Checking filename pattern: {filename_lower}")
     
-    # Check patterns: ac_001, bc_001, c_001, etc.
-    # Look for 'c_' or 'c.' patterns
-    if 'c_' in filename_lower or 'c.' in filename_lower:
-        return True
-    
-    # Also check if filename starts with 'c' followed by number
+    # Check for ac_, bc_, dc_, etc. patterns
     import re
-    if re.match(r'^c\d', filename_lower):
-        return True
+    # Pattern: any letter followed by c_ or just c_
+    pattern1 = re.search(r'[a-z]?c_', filename_lower)
+    # Pattern: any letter followed by c. or just c.
+    pattern2 = re.search(r'[a-z]?c\.', filename_lower)
+    # Pattern: c followed by number
+    pattern3 = re.match(r'^c\d', filename_lower)
     
-    return False
+    is_unplated = bool(pattern1 or pattern2 or pattern3)
+    
+    logger.info(f"Pattern check - ac_/bc_/c_: {bool(pattern1)}, c.: {bool(pattern2)}, c+digit: {bool(pattern3)}")
+    logger.info(f"Is unplated white: {is_unplated}")
+    
+    return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
     """Simple enhancement - 1% WHITE OVERLAY ONLY FOR UNPLATED WHITE (filename with 'c')"""
     
-    logger.info(f"Filename: {filename}, Is unplated white: {is_unplated_white}")
+    logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
     if is_unplated_white:
-        # ULTRA MINIMAL WHITE EFFECT - Only 1%!
+        # ULTRA MINIMAL WHITE EFFECT - Only 1%! (MATCHING V91)
         logger.info("Applying unplated white enhancement (1% white overlay)")
         
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)
+        image = brightness.enhance(1.08)  # V91 setting
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.5)
+        image = color.enhance(0.5)  # V91 setting - Keep more color
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.0)
+        image = contrast.enhance(1.0)  # V91 setting - No contrast change
         
-        # ULTRA MINIMAL white mixing - only 1%!
+        # ULTRA MINIMAL white mixing - only 1%! (V91 SETTING)
         img_array = np.array(image)
-        img_array = img_array * 0.99 + 255 * 0.01
+        img_array = img_array * 0.99 + 255 * 0.01  # Only 1% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Very tiny additional boost
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.01)
+        image = brightness.enhance(1.01)  # V91 setting - Minimal boost
         
     else:
         # For all other colors - NO white overlay, just slight enhancement
@@ -237,10 +252,21 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - with filename-based detection"""
+    """Enhancement processing - with improved filename detection"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
+    logger.info(f"Input data type: {type(job)}")
     
     try:
+        # Find filename FIRST - IMPROVED
+        filename = find_filename(job)
+        if filename:
+            logger.info(f"Successfully extracted filename: {filename}")
+        else:
+            logger.warning("Could not extract filename from input")
+            # Log the structure for debugging
+            if isinstance(job, dict):
+                logger.info(f"Job structure keys: {list(job.keys())[:10]}")
+        
         # Find image data
         image_data = find_input_data(job)
         
@@ -252,10 +278,6 @@ def process_enhancement(job):
                     "version": VERSION
                 }
             }
-        
-        # Find filename
-        filename = find_filename(job)
-        logger.info(f"Extracted filename: {filename}")
         
         # Ensure we have a string
         if not isinstance(image_data, str):
@@ -307,8 +329,8 @@ def process_enhancement(job):
         
         # Check if unplated white based on filename
         is_unplated_white = detect_if_unplated_white(filename)
-        detected_color = "무도금화이트" if is_unplated_white else "기타색상"
-        logger.info(f"Detected type: {detected_color}")
+        detected_type = "무도금화이트" if is_unplated_white else "기타색상"
+        logger.info(f"Final detection - Type: {detected_type}, Filename: {filename}")
         
         # Basic enhancement
         # 1. Brightness
@@ -347,7 +369,7 @@ def process_enhancement(job):
             "output": {
                 "enhanced_image": enhanced_base64_no_padding,
                 "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",
-                "detected_type": detected_color,
+                "detected_type": detected_type,
                 "filename": filename,
                 "original_size": list(image.size),
                 "version": VERSION,
@@ -371,7 +393,7 @@ def process_enhancement(job):
         }
 
 def handler(event):
-    """RunPod handler function - ADDED FOR V92"""
+    """RunPod handler function"""
     return process_enhancement(event)
 
 # RunPod handler
