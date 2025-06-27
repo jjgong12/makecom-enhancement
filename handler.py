@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V95-1.8PercentWhiteOverlay"
+VERSION = "V96-2.0PercentWhiteOverlay"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -147,7 +147,7 @@ def decode_base64_safe(base64_str: str) -> bytes:
     return base64.b64decode(base64_str)
 
 def detect_if_unplated_white(filename: str) -> bool:
-    """Check if filename indicates unplated white (contains 'c')"""
+    """Check if filename indicates unplated white (ONLY ac_ or bc_ patterns)"""
     if not filename:
         logger.warning("No filename found, defaulting to standard enhancement")
         return False
@@ -156,30 +156,26 @@ def detect_if_unplated_white(filename: str) -> bool:
     filename_lower = filename.lower()
     logger.info(f"Checking filename pattern: {filename_lower}")
     
-    # Check for ac_, bc_, dc_, etc. patterns
+    # Check ONLY for ac_ or bc_ patterns (NOT just c_)
     import re
-    # Pattern: any letter followed by c_ or just c_
-    pattern1 = re.search(r'[a-z]?c_', filename_lower)
-    # Pattern: any letter followed by c. or just c.
-    pattern2 = re.search(r'[a-z]?c\.', filename_lower)
-    # Pattern: c followed by number
-    pattern3 = re.match(r'^c\d', filename_lower)
+    # Pattern: specifically ac_ or bc_
+    pattern_ac_bc = re.search(r'(ac_|bc_)', filename_lower)
     
-    is_unplated = bool(pattern1 or pattern2 or pattern3)
+    is_unplated = bool(pattern_ac_bc)
     
-    logger.info(f"Pattern check - ac_/bc_/c_: {bool(pattern1)}, c.: {bool(pattern2)}, c+digit: {bool(pattern3)}")
+    logger.info(f"Pattern check - ac_/bc_: {bool(pattern_ac_bc)}")
     logger.info(f"Is unplated white: {is_unplated}")
     
     return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Simple enhancement - 1.8% WHITE OVERLAY ONLY FOR UNPLATED WHITE (filename with 'c')"""
+    """Simple enhancement - 2.0% WHITE OVERLAY ONLY FOR UNPLATED WHITE (ac_, bc_ patterns)"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
     if is_unplated_white:
-        # UPDATED TO 1.8% WHITE EFFECT FOR V95!
-        logger.info("Applying unplated white enhancement (1.8% white overlay)")
+        # UPDATED TO 2.0% WHITE EFFECT FOR V96!
+        logger.info("Applying unplated white enhancement (2.0% white overlay)")
         
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)
@@ -190,9 +186,9 @@ def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, 
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.0)  # No contrast change
         
-        # UPDATED: 1.8% white mixing (was 1.5%)
+        # UPDATED: 2.0% white mixing
         img_array = np.array(image)
-        img_array = img_array * 0.982 + 255 * 0.018  # 1.8% white overlay
+        img_array = img_array * 0.98 + 255 * 0.02  # 2.0% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Very tiny additional boost
@@ -200,7 +196,7 @@ def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, 
         image = brightness.enhance(1.01)  # Minimal boost
         
     else:
-        # For all other colors - NO white overlay, just slight enhancement
+        # For all other colors (a_, b_ patterns) - NO white overlay, just slight enhancement
         logger.info("Standard enhancement (no white overlay)")
         
         brightness = ImageEnhance.Brightness(image)
@@ -345,7 +341,7 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.03)
         
-        # 4. Apply color-specific enhancement (1.8% white overlay only for 'c' filenames)
+        # 4. Apply color-specific enhancement (2.0% white overlay only for ac_, bc_ filenames)
         image = apply_color_enhancement_simple(image, is_unplated_white, filename)
         
         # 5. Apply center focus
