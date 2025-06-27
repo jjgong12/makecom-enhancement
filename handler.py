@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V93-FixedFilenameDetection"
+VERSION = "V94-1.5PercentWhiteOverlay"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -173,31 +173,31 @@ def detect_if_unplated_white(filename: str) -> bool:
     return is_unplated
 
 def apply_color_enhancement_simple(image: Image.Image, is_unplated_white: bool, filename: str) -> Image.Image:
-    """Simple enhancement - 1% WHITE OVERLAY ONLY FOR UNPLATED WHITE (filename with 'c')"""
+    """Simple enhancement - 1.5% WHITE OVERLAY ONLY FOR UNPLATED WHITE (filename with 'c')"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Is unplated white: {is_unplated_white}")
     
     if is_unplated_white:
-        # ULTRA MINIMAL WHITE EFFECT - Only 1%! (MATCHING V91)
-        logger.info("Applying unplated white enhancement (1% white overlay)")
+        # UPDATED TO 1.5% WHITE EFFECT FOR V94!
+        logger.info("Applying unplated white enhancement (1.5% white overlay)")
         
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)  # V91 setting
+        image = brightness.enhance(1.08)
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.5)  # V91 setting - Keep more color
+        image = color.enhance(0.5)  # Keep more color
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.0)  # V91 setting - No contrast change
+        image = contrast.enhance(1.0)  # No contrast change
         
-        # ULTRA MINIMAL white mixing - only 1%! (V91 SETTING)
+        # UPDATED: 1.5% white mixing (was 1%)
         img_array = np.array(image)
-        img_array = img_array * 0.99 + 255 * 0.01  # Only 1% white overlay
+        img_array = img_array * 0.985 + 255 * 0.015  # 1.5% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Very tiny additional boost
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.01)  # V91 setting - Minimal boost
+        image = brightness.enhance(1.01)  # Minimal boost
         
     else:
         # For all other colors - NO white overlay, just slight enhancement
@@ -345,7 +345,7 @@ def process_enhancement(job):
         color = ImageEnhance.Color(image)
         image = color.enhance(1.03)
         
-        # 4. Apply color-specific enhancement (1% white overlay only for 'c' filenames)
+        # 4. Apply color-specific enhancement (1.5% white overlay only for 'c' filenames)
         image = apply_color_enhancement_simple(image, is_unplated_white, filename)
         
         # 5. Apply center focus
