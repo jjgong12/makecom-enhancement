@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V116-28PercentWhiteOverlay-APattternBrightness"
+VERSION = "V116-28PercentWhiteOverlay-APattternBrightness-Resize1200"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
@@ -341,6 +341,22 @@ def apply_center_focus(image: Image.Image) -> Image.Image:
     
     return Image.fromarray(img_array.astype(np.uint8))
 
+def resize_to_width_1200(image: Image.Image) -> Image.Image:
+    """Resize image to width 1200px while maintaining aspect ratio"""
+    original_width, original_height = image.size
+    logger.info(f"Original size: {original_width}x{original_height}")
+    
+    # Calculate new height maintaining aspect ratio
+    target_width = 1200
+    aspect_ratio = original_height / original_width
+    target_height = int(target_width * aspect_ratio)
+    
+    # Resize using high quality resampling
+    resized_image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+    logger.info(f"Resized to: {target_width}x{target_height}")
+    
+    return resized_image
+
 def calculate_image_hash(image: Image.Image) -> str:
     """Calculate a simple hash to detect duplicate images"""
     # Resize to small size for fast comparison
@@ -359,7 +375,7 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - V116 with pattern-based enhancement"""
+    """Enhancement processing - V116 with pattern-based enhancement and resize to 1200px width"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input data type: {type(job)}")
     
@@ -442,6 +458,9 @@ def process_enhancement(job):
         
         logger.info(f"Image loaded: {image.size}")
         
+        # Store original size before any processing
+        original_size = image.size
+        
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         
@@ -481,6 +500,9 @@ def process_enhancement(job):
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.2)
         
+        # 8. Resize to 1200px width
+        image = resize_to_width_1200(image)
+        
         # Save to base64
         buffered = BytesIO()
         image.save(buffered, format="PNG", optimize=True, quality=95)
@@ -499,7 +521,8 @@ def process_enhancement(job):
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
                 "filename": filename,
-                "original_size": list(image.size),
+                "original_size": list(original_size),
+                "final_size": list(image.size),
                 "version": VERSION,
                 "status": "success"
             }
