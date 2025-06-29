@@ -8,14 +8,38 @@ from io import BytesIO
 from PIL import Image, ImageEnhance, ImageFilter
 import cv2
 import logging
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V116-28PercentWhiteOverlay-APattternBrightness-Resize1200"
+VERSION = "V117-NumberPreserved-28PercentWhiteOverlay-APattternBrightness-Resize1200"
 
 # Global cache to prevent duplicate processing
 PROCESSED_IMAGES = {}
+
+def extract_file_number(filename: str) -> str:
+    """Extract number (001, 002, etc.) from filename"""
+    if not filename:
+        return None
+    
+    # Match patterns like 001, 002, etc. in the filename
+    # This will find 3-digit numbers
+    match = re.search(r'(\d{3})', filename)
+    if match:
+        number = match.group(1)
+        logger.info(f"Extracted number: {number} from filename: {filename}")
+        return number
+    
+    # Try to find 2-digit numbers if 3-digit not found
+    match = re.search(r'(\d{2})', filename)
+    if match:
+        number = match.group(1).zfill(3)  # Pad to 3 digits
+        logger.info(f"Extracted and padded number: {number} from filename: {filename}")
+        return number
+    
+    logger.warning(f"No number found in filename: {filename}")
+    return None
 
 def find_input_data(data):
     """Find input data - optimized for speed"""
@@ -212,8 +236,6 @@ def detect_pattern_type(filename: str) -> str:
     filename_lower = filename.lower()
     logger.info(f"Checking filename pattern: {filename_lower}")
     
-    import re
-    
     # Check for ac_ or bc_ patterns (unplated white)
     pattern_ac_bc = re.search(r'(ac_|bc_)', filename_lower)
     
@@ -375,15 +397,21 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - V116 with pattern-based enhancement and resize to 1200px width"""
+    """Enhancement processing - V117 with pattern-based enhancement, resize to 1200px width, and file number preservation"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input data type: {type(job)}")
     
     try:
         # Use enhanced filename detection
         filename = find_filename_enhanced(job)
+        file_number = None
+        
         if filename:
             logger.info(f"Successfully extracted filename: {filename}")
+            # Extract file number from filename
+            file_number = extract_file_number(filename)
+            if file_number:
+                logger.info(f"Extracted file number: {file_number}")
         else:
             logger.warning("Could not extract filename from input - will use default enhancement")
             # Continue processing even without filename
@@ -474,7 +502,7 @@ def process_enhancement(job):
         
         logger.info(f"Final detection - Type: {detected_type}, Filename: {filename}")
         
-        # Basic enhancement - V116
+        # Basic enhancement - V117
         # 1. Brightness
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)  # Reduced from 1.10
@@ -514,6 +542,15 @@ def process_enhancement(job):
         
         logger.info("Enhancement completed successfully")
         
+        # Build enhanced filename with number preservation
+        enhanced_filename = filename
+        if filename and file_number:
+            # Create enhanced filename that preserves the number
+            # For example: "ac_gold_ring_001.jpg" -> "ac_gold_ring_001_enhanced.jpg"
+            base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            extension = filename.rsplit('.', 1)[1] if '.' in filename else 'jpg'
+            enhanced_filename = f"{base_name}_enhanced.{extension}"
+        
         return {
             "output": {
                 "enhanced_image": enhanced_base64_no_padding,
@@ -521,6 +558,8 @@ def process_enhancement(job):
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
                 "filename": filename,
+                "enhanced_filename": enhanced_filename,
+                "file_number": file_number,  # Add file number to output
                 "original_size": list(original_size),
                 "final_size": list(image.size),
                 "version": VERSION,
