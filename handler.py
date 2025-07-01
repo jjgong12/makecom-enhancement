@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V120-NaturalBackground-ReducedBrightness"
+VERSION = "V121-EnhancedWeddingFocus-SlightlyBrighter"
 
 # Global cache to prevent duplicate processing - DISABLED for testing
 PROCESSED_IMAGES = {}
@@ -298,47 +298,47 @@ def detect_wedding_ring(image: Image.Image) -> bool:
     return False
 
 def apply_wedding_ring_focus(image: Image.Image) -> Image.Image:
-    """Apply enhanced focus and sharpness for wedding rings - very subtle"""
+    """Apply enhanced focus and sharpness for wedding rings - V121 enhanced focus"""
     logger.info("Applying wedding ring focus enhancement")
     
-    # 1. Very subtle center focus for background preservation
+    # 1. Enhanced center focus - V121 improved focus strength
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
     X, Y = np.meshgrid(x, y)
     distance = np.sqrt(X**2 + Y**2)
     
-    # Extremely subtle center focus
-    focus_mask = 1 + 0.015 * np.exp(-distance**2 * 1.5)  # Very reduced and more focused
-    focus_mask = np.clip(focus_mask, 1.0, 1.015)
+    # V121: Enhanced focus for better wedding ring emphasis
+    focus_mask = 1 + 0.025 * np.exp(-distance**2 * 1.5)  # Increased from 0.015 to 0.025
+    focus_mask = np.clip(focus_mask, 1.0, 1.025)
     
     img_array = np.array(image)
     for i in range(3):
         img_array[:, :, i] = np.clip(img_array[:, :, i] * focus_mask, 0, 255)
     image = Image.fromarray(img_array.astype(np.uint8))
     
-    # 2. Enhanced sharpness for ring details only
+    # 2. Enhanced sharpness for ring details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.2)  # Reduced from 1.3
+    image = sharpness.enhance(1.25)  # Increased from 1.2
     
-    # 3. Minimal contrast boost for definition
+    # 3. Slightly enhanced contrast for definition
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.01)  # Very subtle
+    image = contrast.enhance(1.02)  # Increased from 1.01
     
     return image
 
 def apply_color_enhancement_simple(image: Image.Image, pattern_type: str, filename: str) -> Image.Image:
-    """Enhanced with different settings based on pattern type - V120 with natural background"""
+    """Enhanced with different settings based on pattern type - V121 with slightly enhanced brightness"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Pattern type: {pattern_type}")
     
     if pattern_type == "ac_bc":
-        # V120: Further reduced white overlay for natural background
+        # V121: Slightly increased brightness for better visibility
         logger.info("Applying unplated white enhancement (15% white overlay)")
         
-        # Very gentle brightness adjustment
+        # Slightly enhanced brightness adjustment
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.01)  # Reduced from 1.02
+        image = brightness.enhance(1.02)  # Increased from 1.01
         
         # Color adjustment
         color = ImageEnhance.Color(image)
@@ -348,7 +348,7 @@ def apply_color_enhancement_simple(image: Image.Image, pattern_type: str, filena
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.0)
         
-        # Apply 15% white overlay (reduced from 20%)
+        # Apply 15% white overlay
         img_array = np.array(image)
         img_array = img_array * 0.85 + 255 * 0.15  # 15% white overlay
         image = Image.fromarray(img_array.astype(np.uint8))
@@ -356,12 +356,12 @@ def apply_color_enhancement_simple(image: Image.Image, pattern_type: str, filena
         # No final brightness boost
         
     elif pattern_type == "a_only":
-        # V120: Much more natural brightness for a_ pattern
-        logger.info("Applying a_ pattern enhancement (natural brightness + subtle center focus)")
+        # V121: Enhanced brightness for a_ pattern
+        logger.info("Applying a_ pattern enhancement (enhanced brightness + center focus)")
         
-        # Natural brightness for a_ pattern
+        # Enhanced brightness for a_ pattern
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.02)  # Reduced from 1.06
+        image = brightness.enhance(1.03)  # Increased from 1.02
         
         # Color adjustment
         color = ImageEnhance.Color(image)
@@ -369,18 +369,18 @@ def apply_color_enhancement_simple(image: Image.Image, pattern_type: str, filena
         
         # Minimal contrast
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.0)  # No contrast boost
+        image = contrast.enhance(1.01)  # Slightly increased
         
-        # Apply very subtle center focus for a_ pattern
+        # Apply enhanced center focus for a_ pattern
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # Very subtle center focus
-        focus_mask = 1 + 0.02 * np.exp(-distance**2 * 1.0)  # Much reduced
-        focus_mask = np.clip(focus_mask, 1.0, 1.02)
+        # Enhanced center focus
+        focus_mask = 1 + 0.025 * np.exp(-distance**2 * 1.0)  # Increased from 0.02
+        focus_mask = np.clip(focus_mask, 1.0, 1.025)
         
         img_array = np.array(image)
         for i in range(3):
@@ -390,27 +390,27 @@ def apply_color_enhancement_simple(image: Image.Image, pattern_type: str, filena
         # No final brightness boost
         
     else:
-        # Standard enhancement for other patterns - very natural
-        logger.info("Standard enhancement (natural, no white overlay)")
+        # Standard enhancement for other patterns - slightly enhanced
+        logger.info("Standard enhancement (slightly enhanced)")
         
-        # Very natural brightness
+        # Enhanced natural brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.01)  # Reduced from 1.03
+        image = brightness.enhance(1.02)  # Increased from 1.01
         
         # Color adjustment
         color = ImageEnhance.Color(image)
         image = color.enhance(0.98)  # More natural
         
-        # No contrast adjustment
+        # Slight contrast adjustment
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.0)
+        image = contrast.enhance(1.01)  # Added slight contrast
         
         # No final brightness
     
     return image
 
 def apply_center_focus(image: Image.Image) -> Image.Image:
-    """Apply very subtle center brightening to focus on ring"""
+    """Apply enhanced center brightening to focus on ring"""
     width, height = image.size
     
     # Create radial gradient
@@ -421,9 +421,9 @@ def apply_center_focus(image: Image.Image) -> Image.Image:
     # Distance from center
     distance = np.sqrt(X**2 + Y**2)
     
-    # Create very subtle center focus mask
-    focus_mask = 1 + 0.01 * np.exp(-distance**2 * 1.2)  # Very reduced
-    focus_mask = np.clip(focus_mask, 1.0, 1.01)
+    # Create enhanced center focus mask
+    focus_mask = 1 + 0.02 * np.exp(-distance**2 * 1.2)  # Increased from 0.01
+    focus_mask = np.clip(focus_mask, 1.0, 1.02)
     
     # Apply focus
     img_array = np.array(image)
@@ -466,7 +466,7 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - V120 with natural background preservation"""
+    """Enhancement processing - V121 with enhanced wedding focus and brightness"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input data type: {type(job)}")
     
@@ -574,18 +574,18 @@ def process_enhancement(job):
         # Detect if wedding ring
         is_wedding_ring = detect_wedding_ring(image)
         
-        # Basic enhancement - V120 with very natural settings
-        # 1. Very gentle brightness
+        # Basic enhancement - V121 with slightly enhanced settings
+        # 1. Slightly enhanced brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.01)  # Greatly reduced from 1.06
+        image = brightness.enhance(1.02)  # Increased from 1.01
         
-        # 2. Minimal contrast
+        # 2. Enhanced contrast
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.01)  # Greatly reduced from 1.03
+        image = contrast.enhance(1.02)  # Increased from 1.01
         
         # 3. Natural color
         color = ImageEnhance.Color(image)
-        image = color.enhance(1.0)  # No color adjustment
+        image = color.enhance(1.01)  # Slightly increased from 1.0
         
         # 4. Apply wedding ring focus if detected
         if is_wedding_ring:
@@ -598,10 +598,10 @@ def process_enhancement(job):
         if pattern_type != "a_only" and not is_wedding_ring:
             image = apply_center_focus(image)
         
-        # 7. Very light sharpening (only if not wedding ring)
+        # 7. Enhanced sharpening
         if not is_wedding_ring:
             sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.05)  # Much reduced from 1.15
+            image = sharpness.enhance(1.10)  # Increased from 1.05
         
         # 8. Resize to 1200px width
         image = resize_to_width_1200(image)
