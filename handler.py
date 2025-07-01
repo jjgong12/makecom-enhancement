@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V122-StrongerWeddingFocus-BrighterOverall"
+VERSION = "V123-AdjustedWeddingFocus-PreserveDetail"
 
 # Global cache to prevent duplicate processing - DISABLED for testing
 PROCESSED_IMAGES = {}
@@ -298,131 +298,131 @@ def detect_wedding_ring(image: Image.Image) -> bool:
     return False
 
 def apply_wedding_ring_focus(image: Image.Image) -> Image.Image:
-    """Apply enhanced focus and sharpness for wedding rings - V122 stronger focus"""
-    logger.info("Applying wedding ring focus enhancement")
+    """Apply moderate focus and sharpness for wedding rings - V123 adjusted"""
+    logger.info("Applying adjusted wedding ring focus enhancement")
     
-    # 1. Stronger center focus - V122 enhanced for better emphasis
+    # 1. Moderate center focus - V123 adjusted to 0.02
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
     X, Y = np.meshgrid(x, y)
     distance = np.sqrt(X**2 + Y**2)
     
-    # V122: Stronger focus for wedding rings
-    focus_mask = 1 + 0.035 * np.exp(-distance**2 * 1.5)  # Increased from 0.025 to 0.035
-    focus_mask = np.clip(focus_mask, 1.0, 1.035)
+    # V123: Adjusted focus to 0.02 as requested
+    focus_mask = 1 + 0.02 * np.exp(-distance**2 * 1.5)  # Changed from 0.035 to 0.02
+    focus_mask = np.clip(focus_mask, 1.0, 1.02)
     
     img_array = np.array(image)
     for i in range(3):
         img_array[:, :, i] = np.clip(img_array[:, :, i] * focus_mask, 0, 255)
     image = Image.fromarray(img_array.astype(np.uint8))
     
-    # 2. Enhanced sharpness for ring details
+    # 2. Moderate sharpness for ring details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.3)  # Increased from 1.25
+    image = sharpness.enhance(1.15)  # Reduced from 1.3 to 1.15
     
-    # 3. Slightly enhanced contrast for definition
+    # 3. Subtle contrast for definition
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.03)  # Increased from 1.02
+    image = contrast.enhance(1.015)  # Reduced from 1.03 to 1.015
     
     return image
 
 def apply_color_enhancement_simple(image: Image.Image, pattern_type: str, filename: str, is_wedding_ring: bool) -> Image.Image:
-    """Enhanced with different settings based on pattern type - V122 with stronger brightness and wedding focus"""
+    """Enhanced with different settings based on pattern type - V123 moderate enhancement"""
     
     logger.info(f"Applying enhancement - Filename: {filename}, Pattern type: {pattern_type}, Wedding ring: {is_wedding_ring}")
     
     if pattern_type == "ac_bc":
-        # V122: Enhanced brightness and wedding ring specific white overlay
+        # V123: Moderate brightness for balance
         logger.info("Applying unplated white enhancement")
         
-        # Stronger brightness adjustment
+        # Moderate brightness adjustment
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.03)  # Increased from 1.02
+        image = brightness.enhance(1.02)  # Balanced between 1.01 and 1.03
         
         # Color adjustment
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.96)
+        image = color.enhance(0.97)  # Slightly adjusted
         
         # Minimal contrast
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.0)
         
-        # Apply white overlay - more for wedding rings
+        # Apply white overlay - moderate for detail preservation
         if is_wedding_ring:
-            logger.info("Wedding ring detected - applying 18% white overlay")
-            white_overlay_percent = 0.18  # Increased from 15% for wedding rings
+            logger.info("Wedding ring detected - applying 15% white overlay")
+            white_overlay_percent = 0.15  # Back to original 15%
         else:
-            white_overlay_percent = 0.15  # Standard 15% for non-wedding rings
+            white_overlay_percent = 0.12  # Reduced from 15%
             
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay_percent) + 255 * white_overlay_percent
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V122: Apply wedding ring focus for ac_ patterns too
+        # V123: Apply adjusted wedding ring focus for ac_ patterns
         if is_wedding_ring:
             image = apply_wedding_ring_focus(image)
         
     elif pattern_type == "a_only":
-        # V122: Enhanced brightness for a_ pattern
-        logger.info("Applying a_ pattern enhancement (enhanced brightness + center focus)")
+        # V123: Moderate brightness for a_ pattern
+        logger.info("Applying a_ pattern enhancement (moderate brightness + center focus)")
         
-        # Enhanced brightness for a_ pattern
+        # Moderate brightness for a_ pattern
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.04)  # Increased from 1.03
+        image = brightness.enhance(1.025)  # Balanced between 1.015 and 1.04
         
         # Color adjustment
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.98)
+        image = color.enhance(0.985)  # More natural
         
-        # Minimal contrast
+        # Subtle contrast
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.02)  # Increased from 1.01
+        image = contrast.enhance(1.01)  # Balanced
         
-        # Apply enhanced center focus for a_ pattern
+        # Apply moderate center focus for a_ pattern
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # Enhanced center focus
-        focus_mask = 1 + 0.03 * np.exp(-distance**2 * 1.0)  # Increased from 0.025
-        focus_mask = np.clip(focus_mask, 1.0, 1.03)
+        # Moderate center focus
+        focus_mask = 1 + 0.018 * np.exp(-distance**2 * 1.0)  # Balanced between 0.01 and 0.03
+        focus_mask = np.clip(focus_mask, 1.0, 1.018)
         
         img_array = np.array(image)
         for i in range(3):
             img_array[:, :, i] = np.clip(img_array[:, :, i] * focus_mask, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Apply wedding ring focus if detected
+        # Apply adjusted wedding ring focus if detected
         if is_wedding_ring:
             image = apply_wedding_ring_focus(image)
         
     else:
-        # Standard enhancement for other patterns - enhanced brightness
-        logger.info("Standard enhancement (enhanced brightness)")
+        # Standard enhancement for other patterns - moderate
+        logger.info("Standard enhancement (moderate brightness)")
         
-        # Enhanced natural brightness
+        # Moderate natural brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.03)  # Increased from 1.02
+        image = brightness.enhance(1.02)  # Balanced between 1.01 and 1.03
         
         # Color adjustment
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.98)
+        image = color.enhance(0.985)  # More natural
         
-        # Slight contrast adjustment
+        # Subtle contrast adjustment
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.02)  # Increased from 1.01
+        image = contrast.enhance(1.01)  # Balanced
         
-        # Apply wedding ring focus if detected
+        # Apply adjusted wedding ring focus if detected
         if is_wedding_ring:
             image = apply_wedding_ring_focus(image)
     
     return image
 
 def apply_center_focus(image: Image.Image) -> Image.Image:
-    """Apply enhanced center brightening to focus on ring"""
+    """Apply moderate center brightening to focus on ring"""
     width, height = image.size
     
     # Create radial gradient
@@ -433,9 +433,9 @@ def apply_center_focus(image: Image.Image) -> Image.Image:
     # Distance from center
     distance = np.sqrt(X**2 + Y**2)
     
-    # Create enhanced center focus mask
-    focus_mask = 1 + 0.025 * np.exp(-distance**2 * 1.2)  # Increased from 0.02
-    focus_mask = np.clip(focus_mask, 1.0, 1.025)
+    # Create moderate center focus mask
+    focus_mask = 1 + 0.015 * np.exp(-distance**2 * 1.2)  # Balanced between 0.008 and 0.025
+    focus_mask = np.clip(focus_mask, 1.0, 1.015)
     
     # Apply focus
     img_array = np.array(image)
@@ -478,7 +478,7 @@ def calculate_image_hash(image: Image.Image) -> str:
     return hash_str
 
 def process_enhancement(job):
-    """Enhancement processing - V122 with stronger wedding focus and brightness"""
+    """Enhancement processing - V123 with adjusted focus for detail preservation"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input data type: {type(job)}")
     
@@ -563,18 +563,18 @@ def process_enhancement(job):
         # Detect if wedding ring
         is_wedding_ring = detect_wedding_ring(image)
         
-        # Basic enhancement - V122 with stronger settings
-        # 1. Stronger brightness
+        # Basic enhancement - V123 with moderate settings
+        # 1. Moderate brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.03)  # Increased from 1.02
+        image = brightness.enhance(1.02)  # Balanced setting
         
-        # 2. Enhanced contrast
+        # 2. Moderate contrast
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.03)  # Increased from 1.02
+        image = contrast.enhance(1.02)  # Balanced setting
         
         # 3. Natural color
         color = ImageEnhance.Color(image)
-        image = color.enhance(1.02)  # Increased from 1.01
+        image = color.enhance(1.01)  # Slight enhancement
         
         # 4. Apply pattern-specific enhancement (includes wedding ring focus)
         image = apply_color_enhancement_simple(image, pattern_type, filename, is_wedding_ring)
@@ -583,10 +583,10 @@ def process_enhancement(job):
         if pattern_type != "a_only" and not is_wedding_ring:
             image = apply_center_focus(image)
         
-        # 6. Enhanced sharpening
+        # 6. Moderate sharpening
         if not is_wedding_ring:
             sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.15)  # Increased from 1.10
+            image = sharpness.enhance(1.08)  # Reduced from 1.15 for detail preservation
         
         # 7. Resize to 1200px width
         image = resize_to_width_1200(image)
