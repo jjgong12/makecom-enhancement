@@ -10,10 +10,10 @@ import cv2
 import logging
 import re
 
-logging.basicConfig(level=logging.WARNING)  # Reduced logging
+logging.basicConfig(level=logging.INFO)  # Changed to INFO for better debugging
 logger = logging.getLogger(__name__)
 
-VERSION = "V124-OptimizedQualityCheck"
+VERSION = "V125-ImprovedPathFinding"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -31,55 +31,143 @@ def extract_file_number(filename: str) -> str:
     return None
 
 def find_input_data_fast(data):
-    """Find input data - highly optimized for speed"""
+    """Find input data - optimized with limited recursion"""
     if isinstance(data, str):
         return data
     
     if isinstance(data, dict):
         # Direct access to common paths
-        image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image']
+        image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
+                     'imageBase64', 'image_base64', 'base64']
         
+        # Check root level
         for key in image_keys:
             if key in data and isinstance(data[key], str) and len(data[key]) > 100:
                 return data[key]
         
-        # Check input key
+        # Check input key properly
         if 'input' in data:
-            if isinstance(data['input'], str):
+            if isinstance(data['input'], str) and len(data['input']) > 100:
                 return data['input']
             elif isinstance(data['input'], dict):
                 for key in image_keys:
-                    if key in data['input'].get(key, ''):
+                    if key in data['input'] and isinstance(data['input'][key], str):
                         return data['input'][key]
         
-        # Make.com specific path
-        try:
-            if '4' in data:
-                return data['4']['data']['output']['output']['enhanced_image']
-        except:
-            pass
+        # Check numeric keys (Make.com) - limited to 0-9
+        for i in range(10):
+            key = str(i)
+            if key in data:
+                if isinstance(data[key], str) and len(data[key]) > 100:
+                    return data[key]
+                elif isinstance(data[key], dict):
+                    # Limited recursive search
+                    result = _limited_search(data[key], depth=1)
+                    if result:
+                        return result
+        
+        # Try common nested paths
+        paths = [
+            ['job', 'input'],
+            ['data', 'image'],
+            ['data', 'enhanced_image'],
+            ['output', 'enhanced_image'],
+            ['4', 'data', 'output', 'output', 'enhanced_image']
+        ]
+        
+        for path in paths:
+            obj = data
+            try:
+                for key in path:
+                    obj = obj[key]
+                if isinstance(obj, str) and len(obj) > 100:
+                    return obj
+            except:
+                continue
     
     return None
 
-def find_filename_fast(data):
-    """Fast filename extraction - no deep recursion"""
+def _limited_search(obj, depth=0):
+    """Limited depth search helper"""
+    if depth > 2:  # Max depth 2
+        return None
+    
+    if isinstance(obj, str) and len(obj) > 100:
+        return obj
+    
+    if isinstance(obj, dict):
+        # Priority keys
+        priority_keys = ['enhanced_image', 'image', 'image_data', 'base64_image', 
+                        'output', 'data', 'input']
+        
+        # Check priority keys first
+        for key in priority_keys:
+            if key in obj:
+                if isinstance(obj[key], str) and len(obj[key]) > 100:
+                    return obj[key]
+                elif isinstance(obj[key], dict):
+                    result = _limited_search(obj[key], depth + 1)
+                    if result:
+                        return result
+        
+        # Then check other keys
+        for key, value in obj.items():
+            if key not in priority_keys:
+                if isinstance(value, str) and len(value) > 100:
+                    return value
+                elif isinstance(value, dict) and depth < 2:
+                    result = _limited_search(value, depth + 1)
+                    if result:
+                        return result
+    
+    return None
+
+def find_filename_fast(data, depth=0):
+    """Fast filename extraction with limited recursion"""
+    if depth > 3:  # Limit depth
+        return None
+    
     if isinstance(data, dict):
         # Direct filename keys
-        filename_keys = ['filename', 'file_name', 'fileName', 'name']
+        filename_keys = ['filename', 'file_name', 'fileName', 'name', 
+                        'originalName', 'original_name', 'image_name']
         
+        # Check current level
         for key in filename_keys:
             if key in data and isinstance(data[key], str):
                 value = data[key]
                 if any(p in value.lower() for p in ['ac_', 'bc_', 'a_', 'b_', 'c_']):
                     return value
         
-        # Check input level
-        if 'input' in data and isinstance(data['input'], dict):
-            for key in filename_keys:
-                if key in data['input'] and isinstance(data['input'][key], str):
-                    value = data['input'][key]
-                    if any(p in value.lower() for p in ['ac_', 'bc_', 'a_', 'b_', 'c_']):
-                        return value
+        # Check common nested locations
+        nested_keys = ['input', 'data', 'job', 'output']
+        for key in nested_keys:
+            if key in data:
+                if isinstance(data[key], dict):
+                    result = find_filename_fast(data[key], depth + 1)
+                    if result:
+                        return result
+                elif isinstance(data[key], str):
+                    # Sometimes the value itself contains the filename
+                    if any(p in data[key].lower() for p in ['ac_', 'bc_', 'a_', 'b_', 'c_']):
+                        if len(data[key]) < 100:  # Reasonable filename length
+                            return data[key]
+        
+        # Check numeric keys (Make.com)
+        for i in range(10):
+            key = str(i)
+            if key in data and isinstance(data[key], dict):
+                result = find_filename_fast(data[key], depth + 1)
+                if result:
+                    return result
+    
+    elif isinstance(data, list) and depth < 3:
+        # Check list items
+        for item in data:
+            if isinstance(item, dict):
+                result = find_filename_fast(item, depth + 1)
+                if result:
+                    return result
     
     return None
 
@@ -272,6 +360,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
 def process_enhancement(job):
     """Main enhancement processing with quality check system"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
+    logger.info(f"Input type: {type(job)}, Keys: {list(job.keys())[:5] if isinstance(job, dict) else 'Not a dict'}")
     
     try:
         # Fast filename extraction
@@ -282,11 +371,17 @@ def process_enhancement(job):
         image_data = find_input_data_fast(job)
         
         if not image_data:
+            # Log more details for debugging
+            logger.error(f"Failed to find image data. Input structure: {list(job.keys()) if isinstance(job, dict) else type(job)}")
             return {
                 "output": {
                     "error": "No image data found",
                     "status": "error",
-                    "version": VERSION
+                    "version": VERSION,
+                    "debug_info": {
+                        "input_type": str(type(job)),
+                        "keys": list(job.keys())[:10] if isinstance(job, dict) else None
+                    }
                 }
             }
         
