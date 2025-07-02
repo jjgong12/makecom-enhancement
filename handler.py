@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)  # Changed to INFO for debugging
 logger = logging.getLogger(__name__)
 
-VERSION = "V128-CompleteFix"
+VERSION = "V128-CompleteFix-WeddingFocus"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -374,7 +374,8 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.01)
         
-        # Simple center focus for a_ pattern
+        # Center focus for a_ pattern (applied regardless of wedding ring)
+        # Wedding rings will get additional focus enhancement below
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
@@ -401,13 +402,44 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.01)
     
-    # Wedding ring focus (simplified)
+    # Wedding ring focus enhancement - APPLIED TO ALL PATTERNS!
+    # 웨딩링은 패턴에 관계없이 무조건 중앙 포커스 강화!
     if is_wedding_ring:
+        # First apply sharpening
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.15)
         
+        # Then apply contrast
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.015)
+        
+        # IMPORTANT: Center focus enhancement for wedding rings
+        width, height = image.size
+        x = np.linspace(-1, 1, width)
+        y = np.linspace(-1, 1, height)
+        X, Y = np.meshgrid(x, y)
+        distance = np.sqrt(X**2 + Y**2)
+        
+        # Create center brightening mask
+        center_mask = 1 + 0.03 * np.exp(-distance**2 * 1.8)
+        center_mask = np.clip(center_mask, 1.0, 1.03)
+        
+        # Apply center brightening
+        img_array = np.array(image, dtype=np.float32)
+        for i in range(3):
+            img_array[:, :, i] *= center_mask
+        img_array = np.clip(img_array, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # Additional edge darkening for more focus
+        edge_mask = 0.98 + 0.02 * np.exp(-distance**2 * 0.8)
+        edge_mask = np.clip(edge_mask, 0.98, 1.0)
+        
+        img_array = np.array(image, dtype=np.float32)
+        for i in range(3):
+            img_array[:, :, i] *= edge_mask
+        img_array = np.clip(img_array, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
     
     return image
 
