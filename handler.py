@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V132-WhiteOverlay-Extended"
+VERSION = "V133-Adjusted-WhiteOverlay"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -298,12 +298,12 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
     }
 
 def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
-    """Determine if second correction is needed - V132 stricter standards"""
+    """Determine if second correction is needed - V133 stricter standards"""
     # Apply to both ac_bc and a_only patterns now
     if pattern_type not in ["ac_bc", "a_only"]:
         return False, None
     
-    # V132: Stricter quality criteria for pure white
+    # V133: Stricter quality criteria for pure white
     reasons = []
     
     if metrics["brightness"] < 241:  # Increased from 235
@@ -321,7 +321,7 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check - V132 pure white"""
+    """Apply second correction based on quality check - V133 pure white"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
     # Enhanced white overlay for pure white
@@ -347,19 +347,38 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     
     return image
 
+def apply_center_focus(image: Image.Image, intensity: float = 0.02) -> Image.Image:
+    """Apply subtle center focus effect - V133"""
+    width, height = image.size
+    x = np.linspace(-1, 1, width)
+    y = np.linspace(-1, 1, height)
+    X, Y = np.meshgrid(x, y)
+    distance = np.sqrt(X**2 + Y**2)
+    
+    # Subtle center focus
+    focus_mask = 1 + intensity * np.exp(-distance**2 * 1.8)
+    focus_mask = np.clip(focus_mask, 1.0, 1.0 + intensity)
+    
+    img_array = np.array(image, dtype=np.float32)
+    for i in range(3):
+        img_array[:, :, i] *= focus_mask
+    img_array = np.clip(img_array, 0, 255)
+    
+    return Image.fromarray(img_array.astype(np.uint8))
+
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
-    """Optimized enhancement with pattern-specific settings - V132 with a_ white overlay"""
+    """Optimized enhancement with pattern-specific settings - V133 adjusted white overlay"""
     
     if pattern_type == "ac_bc":
-        # Unplated white enhancement - V131 for purer white
+        # Unplated white enhancement - V133 adjusted
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.03)  # Increased for purer white
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # More desaturated
         
-        # White overlay for pure white effect
-        white_overlay = 0.12 if is_wedding_ring else 0.10
+        # V133: Adjusted white overlay for ac_bc - 0.13
+        white_overlay = 0.13  # Fixed at 0.13 for both wedding ring and normal
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
@@ -371,7 +390,7 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V130: 5% center focus
+        # V133: 5% center focus
         focus_mask = 1 + 0.05 * np.exp(-distance**2 * 1.5)
         focus_mask = np.clip(focus_mask, 1.0, 1.05)
         
@@ -381,16 +400,19 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
+        # V133: Additional subtle center focus
+        image = apply_center_focus(image, 0.02)
+        
     elif pattern_type == "a_only":
-        # a_ pattern enhancement - V132 WITH WHITE OVERLAY
+        # a_ pattern enhancement - V133 with 0.10 white overlay
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.03)  # Same as ac_bc
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # Same desaturation as ac_bc
         
-        # V132: ADD WHITE OVERLAY TO a_ PATTERN
-        white_overlay = 0.12 if is_wedding_ring else 0.10
+        # V133: White overlay for a_ pattern - 0.10
+        white_overlay = 0.10  # Fixed at 0.10 for both wedding ring and normal
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
@@ -402,7 +424,7 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V132: 5% center focus
+        # V133: 5% center focus
         focus_mask = 1 + 0.05 * np.exp(-distance**2 * 1.2)
         focus_mask = np.clip(focus_mask, 1.0, 1.05)
         
@@ -411,6 +433,9 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
             img_array[:, :, i] *= focus_mask
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # V133: Additional subtle center focus
+        image = apply_center_focus(image, 0.02)
         
     else:
         # Standard enhancement (other patterns)
@@ -422,6 +447,9 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.01)
+        
+        # V133: Add subtle center focus to other patterns too
+        image = apply_center_focus(image, 0.015)
     
     # Wedding ring focus enhancement - APPLIED TO ALL PATTERNS!
     if is_wedding_ring:
@@ -534,8 +562,8 @@ def process_enhancement(job):
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_bc": "무도금화이트",
-            "a_only": "a_패턴(화이트오버레이)",  # V132: Now with white overlay
+            "ac_bc": "무도금화이트(0.13)",
+            "a_only": "a_패턴(0.10)",
             "other": "기타색상"
         }.get(pattern_type, "기타색상")
         
@@ -562,7 +590,7 @@ def process_enhancement(job):
         correction_reasons = []
         quality_metrics = None
         
-        if pattern_type in ["ac_bc", "a_only"]:  # V132: Extended to a_only
+        if pattern_type in ["ac_bc", "a_only"]:  # V133: Extended to a_only
             quality_metrics = calculate_quality_metrics(image)
             needs_correction, reasons = needs_second_correction(quality_metrics, pattern_type)
             
@@ -615,10 +643,11 @@ def process_enhancement(job):
                 "second_correction_applied": bool(second_correction_applied),
                 "correction_reasons": correction_reasons,
                 "white_overlay_info": {
-                    "ac_bc": "0.10-0.12",
-                    "a_only": "0.10-0.12",  # V132: Now same as ac_bc
+                    "ac_bc": "0.13",
+                    "a_only": "0.10",
                     "other": "none"
-                }
+                },
+                "has_center_focus": True
             }
         }
         
