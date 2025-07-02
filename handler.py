@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)  # Changed to INFO for debugging
 logger = logging.getLogger(__name__)
 
-VERSION = "V130-Stronger5PercentFocus-Enhanced"
+VERSION = "V131-PureWhite-StricterStandards"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -298,14 +298,14 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
     }
 
 def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
-    """Determine if second correction is needed"""
+    """Determine if second correction is needed - V131 stricter standards"""
     if pattern_type != "ac_bc":
         return False, None
     
-    # Quality criteria for unplated white
+    # V131: Stricter quality criteria for pure white
     reasons = []
     
-    if metrics["brightness"] < 235:
+    if metrics["brightness"] < 241:  # Increased from 235
         reasons.append("brightness_low")
     
     if metrics["cool_tone_diff"] < 3:
@@ -314,18 +314,18 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     if metrics["rgb_deviation"] > 5:
         reasons.append("rgb_deviation_high")
     
-    if metrics["saturation"] > 3:
+    if metrics["saturation"] > 2:  # Reduced from 3
         reasons.append("saturation_high")
     
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check"""
+    """Apply second correction based on quality check - V131 pure white"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
-    # Enhanced white overlay for unplated white
+    # Enhanced white overlay for pure white
     if "brightness_low" in reasons:
-        white_overlay_percent = 0.15  # Reduced from 20%
+        white_overlay_percent = 0.18  # Increased for purer white
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay_percent) + 255 * white_overlay_percent
         image = Image.fromarray(img_array.astype(np.uint8))
@@ -334,9 +334,9 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     if "insufficient_cool_tone" in reasons:
         img_array = np.array(image)
         # Slightly boost blue channel
-        img_array[:,:,2] = np.clip(img_array[:,:,2] * 1.02, 0, 255)
+        img_array[:,:,2] = np.clip(img_array[:,:,2] * 1.025, 0, 255)
         # Slightly reduce red channel
-        img_array[:,:,0] = np.clip(img_array[:,:,0] * 0.98, 0, 255)
+        img_array[:,:,0] = np.clip(img_array[:,:,0] * 0.975, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
     
     # Detail enhancement with edge preservation
@@ -350,15 +350,15 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
     """Optimized enhancement with pattern-specific settings"""
     
     if pattern_type == "ac_bc":
-        # Unplated white enhancement
+        # Unplated white enhancement - V131 for purer white
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.025)  # Slight increase from 1.02
+        image = brightness.enhance(1.03)  # Increased for purer white
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.97)
+        image = color.enhance(0.96)  # More desaturated
         
-        # Reduced white overlay
-        white_overlay = 0.10 if is_wedding_ring else 0.08
+        # White overlay for pure white effect
+        white_overlay = 0.12 if is_wedding_ring else 0.10
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
