@@ -12,7 +12,7 @@ import re
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-VERSION = "V126-TargetRGB-Optimized"
+VERSION = "V127-BoolFixed-Optimized"
 
 # Target RGB values for unplated white
 TARGET_RGB_UNPLATED = (235, 237, 239)
@@ -214,16 +214,17 @@ def detect_wedding_ring_fast(image: Image.Image) -> bool:
     total_pixels = gray_array.size
     bright_ratio = bright_pixels / total_pixels
     
-    return bright_ratio > 0.15
+    # Convert numpy bool to Python bool
+    return bool(bright_ratio > 0.15)
 
 def calculate_quality_metrics_fast(image: Image.Image) -> dict:
     """Calculate quality metrics without cv2"""
     img_array = np.array(image)
     
     # Calculate average RGB values
-    r_avg = np.mean(img_array[:,:,0])
-    g_avg = np.mean(img_array[:,:,1])
-    b_avg = np.mean(img_array[:,:,2])
+    r_avg = float(np.mean(img_array[:,:,0]))
+    g_avg = float(np.mean(img_array[:,:,1]))
+    b_avg = float(np.mean(img_array[:,:,2]))
     
     # Calculate brightness (luminance)
     brightness = (r_avg + g_avg + b_avg) / 3
@@ -254,9 +255,9 @@ def apply_target_rgb_correction(image: Image.Image, target_rgb=TARGET_RGB_UNPLAT
     img_array = np.array(image, dtype=np.float32)
     
     # Calculate current average RGB
-    current_r = np.mean(img_array[:,:,0])
-    current_g = np.mean(img_array[:,:,1])
-    current_b = np.mean(img_array[:,:,2])
+    current_r = float(np.mean(img_array[:,:,0]))
+    current_g = float(np.mean(img_array[:,:,1]))
+    current_b = float(np.mean(img_array[:,:,2]))
     
     # Protect highlights (cubic/diamond areas)
     brightness_map = np.mean(img_array, axis=2)
@@ -290,8 +291,6 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
     
     if pattern_type == "ac_bc":
         # For unplated white - apply target RGB
-        logger.info("Applying target RGB correction for unplated white")
-        
         # First mild brightness adjustment
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.01)
@@ -384,21 +383,15 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
 
 def process_enhancement(job):
     """Main enhancement processing with target RGB system"""
-    logger.info(f"=== Enhancement {VERSION} Started ===")
-    
     try:
         # Fast filename extraction
         filename = find_filename_fast(job)
         file_number = extract_file_number(filename) if filename else None
         
-        if filename:
-            logger.info(f"Processing file: {filename}")
-        
         # Fast image data extraction
         image_data = find_input_data_fast(job)
         
         if not image_data:
-            logger.error(f"Failed to find image data")
             return {
                 "output": {
                     "error": "No image data found",
@@ -421,7 +414,6 @@ def process_enhancement(job):
                 image = image.convert('RGB')
         
         original_size = image.size
-        logger.info(f"Image size: {original_size}")
         
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
@@ -431,9 +423,7 @@ def process_enhancement(job):
             "other": "기타색상"
         }.get(pattern_type, "기타색상")
         
-        logger.info(f"Pattern type: {pattern_type}, Detected type: {detected_type}")
-        
-        # Fast wedding ring detection
+        # Fast wedding ring detection - returns Python bool
         is_wedding_ring = detect_wedding_ring_fast(image)
         
         # Basic enhancement for all images
@@ -494,7 +484,7 @@ def process_enhancement(job):
                 "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
-                "is_wedding_ring": is_wedding_ring,
+                "is_wedding_ring": bool(is_wedding_ring),  # Ensure Python bool
                 "filename": filename,
                 "enhanced_filename": enhanced_filename,
                 "file_number": file_number,
@@ -508,19 +498,18 @@ def process_enhancement(job):
         # Add quality metrics for ac_bc patterns
         if quality_metrics:
             output["output"]["quality_check"] = {
-                "brightness": round(quality_metrics["brightness"], 1),
+                "brightness": round(float(quality_metrics["brightness"]), 1),
                 "rgb": {
-                    "r": round(quality_metrics["rgb"]["r"], 1),
-                    "g": round(quality_metrics["rgb"]["g"], 1),
-                    "b": round(quality_metrics["rgb"]["b"], 1)
+                    "r": round(float(quality_metrics["rgb"]["r"]), 1),
+                    "g": round(float(quality_metrics["rgb"]["g"]), 1),
+                    "b": round(float(quality_metrics["rgb"]["b"]), 1)
                 },
-                "rgb_deviation": round(quality_metrics["rgb_deviation"], 1),
-                "saturation": round(quality_metrics["saturation"], 1),
-                "cool_tone_diff": round(quality_metrics["cool_tone_diff"], 1),
-                "target_rgb": TARGET_RGB_UNPLATED
+                "rgb_deviation": round(float(quality_metrics["rgb_deviation"]), 1),
+                "saturation": round(float(quality_metrics["saturation"]), 1),
+                "cool_tone_diff": round(float(quality_metrics["cool_tone_diff"]), 1),
+                "target_rgb": list(TARGET_RGB_UNPLATED)
             }
         
-        logger.info("Enhancement completed successfully")
         return output
         
     except Exception as e:
