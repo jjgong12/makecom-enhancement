@@ -10,10 +10,10 @@ import cv2
 import logging
 import re
 
-logging.basicConfig(level=logging.WARNING)  # Reduced logging
+logging.basicConfig(level=logging.INFO)  # Changed to INFO for debugging
 logger = logging.getLogger(__name__)
 
-VERSION = "V124-OptimizedQualityCheck"
+VERSION = "V128-CompleteFix"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -30,72 +30,208 @@ def extract_file_number(filename: str) -> str:
     
     return None
 
-def find_input_data_fast(data):
-    """Find input data - highly optimized for speed"""
+def find_input_data_comprehensive(data, depth=0):
+    """Comprehensive search for input data with multiple strategies"""
+    if depth > 5:  # Prevent infinite recursion
+        return None
+    
+    # If data is already a string, check if it's base64
     if isinstance(data, str):
-        return data
+        if len(data) > 100:  # Likely base64
+            return data
     
     if isinstance(data, dict):
-        # Direct access to common paths
-        image_keys = ['enhanced_image', 'image', 'image_data', 'base64_image']
+        # Extended list of possible image keys
+        image_keys = [
+            'enhanced_image', 'image', 'image_data', 'base64_image',
+            'imageBase64', 'image_base64', 'base64', 'img', 'photo',
+            'picture', 'file', 'content', 'data', 'b64', 'base64_data',
+            'image_content', 'file_content', 'image_url', 'url'
+        ]
         
+        # 1. Check direct keys
         for key in image_keys:
-            if key in data and isinstance(data[key], str) and len(data[key]) > 100:
-                return data[key]
+            if key in data:
+                value = data[key]
+                if isinstance(value, str) and len(value) > 100:
+                    logger.info(f"Found image data at key: {key}")
+                    return value
+                elif isinstance(value, dict):
+                    result = find_input_data_comprehensive(value, depth + 1)
+                    if result:
+                        return result
         
-        # Check input key
-        if 'input' in data:
-            if isinstance(data['input'], str):
-                return data['input']
-            elif isinstance(data['input'], dict):
-                for key in image_keys:
-                    if key in data['input'].get(key, ''):
-                        return data['input'][key]
+        # 2. Check 'input' variations
+        input_keys = ['input', 'inputs', 'data', 'payload', 'body', 'request']
+        for input_key in input_keys:
+            if input_key in data:
+                if isinstance(data[input_key], str) and len(data[input_key]) > 100:
+                    logger.info(f"Found image data at {input_key}")
+                    return data[input_key]
+                elif isinstance(data[input_key], dict):
+                    for key in image_keys:
+                        if key in data[input_key]:
+                            value = data[input_key][key]
+                            if isinstance(value, str) and len(value) > 100:
+                                logger.info(f"Found image data at {input_key}.{key}")
+                                return value
         
-        # Make.com specific path
-        try:
-            if '4' in data:
-                return data['4']['data']['output']['output']['enhanced_image']
-        except:
-            pass
+        # 3. Check numeric keys (Make.com patterns)
+        for i in range(20):  # Check more numeric keys
+            key = str(i)
+            if key in data:
+                if isinstance(data[key], str) and len(data[key]) > 100:
+                    logger.info(f"Found image data at numeric key: {key}")
+                    return data[key]
+                elif isinstance(data[key], dict):
+                    result = find_input_data_comprehensive(data[key], depth + 1)
+                    if result:
+                        return result
+        
+        # 4. Check nested structures - common API patterns
+        nested_paths = [
+            ['job', 'input'],
+            ['job', 'data'],
+            ['data', 'image'],
+            ['data', 'input'],
+            ['payload', 'image'],
+            ['body', 'data'],
+            ['request', 'data'],
+            ['output', 'enhanced_image'],
+            ['result', 'image'],
+            ['response', 'data'],
+            # Make.com specific paths
+            ['4', 'data', 'output', 'output', 'enhanced_image'],
+            ['3', 'data', 'output', 'enhanced_image'],
+            ['2', 'data', 'image'],
+            ['1', 'image'],
+            ['0', 'data']
+        ]
+        
+        for path in nested_paths:
+            obj = data
+            try:
+                for key in path:
+                    obj = obj[key]
+                if isinstance(obj, str) and len(obj) > 100:
+                    logger.info(f"Found image data at path: {'.'.join(path)}")
+                    return obj
+                elif isinstance(obj, dict):
+                    result = find_input_data_comprehensive(obj, depth + 1)
+                    if result:
+                        return result
+            except:
+                continue
+        
+        # 5. Deep search all string values
+        for key, value in data.items():
+            if isinstance(value, str) and len(value) > 100:
+                # Check if it looks like base64
+                if not value.startswith('http') and not '/' in value[:50]:
+                    logger.info(f"Found potential image data at key: {key}")
+                    return value
+            elif isinstance(value, dict):
+                result = find_input_data_comprehensive(value, depth + 1)
+                if result:
+                    return result
+            elif isinstance(value, list) and len(value) > 0:
+                for item in value:
+                    if isinstance(item, dict):
+                        result = find_input_data_comprehensive(item, depth + 1)
+                        if result:
+                            return result
+                    elif isinstance(item, str) and len(item) > 100:
+                        logger.info(f"Found image data in list at key: {key}")
+                        return item
+    
+    elif isinstance(data, list):
+        # Check list items
+        for i, item in enumerate(data):
+            if isinstance(item, str) and len(item) > 100:
+                logger.info(f"Found image data in list at index: {i}")
+                return item
+            elif isinstance(item, dict):
+                result = find_input_data_comprehensive(item, depth + 1)
+                if result:
+                    return result
     
     return None
 
-def find_filename_fast(data):
-    """Fast filename extraction - no deep recursion"""
+def find_filename_comprehensive(data, depth=0):
+    """Comprehensive filename search"""
+    if depth > 5:
+        return None
+    
     if isinstance(data, dict):
-        # Direct filename keys
-        filename_keys = ['filename', 'file_name', 'fileName', 'name']
+        # Extended filename keys
+        filename_keys = [
+            'filename', 'file_name', 'fileName', 'name', 'originalName', 
+            'original_name', 'image_name', 'imageName', 'file', 'title',
+            'display_name', 'displayName', 'originalFilename', 'original_filename'
+        ]
         
+        # Check current level
         for key in filename_keys:
             if key in data and isinstance(data[key], str):
                 value = data[key]
                 if any(p in value.lower() for p in ['ac_', 'bc_', 'a_', 'b_', 'c_']):
+                    logger.info(f"Found filename at key: {key} = {value}")
+                    return value
+                elif '.' in value and len(value) < 100:  # Any filename with extension
+                    logger.info(f"Found filename at key: {key} = {value}")
                     return value
         
-        # Check input level
-        if 'input' in data and isinstance(data['input'], dict):
-            for key in filename_keys:
-                if key in data['input'] and isinstance(data['input'][key], str):
-                    value = data['input'][key]
-                    if any(p in value.lower() for p in ['ac_', 'bc_', 'a_', 'b_', 'c_']):
-                        return value
+        # Recursive search
+        for key, value in data.items():
+            if isinstance(value, dict):
+                result = find_filename_comprehensive(value, depth + 1)
+                if result:
+                    return result
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        result = find_filename_comprehensive(item, depth + 1)
+                        if result:
+                            return result
     
     return None
 
 def decode_base64_safe(base64_str: str) -> bytes:
-    """Safely decode base64 - optimized"""
-    if base64_str.startswith('data:'):
-        base64_str = base64_str.split(',')[1]
-    
-    base64_str = base64_str.strip()
-    
-    # Add padding if needed
-    padding = 4 - len(base64_str) % 4
-    if padding != 4:
-        base64_str += '=' * padding
-    
-    return base64.b64decode(base64_str)
+    """Safely decode base64 with comprehensive error handling"""
+    try:
+        # Remove data URL prefix if present
+        if 'base64,' in base64_str:
+            base64_str = base64_str.split('base64,')[1]
+        elif base64_str.startswith('data:'):
+            base64_str = base64_str.split(',')[1]
+        
+        # Clean the string
+        base64_str = base64_str.strip()
+        
+        # Remove any whitespace or newlines
+        base64_str = base64_str.replace('\n', '').replace('\r', '').replace(' ', '')
+        
+        # Add padding if needed
+        padding = 4 - len(base64_str) % 4
+        if padding != 4:
+            base64_str += '=' * padding
+        
+        # Try to decode
+        return base64.b64decode(base64_str)
+        
+    except Exception as e:
+        logger.error(f"Base64 decode error: {str(e)}")
+        # Try without padding
+        try:
+            return base64.b64decode(base64_str.rstrip('='))
+        except:
+            # Try with different padding
+            for pad in range(4):
+                try:
+                    return base64.b64decode(base64_str.rstrip('=') + '=' * pad)
+                except:
+                    continue
+            raise ValueError(f"Failed to decode base64: {str(e)}")
 
 def detect_pattern_type(filename: str) -> str:
     """Detect pattern type - optimized"""
@@ -112,28 +248,32 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def detect_wedding_ring_fast(image: Image.Image) -> bool:
-    """Fast wedding ring detection - brightness only"""
-    # Convert center region to grayscale
-    width, height = image.size
-    center_crop = image.crop((width//3, height//3, 2*width//3, 2*height//3))
-    gray = center_crop.convert('L')
-    gray_array = np.array(gray)
-    
-    # Check bright metallic areas
-    bright_pixels = np.sum(gray_array > 200)
-    total_pixels = gray_array.size
-    bright_ratio = bright_pixels / total_pixels
-    
-    return bright_ratio > 0.15
+    """Fast wedding ring detection - returns Python bool"""
+    try:
+        # Convert center region to grayscale
+        width, height = image.size
+        center_crop = image.crop((width//3, height//3, 2*width//3, 2*height//3))
+        gray = center_crop.convert('L')
+        gray_array = np.array(gray)
+        
+        # Check bright metallic areas
+        bright_pixels = np.sum(gray_array > 200)
+        total_pixels = gray_array.size
+        bright_ratio = bright_pixels / total_pixels
+        
+        # Convert to Python bool
+        return bool(bright_ratio > 0.15)
+    except:
+        return False
 
 def calculate_quality_metrics(image: Image.Image) -> dict:
     """Calculate quality metrics for second correction decision"""
     img_array = np.array(image)
     
-    # Calculate average RGB values
-    r_avg = np.mean(img_array[:,:,0])
-    g_avg = np.mean(img_array[:,:,1])
-    b_avg = np.mean(img_array[:,:,2])
+    # Calculate average RGB values - convert to Python float
+    r_avg = float(np.mean(img_array[:,:,0]))
+    g_avg = float(np.mean(img_array[:,:,1]))
+    b_avg = float(np.mean(img_array[:,:,2]))
     
     # Calculate brightness (luminance)
     brightness = (r_avg + g_avg + b_avg) / 3
@@ -144,7 +284,7 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
     
     # Calculate saturation
     img_hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
-    saturation = np.mean(img_hsv[:,:,1]) / 255 * 100
+    saturation = float(np.mean(img_hsv[:,:,1]) / 255 * 100)
     
     # Cool tone check (B should be higher than R)
     cool_tone_diff = b_avg - r_avg
@@ -163,11 +303,6 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
         return False, None
     
     # Quality criteria for unplated white
-    target_brightness = 237
-    target_cool_diff = 4
-    max_rgb_deviation = 5
-    max_saturation = 3
-    
     reasons = []
     
     if metrics["brightness"] < 235:
@@ -176,10 +311,10 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     if metrics["cool_tone_diff"] < 3:
         reasons.append("insufficient_cool_tone")
     
-    if metrics["rgb_deviation"] > max_rgb_deviation:
+    if metrics["rgb_deviation"] > 5:
         reasons.append("rgb_deviation_high")
     
-    if metrics["saturation"] > max_saturation:
+    if metrics["saturation"] > 3:
         reasons.append("saturation_high")
     
     return len(reasons) > 0, reasons
@@ -239,6 +374,22 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.01)
         
+        # Simple center focus for a_ pattern
+        width, height = image.size
+        x = np.linspace(-1, 1, width)
+        y = np.linspace(-1, 1, height)
+        X, Y = np.meshgrid(x, y)
+        distance = np.sqrt(X**2 + Y**2)
+        
+        focus_mask = 1 + 0.015 * np.exp(-distance**2 * 1.2)
+        focus_mask = np.clip(focus_mask, 1.0, 1.015)
+        
+        img_array = np.array(image, dtype=np.float32)
+        for i in range(3):
+            img_array[:, :, i] *= focus_mask
+        img_array = np.clip(img_array, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+        
     else:
         # Standard enhancement
         brightness = ImageEnhance.Brightness(image)
@@ -261,7 +412,7 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
     return image
 
 def resize_to_width_1200(image: Image.Image) -> Image.Image:
-    """Resize image to width 1200px"""
+    """Resize image to width 1200px maintaining aspect ratio"""
     width, height = image.size
     target_width = 1200
     aspect_ratio = height / width
@@ -272,27 +423,49 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
 def process_enhancement(job):
     """Main enhancement processing with quality check system"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
+    logger.info(f"Input type: {type(job)}")
+    
+    if isinstance(job, dict):
+        logger.info(f"Input keys: {list(job.keys())[:10]}")
     
     try:
-        # Fast filename extraction
-        filename = find_filename_fast(job)
+        # Comprehensive filename extraction
+        filename = find_filename_comprehensive(job)
+        logger.info(f"Filename found: {filename}")
         file_number = extract_file_number(filename) if filename else None
         
-        # Fast image data extraction
-        image_data = find_input_data_fast(job)
+        # Comprehensive image data extraction
+        image_data = find_input_data_comprehensive(job)
         
         if not image_data:
+            logger.error("Failed to find image data after comprehensive search")
             return {
                 "output": {
-                    "error": "No image data found",
+                    "error": "No image data found in input",
+                    "status": "error",
+                    "version": VERSION,
+                    "debug_info": {
+                        "input_type": str(type(job)),
+                        "keys": list(job.keys())[:20] if isinstance(job, dict) else None
+                    }
+                }
+            }
+        
+        logger.info(f"Found image data, length: {len(image_data)}")
+        
+        # Decode image with enhanced error handling
+        try:
+            image_bytes = decode_base64_safe(image_data)
+            image = Image.open(BytesIO(image_bytes))
+        except Exception as e:
+            logger.error(f"Failed to decode/open image: {str(e)}")
+            return {
+                "output": {
+                    "error": f"Failed to decode image: {str(e)}",
                     "status": "error",
                     "version": VERSION
                 }
             }
-        
-        # Decode image
-        image_bytes = decode_base64_safe(image_data)
-        image = Image.open(BytesIO(image_bytes))
         
         # Convert to RGB
         if image.mode != 'RGB':
@@ -304,6 +477,7 @@ def process_enhancement(job):
                 image = image.convert('RGB')
         
         original_size = image.size
+        logger.info(f"Image size: {original_size}")
         
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
@@ -313,7 +487,9 @@ def process_enhancement(job):
             "other": "기타색상"
         }.get(pattern_type, "기타색상")
         
-        # Fast wedding ring detection
+        logger.info(f"Pattern type: {pattern_type}, Detected type: {detected_type}")
+        
+        # Fast wedding ring detection - returns Python bool
         is_wedding_ring = detect_wedding_ring_fast(image)
         
         # Basic enhancement
@@ -350,8 +526,9 @@ def process_enhancement(job):
             sharpness = ImageEnhance.Sharpness(image)
             image = sharpness.enhance(1.08)
         
-        # Resize
+        # Resize to 1200px width
         image = resize_to_width_1200(image)
+        logger.info(f"Resized to: {image.size}")
         
         # Save to base64
         buffered = BytesIO()
@@ -359,7 +536,7 @@ def process_enhancement(job):
         buffered.seek(0)
         enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
-        # Remove padding
+        # Remove padding for Make.com compatibility
         enhanced_base64_no_padding = enhanced_base64.rstrip('=')
         
         # Build enhanced filename
@@ -375,7 +552,7 @@ def process_enhancement(job):
                 "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
-                "is_wedding_ring": is_wedding_ring,
+                "is_wedding_ring": bool(is_wedding_ring),  # Ensure Python bool
                 "filename": filename,
                 "enhanced_filename": enhanced_filename,
                 "file_number": file_number,
@@ -383,7 +560,7 @@ def process_enhancement(job):
                 "final_size": list(image.size),
                 "version": VERSION,
                 "status": "success",
-                "second_correction_applied": second_correction_applied,
+                "second_correction_applied": bool(second_correction_applied),
                 "correction_reasons": correction_reasons
             }
         }
@@ -391,26 +568,31 @@ def process_enhancement(job):
         # Add quality metrics for ac_bc patterns
         if quality_metrics:
             output["output"]["quality_check"] = {
-                "brightness": round(quality_metrics["brightness"], 1),
+                "brightness": round(float(quality_metrics["brightness"]), 1),
                 "rgb": {
-                    "r": round(quality_metrics["rgb"]["r"], 1),
-                    "g": round(quality_metrics["rgb"]["g"], 1),
-                    "b": round(quality_metrics["rgb"]["b"], 1)
+                    "r": round(float(quality_metrics["rgb"]["r"]), 1),
+                    "g": round(float(quality_metrics["rgb"]["g"]), 1),
+                    "b": round(float(quality_metrics["rgb"]["b"]), 1)
                 },
-                "rgb_deviation": round(quality_metrics["rgb_deviation"], 1),
-                "saturation": round(quality_metrics["saturation"], 1),
-                "cool_tone_diff": round(quality_metrics["cool_tone_diff"], 1)
+                "rgb_deviation": round(float(quality_metrics["rgb_deviation"]), 1),
+                "saturation": round(float(quality_metrics["saturation"]), 1),
+                "cool_tone_diff": round(float(quality_metrics["cool_tone_diff"]), 1)
             }
         
+        logger.info("Enhancement completed successfully")
         return output
         
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f"Unexpected error: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
         return {
             "output": {
                 "error": str(e),
                 "status": "error",
-                "version": VERSION
+                "version": VERSION,
+                "traceback": traceback.format_exc()
             }
         }
 
