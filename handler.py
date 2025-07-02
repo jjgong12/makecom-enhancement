@@ -377,8 +377,8 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # More desaturated
         
-        # V133: Adjusted white overlay for ac_bc - 0.13
-        white_overlay = 0.13  # Fixed at 0.13 for both wedding ring and normal
+        # V133: Unified white overlay for ac_bc - 0.13
+        white_overlay = 0.13  # Unified value for ac_ and bc_
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
@@ -404,18 +404,22 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         image = apply_center_focus(image, 0.02)
         
     elif pattern_type == "a_only":
-        # a_ pattern enhancement - V133 with 0.10 white overlay
+        # a_ pattern enhancement - V133 with reduced white overlay and increased sharpness
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.03)  # Same as ac_bc
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # Same desaturation as ac_bc
         
-        # V133: White overlay for a_ pattern - 0.10
-        white_overlay = 0.10  # Fixed at 0.10 for both wedding ring and normal
+        # V133: Reduced white overlay for a_ pattern - 0.08
+        white_overlay = 0.08  # Reduced from 0.10
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # Enhanced sharpness for a_ pattern
+        sharpness = ImageEnhance.Sharpness(image)
+        image = sharpness.enhance(1.15)  # Increased sharpness
         
         # STRONGER center focus for a_ pattern - 5%!
         width, height = image.size
@@ -563,7 +567,7 @@ def process_enhancement(job):
         pattern_type = detect_pattern_type(filename)
         detected_type = {
             "ac_bc": "무도금화이트(0.13)",
-            "a_only": "a_패턴(0.10)",
+            "a_only": "a_패턴(0.08)",
             "other": "기타색상"
         }.get(pattern_type, "기타색상")
         
@@ -644,7 +648,7 @@ def process_enhancement(job):
                 "correction_reasons": correction_reasons,
                 "white_overlay_info": {
                     "ac_bc": "0.13",
-                    "a_only": "0.10",
+                    "a_only": "0.08",
                     "other": "none"
                 },
                 "has_center_focus": True
