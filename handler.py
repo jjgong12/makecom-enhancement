@@ -10,10 +10,10 @@ import cv2
 import logging
 import re
 
-logging.basicConfig(level=logging.INFO)  # Changed to INFO for debugging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V131-PureWhite-StricterStandards"
+VERSION = "V132-WhiteOverlay-Extended"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -298,11 +298,12 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
     }
 
 def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
-    """Determine if second correction is needed - V131 stricter standards"""
-    if pattern_type != "ac_bc":
+    """Determine if second correction is needed - V132 stricter standards"""
+    # Apply to both ac_bc and a_only patterns now
+    if pattern_type not in ["ac_bc", "a_only"]:
         return False, None
     
-    # V131: Stricter quality criteria for pure white
+    # V132: Stricter quality criteria for pure white
     reasons = []
     
     if metrics["brightness"] < 241:  # Increased from 235
@@ -320,7 +321,7 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check - V131 pure white"""
+    """Apply second correction based on quality check - V132 pure white"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
     # Enhanced white overlay for pure white
@@ -347,7 +348,7 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     return image
 
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
-    """Optimized enhancement with pattern-specific settings"""
+    """Optimized enhancement with pattern-specific settings - V132 with a_ white overlay"""
     
     if pattern_type == "ac_bc":
         # Unplated white enhancement - V131 for purer white
@@ -381,15 +382,18 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         image = Image.fromarray(img_array.astype(np.uint8))
         
     elif pattern_type == "a_only":
-        # a_ pattern enhancement
+        # a_ pattern enhancement - V132 WITH WHITE OVERLAY
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.03)  # Slight increase from 1.025
+        image = brightness.enhance(1.03)  # Same as ac_bc
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.985)
+        image = color.enhance(0.96)  # Same desaturation as ac_bc
         
-        contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.01)
+        # V132: ADD WHITE OVERLAY TO a_ PATTERN
+        white_overlay = 0.12 if is_wedding_ring else 0.10
+        img_array = np.array(image)
+        img_array = img_array * (1 - white_overlay) + 255 * white_overlay
+        image = Image.fromarray(img_array.astype(np.uint8))
         
         # STRONGER center focus for a_ pattern - 5%!
         width, height = image.size
@@ -398,7 +402,7 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V130: 5% center focus
+        # V132: 5% center focus
         focus_mask = 1 + 0.05 * np.exp(-distance**2 * 1.2)
         focus_mask = np.clip(focus_mask, 1.0, 1.05)
         
@@ -409,7 +413,7 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         image = Image.fromarray(img_array.astype(np.uint8))
         
     else:
-        # Standard enhancement
+        # Standard enhancement (other patterns)
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.025)  # Slight increase from 1.02
         
@@ -531,7 +535,7 @@ def process_enhancement(job):
         pattern_type = detect_pattern_type(filename)
         detected_type = {
             "ac_bc": "무도금화이트",
-            "a_only": "a_패턴",
+            "a_only": "a_패턴(화이트오버레이)",  # V132: Now with white overlay
             "other": "기타색상"
         }.get(pattern_type, "기타색상")
         
@@ -553,12 +557,12 @@ def process_enhancement(job):
         # Apply pattern-specific enhancement
         image = apply_enhancement_optimized(image, pattern_type, is_wedding_ring)
         
-        # Quality check for second correction (only for ac_bc)
+        # Quality check for second correction (now for both ac_bc and a_only)
         second_correction_applied = False
         correction_reasons = []
         quality_metrics = None
         
-        if pattern_type == "ac_bc":
+        if pattern_type in ["ac_bc", "a_only"]:  # V132: Extended to a_only
             quality_metrics = calculate_quality_metrics(image)
             needs_correction, reasons = needs_second_correction(quality_metrics, pattern_type)
             
@@ -609,11 +613,16 @@ def process_enhancement(job):
                 "version": VERSION,
                 "status": "success",
                 "second_correction_applied": bool(second_correction_applied),
-                "correction_reasons": correction_reasons
+                "correction_reasons": correction_reasons,
+                "white_overlay_info": {
+                    "ac_bc": "0.10-0.12",
+                    "a_only": "0.10-0.12",  # V132: Now same as ac_bc
+                    "other": "none"
+                }
             }
         }
         
-        # Add quality metrics for ac_bc patterns
+        # Add quality metrics for ac_bc and a_only patterns
         if quality_metrics:
             output["output"]["quality_check"] = {
                 "brightness": round(float(quality_metrics["brightness"]), 1),
