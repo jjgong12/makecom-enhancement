@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V134-Enhanced-Wedding"
+VERSION = "V134-WhiteBalance-Fixed"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -266,6 +266,52 @@ def detect_wedding_ring_fast(image: Image.Image) -> bool:
     except:
         return False
 
+def auto_white_balance(image: Image.Image) -> Image.Image:
+    """Apply automatic white balance correction"""
+    img_array = np.array(image, dtype=np.float32)
+    
+    # Find gray/white areas (R≈G≈B)
+    gray_mask = (
+        (np.abs(img_array[:,:,0] - img_array[:,:,1]) < 10) & 
+        (np.abs(img_array[:,:,1] - img_array[:,:,2]) < 10) &
+        (img_array[:,:,0] > 200)  # Bright areas
+    )
+    
+    if np.sum(gray_mask) > 100:  # If enough gray pixels
+        # Calculate average RGB in gray areas
+        r_avg = np.mean(img_array[gray_mask, 0])
+        g_avg = np.mean(img_array[gray_mask, 1])
+        b_avg = np.mean(img_array[gray_mask, 2])
+        
+        # Calculate correction factors
+        gray_avg = (r_avg + g_avg + b_avg) / 3
+        r_factor = gray_avg / r_avg if r_avg > 0 else 1
+        g_factor = gray_avg / g_avg if g_avg > 0 else 1
+        b_factor = gray_avg / b_avg if b_avg > 0 else 1
+        
+        # Apply correction
+        img_array[:,:,0] *= r_factor
+        img_array[:,:,1] *= g_factor
+        img_array[:,:,2] *= b_factor
+        
+        logger.info(f"White balance correction applied - R:{r_factor:.3f}, G:{g_factor:.3f}, B:{b_factor:.3f}")
+    
+    img_array = np.clip(img_array, 0, 255)
+    return Image.fromarray(img_array.astype(np.uint8))
+
+def correct_background_color(image: Image.Image) -> Image.Image:
+    """Correct background color to pure white"""
+    img_array = np.array(image, dtype=np.float32)
+    
+    # Detect background (bright, low saturation areas)
+    gray = np.mean(img_array, axis=2)
+    background_mask = gray > 240
+    
+    # Make background pure white
+    img_array[background_mask] = 255
+    
+    return Image.fromarray(img_array.astype(np.uint8))
+
 def calculate_quality_metrics(image: Image.Image) -> dict:
     """Calculate quality metrics for second correction decision"""
     img_array = np.array(image)
@@ -321,7 +367,7 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check - V134 pure white"""
+    """Apply second correction based on quality check - V134 pure white with reduced cool tone"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
     # Enhanced white overlay for pure white
@@ -331,13 +377,13 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
         img_array = img_array * (1 - white_overlay_percent) + 255 * white_overlay_percent
         image = Image.fromarray(img_array.astype(np.uint8))
     
-    # Cool tone enhancement
+    # Cool tone enhancement - REDUCED
     if "insufficient_cool_tone" in reasons:
         img_array = np.array(image)
-        # Slightly boost blue channel
-        img_array[:,:,2] = np.clip(img_array[:,:,2] * 1.025, 0, 255)
-        # Slightly reduce red channel
-        img_array[:,:,0] = np.clip(img_array[:,:,0] * 0.975, 0, 255)
+        # REDUCED: Slightly boost blue channel
+        img_array[:,:,2] = np.clip(img_array[:,:,2] * 1.01, 0, 255)  # 1.025 → 1.01
+        # REDUCED: Slightly reduce red channel
+        img_array[:,:,0] = np.clip(img_array[:,:,0] * 0.99, 0, 255)   # 0.975 → 0.99
         image = Image.fromarray(img_array.astype(np.uint8))
     
     # Detail enhancement with edge preservation
@@ -585,6 +631,9 @@ def process_enhancement(job):
         original_size = image.size
         logger.info(f"Image size: {original_size}")
         
+        # Apply white balance correction FIRST
+        image = auto_white_balance(image)
+        
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
@@ -632,6 +681,9 @@ def process_enhancement(job):
             sharpness = ImageEnhance.Sharpness(image)
             image = sharpness.enhance(1.15)  # Increased from 1.12
         
+        # Apply background correction for final touch
+        image = correct_background_color(image)
+        
         # Resize to 1200px width
         image = resize_to_width_1200(image)
         logger.info(f"Resized to: {image.size}")
@@ -675,6 +727,8 @@ def process_enhancement(job):
                 },
                 "has_center_focus": True,
                 "center_focus_intensity": "9%",
+                "white_balance_applied": True,
+                "cool_tone_reduced": True,
                 "wedding_ring_enhancements": {
                     "highlight_enhancement": "15%",
                     "micro_contrast": "12%",
