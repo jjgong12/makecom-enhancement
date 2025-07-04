@@ -10,14 +10,28 @@ import cv2
 import logging
 import re
 import replicate
+import requests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V138-Replicate-Enhanced"
+VERSION = "V139-EnvOptimized"
 
-# Replicate client initialization (will need API key)
-# replicate_client = replicate.Client(api_token=os.environ.get("REPLICATE_API_TOKEN"))
+# ===== REPLICATE INITIALIZATION (환경변수 최적화) =====
+REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
+REPLICATE_CLIENT = None
+USE_REPLICATE = False
+
+if REPLICATE_API_TOKEN:
+    try:
+        REPLICATE_CLIENT = replicate.Client(api_token=REPLICATE_API_TOKEN)
+        USE_REPLICATE = True
+        logger.info("✅ Replicate client initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Replicate client: {e}")
+        USE_REPLICATE = False
+else:
+    logger.warning("⚠️ REPLICATE_API_TOKEN not found in environment variables")
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -270,9 +284,10 @@ def detect_wedding_ring_fast(image: Image.Image) -> bool:
     except:
         return False
 
-def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, pattern_type: str, use_replicate: bool = True) -> Image.Image:
-    """Apply Replicate API enhancement if enabled"""
-    if not use_replicate:
+def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, pattern_type: str) -> Image.Image:
+    """Apply Replicate API enhancement using pre-initialized client"""
+    if not USE_REPLICATE or not REPLICATE_CLIENT:
+        logger.warning("Replicate not available, skipping enhancement")
         return image
     
     try:
@@ -285,10 +300,10 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
         
         # For wedding rings, use more aggressive enhancement
         if is_wedding_ring:
-            logger.info("Applying Replicate enhancement for wedding ring")
+            logger.info("🔷 Applying Replicate enhancement for wedding ring")
             
             # Use magic-image-refiner for wedding rings
-            output = replicate.run(
+            output = REPLICATE_CLIENT.run(
                 "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
                 input={
                     "image": img_data_url,
@@ -300,7 +315,8 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
             
             # Additional pass with swin2sr for extra sharpness
             if output:
-                output = replicate.run(
+                logger.info("🔷 Applying second pass with swin2sr")
+                output = REPLICATE_CLIENT.run(
                     "mv-lab/swin2sr:a01b0512004918ca55d02e554914a9eca63909fa83a29ff0f115c78a7045574f",
                     input={
                         "image": output,
@@ -312,9 +328,9 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
         
         # For ac_bc pattern (무도금화이트), focus on white metal enhancement
         elif pattern_type == "ac_bc":
-            logger.info("Applying Replicate enhancement for unplated white gold")
+            logger.info("⚪ Applying Replicate enhancement for unplated white gold")
             
-            output = replicate.run(
+            output = REPLICATE_CLIENT.run(
                 "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
                 input={
                     "image": img_data_url,
@@ -326,10 +342,10 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
         
         # For other patterns, standard enhancement
         else:
-            logger.info("Applying standard Replicate enhancement")
+            logger.info("🔶 Applying standard Replicate enhancement")
             
             # Use Real-ESRGAN for general enhancement (faster and cheaper)
-            output = replicate.run(
+            output = REPLICATE_CLIENT.run(
                 "nightmareai/real-esrgan:350d32041630ffbe63c8352783a26d94126809164e54085352f8326e53999085",
                 input={
                     "image": img_data_url,
@@ -342,7 +358,6 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
             # Convert output back to PIL Image
             if isinstance(output, str):
                 # If output is URL
-                import requests
                 response = requests.get(output)
                 enhanced_image = Image.open(BytesIO(response.content))
             else:
@@ -352,13 +367,14 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
                 else:
                     enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
             
+            logger.info("✅ Replicate enhancement successful")
             return enhanced_image
         else:
-            logger.warning("Replicate enhancement failed, returning original image")
+            logger.warning("⚠️ Replicate enhancement failed, returning original image")
             return image
             
     except Exception as e:
-        logger.error(f"Replicate enhancement error: {str(e)}")
+        logger.error(f"❌ Replicate enhancement error: {str(e)}")
         return image
 
 def auto_white_balance(image: Image.Image) -> Image.Image:
@@ -687,23 +703,12 @@ def process_enhancement(job):
     """Main enhancement processing with quality check system and Replicate integration"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input type: {type(job)}")
+    logger.info(f"Replicate available: {USE_REPLICATE}")
     
     if isinstance(job, dict):
         logger.info(f"Input keys: {list(job.keys())[:10]}")
     
     try:
-        # Check if Replicate should be used
-        use_replicate = job.get('use_replicate', False) if isinstance(job, dict) else False
-        replicate_api_token = None
-        
-        if isinstance(job, dict):
-            replicate_api_token = job.get('replicate_api_token') or os.environ.get('REPLICATE_API_TOKEN')
-        
-        if use_replicate and replicate_api_token:
-            global replicate
-            replicate = replicate.Client(api_token=replicate_api_token)
-            logger.info("Replicate API initialized")
-        
         # Comprehensive filename extraction
         filename = find_filename_comprehensive(job)
         logger.info(f"Filename found: {filename}")
@@ -769,15 +774,16 @@ def process_enhancement(job):
         
         # Fast wedding ring detection - returns Python bool
         is_wedding_ring = detect_wedding_ring_fast(image)
+        logger.info(f"Wedding ring detected: {is_wedding_ring}")
         
         # Check if upscaling is needed before basic enhancement
         needs_upscale = needs_upscaling(image)
         replicate_applied = False
         
-        # Apply Replicate enhancement BEFORE basic enhancement if needed
-        if use_replicate and replicate_api_token and (is_wedding_ring or needs_upscale):
+        # Apply Replicate enhancement if available (웨딩링이므로 항상 적용)
+        if USE_REPLICATE:
             logger.info(f"Applying Replicate enhancement - Wedding ring: {is_wedding_ring}, Needs upscale: {needs_upscale}")
-            image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type, True)
+            image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type)
             replicate_applied = True
         
         # Basic enhancement with original brightness
@@ -866,10 +872,11 @@ def process_enhancement(job):
                 "replicate_enhancement": {
                     "applied": replicate_applied,
                     "upscaling_needed": needs_upscale,
+                    "available": USE_REPLICATE,
                     "model_used": "magic-image-refiner + swin2sr" if is_wedding_ring else 
                                   "magic-image-refiner" if pattern_type == "ac_bc" else 
                                   "real-esrgan"
-                } if replicate_applied else None,
+                },
                 "wedding_ring_enhancements": {
                     "highlight_enhancement": "10%",
                     "highlight_threshold": "220",
