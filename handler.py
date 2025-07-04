@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V134-WhiteBalance-Fixed"
+VERSION = "V135-ReducedWhite-Fixed"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -344,35 +344,35 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
     }
 
 def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
-    """Determine if second correction is needed - V134 stricter standards"""
+    """Determine if second correction is needed - V135 reduced standards"""
     # Apply ONLY to ac_bc pattern (무도금화이트)
-    if pattern_type != "ac_bc":  # CHANGED: Only ac_bc pattern
+    if pattern_type != "ac_bc":  # Only ac_bc pattern
         return False, None
     
-    # V134: Stricter quality criteria for pure white
+    # V135: Reduced quality criteria for less white
     reasons = []
     
-    if metrics["brightness"] < 241:  # Increased from 235
+    if metrics["brightness"] < 238:  # Lowered from 241
         reasons.append("brightness_low")
     
-    if metrics["cool_tone_diff"] < 3:
+    if metrics["cool_tone_diff"] < 2:  # Lowered from 3
         reasons.append("insufficient_cool_tone")
     
-    if metrics["rgb_deviation"] > 5:
+    if metrics["rgb_deviation"] > 6:  # Increased from 5
         reasons.append("rgb_deviation_high")
     
-    if metrics["saturation"] > 2:  # Reduced from 3
+    if metrics["saturation"] > 3:  # Increased from 2
         reasons.append("saturation_high")
     
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check - V134 pure white with reduced cool tone"""
+    """Apply second correction based on quality check - V135 reduced white"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
-    # Enhanced white overlay for pure white
+    # Reduced white overlay
     if "brightness_low" in reasons:
-        white_overlay_percent = 0.18  # Increased for purer white
+        white_overlay_percent = 0.12  # Reduced from 0.18
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay_percent) + 255 * white_overlay_percent
         image = Image.fromarray(img_array.astype(np.uint8))
@@ -381,9 +381,9 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     if "insufficient_cool_tone" in reasons:
         img_array = np.array(image)
         # REDUCED: Slightly boost blue channel
-        img_array[:,:,2] = np.clip(img_array[:,:,2] * 1.01, 0, 255)  # 1.025 → 1.01
+        img_array[:,:,2] = np.clip(img_array[:,:,2] * 1.005, 0, 255)  # 1.01 → 1.005
         # REDUCED: Slightly reduce red channel
-        img_array[:,:,0] = np.clip(img_array[:,:,0] * 0.99, 0, 255)   # 0.975 → 0.99
+        img_array[:,:,0] = np.clip(img_array[:,:,0] * 0.995, 0, 255)  # 0.99 → 0.995
         image = Image.fromarray(img_array.astype(np.uint8))
     
     # Detail enhancement with edge preservation
@@ -394,7 +394,7 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     return image
 
 def apply_center_focus(image: Image.Image, intensity: float = 0.02) -> Image.Image:
-    """Apply subtle center focus effect - V134"""
+    """Apply subtle center focus effect - V135"""
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
@@ -413,32 +413,32 @@ def apply_center_focus(image: Image.Image, intensity: float = 0.02) -> Image.Ima
     return Image.fromarray(img_array.astype(np.uint8))
 
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
-    """Optimized enhancement with pattern-specific settings - V134 updated values"""
+    """Optimized enhancement with pattern-specific settings - V135 reduced values"""
     
     if pattern_type == "ac_bc":
-        # Unplated white enhancement - V134 updated
+        # Unplated white enhancement - V135 reduced
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.04)  # Increased from 1.03
+        image = brightness.enhance(1.03)  # Reduced from 1.04
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # More desaturated
         
-        # V134: Updated white overlay for ac_bc - 0.14
-        white_overlay = 0.14  # Increased from 0.13
+        # V135: Reduced white overlay for ac_bc - 0.10
+        white_overlay = 0.10  # Reduced from 0.14
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V134: STRONGER center focus for ac_ pattern - 9%!
+        # V135: Reduced center focus for ac_ pattern - 7%
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V134: 9% center focus (increased from 5%)
-        focus_mask = 1 + 0.09 * np.exp(-distance**2 * 1.5)
-        focus_mask = np.clip(focus_mask, 1.0, 1.09)
+        # V135: 7% center focus (reduced from 9%)
+        focus_mask = 1 + 0.07 * np.exp(-distance**2 * 1.5)
+        focus_mask = np.clip(focus_mask, 1.0, 1.07)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -446,37 +446,37 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V134: Additional subtle center focus
-        image = apply_center_focus(image, 0.02)
+        # V135: Additional subtle center focus
+        image = apply_center_focus(image, 0.015)  # Reduced from 0.02
         
     elif pattern_type == "a_only":
-        # a_ pattern enhancement - V134 updated values
+        # a_ pattern enhancement - V135 reduced values
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.04)  # Increased from 1.03
+        image = brightness.enhance(1.03)  # Reduced from 1.04
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # Same desaturation as ac_bc
         
-        # V134: Updated white overlay for a_ pattern - 0.07
-        white_overlay = 0.07  # Reduced from 0.08
+        # V135: Reduced white overlay for a_ pattern - 0.05
+        white_overlay = 0.05  # Reduced from 0.07
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Enhanced sharpness for a_ pattern
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.15)  # Increased sharpness
+        image = sharpness.enhance(1.12)  # Reduced from 1.15
         
-        # V134: STRONGER center focus for a_ pattern - 9%!
+        # V135: Reduced center focus for a_ pattern - 7%
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V134: 9% center focus (increased from 5%)
-        focus_mask = 1 + 0.09 * np.exp(-distance**2 * 1.2)
-        focus_mask = np.clip(focus_mask, 1.0, 1.09)
+        # V135: 7% center focus (reduced from 9%)
+        focus_mask = 1 + 0.07 * np.exp(-distance**2 * 1.2)
+        focus_mask = np.clip(focus_mask, 1.0, 1.07)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -484,13 +484,13 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V134: Additional subtle center focus
-        image = apply_center_focus(image, 0.02)
+        # V135: Additional subtle center focus
+        image = apply_center_focus(image, 0.015)  # Reduced from 0.02
         
     else:
         # Standard enhancement (other patterns)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.025)  # Slight increase from 1.02
+        image = brightness.enhance(1.02)  # Reduced from 1.025
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.985)
@@ -498,39 +498,39 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.01)
         
-        # V134: Add subtle center focus to other patterns too
-        image = apply_center_focus(image, 0.015)
+        # V135: Add subtle center focus to other patterns too
+        image = apply_center_focus(image, 0.01)  # Reduced from 0.015
     
-    # Wedding ring focus enhancement - ENHANCED VERSION!
+    # Wedding ring focus enhancement - REDUCED VERSION!
     if is_wedding_ring:
-        # 1. Highlight Enhancement (NEW) - 밝은 영역 강조
+        # 1. Highlight Enhancement - REDUCED
         img_array = np.array(image, dtype=np.float32)
-        bright_mask = img_array > 200  # 밝은 영역 감지
-        img_array[bright_mask] *= 1.15  # 15% 밝기 증가
+        bright_mask = img_array > 210  # Increased threshold
+        img_array[bright_mask] *= 1.10  # Reduced from 1.15
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 2. Enhanced sharpening (UPDATED)
+        # 2. Enhanced sharpening - REDUCED
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.25)  # Increased from 1.15
+        image = sharpness.enhance(1.20)  # Reduced from 1.25
         
-        # 3. Enhanced contrast (UPDATED)
+        # 3. Enhanced contrast - REDUCED
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.025)  # Increased from 1.015
+        image = contrast.enhance(1.02)  # Reduced from 1.025
         
-        # 4. Structure Enhancement (NEW) - Unsharp mask for micro details
-        image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=2))
+        # 4. Structure Enhancement - REDUCED
+        image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=50, threshold=3))  # Reduced from 80
         
-        # 5. Enhanced Center focus (UPDATED) - additional 5%
+        # 5. Enhanced Center focus - REDUCED to 3%
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # Additional 5% for wedding rings (UPDATED from 3%)
-        center_mask = 1 + 0.05 * np.exp(-distance**2 * 1.8)
-        center_mask = np.clip(center_mask, 1.0, 1.05)
+        # Additional 3% for wedding rings (REDUCED from 5%)
+        center_mask = 1 + 0.03 * np.exp(-distance**2 * 1.8)
+        center_mask = np.clip(center_mask, 1.0, 1.03)
         
         # Apply center brightening
         img_array = np.array(image, dtype=np.float32)
@@ -539,9 +539,9 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 6. Enhanced edge darkening (UPDATED)
-        edge_mask = 0.97 + 0.03 * np.exp(-distance**2 * 0.8)
-        edge_mask = np.clip(edge_mask, 0.97, 1.0)  # Updated from 0.99-1.0
+        # 6. Enhanced edge darkening - REDUCED
+        edge_mask = 0.98 + 0.02 * np.exp(-distance**2 * 0.8)  # Reduced from 0.97-1.0
+        edge_mask = np.clip(edge_mask, 0.98, 1.0)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -549,11 +549,10 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 7. Micro Contrast (NEW) - Local contrast enhancement
-        # Simple implementation using high-pass filter
+        # 7. Micro Contrast - REDUCED
         gray = image.convert('L')
         edges = gray.filter(ImageFilter.FIND_EDGES)
-        edges_array = np.array(edges, dtype=np.float32) * 0.12  # 12% micro contrast
+        edges_array = np.array(edges, dtype=np.float32) * 0.08  # Reduced from 0.12
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -637,8 +636,8 @@ def process_enhancement(job):
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_bc": "무도금화이트(0.14)",
-            "a_only": "a_패턴(0.07)",
+            "ac_bc": "무도금화이트(0.10)",  # Updated
+            "a_only": "a_패턴(0.05)",        # Updated
             "other": "기타색상"
         }.get(pattern_type, "기타색상")
         
@@ -647,15 +646,15 @@ def process_enhancement(job):
         # Fast wedding ring detection - returns Python bool
         is_wedding_ring = detect_wedding_ring_fast(image)
         
-        # Basic enhancement with slight brightness increase
+        # Basic enhancement with reduced brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.025)  # Slight increase from 1.02
+        image = brightness.enhance(1.02)  # Reduced from 1.025
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.02)
+        image = contrast.enhance(1.015)  # Reduced from 1.02
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(1.01)
+        image = color.enhance(1.005)  # Reduced from 1.01
         
         # Apply pattern-specific enhancement
         image = apply_enhancement_optimized(image, pattern_type, is_wedding_ring)
@@ -665,7 +664,7 @@ def process_enhancement(job):
         correction_reasons = []
         quality_metrics = None
         
-        if pattern_type == "ac_bc":  # CHANGED: Only ac_bc pattern
+        if pattern_type == "ac_bc":  # Only ac_bc pattern
             quality_metrics = calculate_quality_metrics(image)
             needs_correction, reasons = needs_second_correction(quality_metrics, pattern_type)
             
@@ -676,10 +675,10 @@ def process_enhancement(job):
                 # Recalculate metrics after correction
                 quality_metrics = calculate_quality_metrics(image)
         
-        # V134: Updated final sharpening - increased to 1.15
+        # V135: Reduced final sharpening
         if not is_wedding_ring:
             sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.15)  # Increased from 1.12
+            image = sharpness.enhance(1.10)  # Reduced from 1.15
         
         # Apply background correction for final touch
         image = correct_background_color(image)
@@ -721,22 +720,22 @@ def process_enhancement(job):
                 "second_correction_applied": bool(second_correction_applied),
                 "correction_reasons": correction_reasons,
                 "white_overlay_info": {
-                    "ac_bc": "0.14",
-                    "a_only": "0.07",
+                    "ac_bc": "0.10",  # Reduced
+                    "a_only": "0.05",  # Reduced
                     "other": "none"
                 },
                 "has_center_focus": True,
-                "center_focus_intensity": "9%",
+                "center_focus_intensity": "7%",  # Reduced
                 "white_balance_applied": True,
                 "cool_tone_reduced": True,
                 "wedding_ring_enhancements": {
-                    "highlight_enhancement": "15%",
-                    "micro_contrast": "12%",
+                    "highlight_enhancement": "10%",   # Reduced from 15%
+                    "micro_contrast": "8%",           # Reduced from 12%
                     "structure_enhancement": "enabled",
-                    "enhanced_sharpness": "1.25",
-                    "enhanced_contrast": "1.025",
-                    "enhanced_center_focus": "5%",
-                    "enhanced_edge_darkening": "0.97-1.0"
+                    "enhanced_sharpness": "1.20",     # Reduced from 1.25
+                    "enhanced_contrast": "1.02",      # Reduced from 1.025
+                    "enhanced_center_focus": "3%",    # Reduced from 5%
+                    "enhanced_edge_darkening": "0.98-1.0"  # Reduced
                 } if is_wedding_ring else None
             }
         }
