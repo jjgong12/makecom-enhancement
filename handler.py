@@ -299,8 +299,8 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
 
 def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     """Determine if second correction is needed - V134 stricter standards"""
-    # Apply to both ac_bc and a_only patterns now
-    if pattern_type not in ["ac_bc", "a_only"]:
+    # Apply ONLY to ac_bc pattern (무도금화이트)
+    if pattern_type != "ac_bc":  # CHANGED: Only ac_bc pattern
         return False, None
     
     # V134: Stricter quality criteria for pure white
@@ -589,12 +589,12 @@ def process_enhancement(job):
         # Apply pattern-specific enhancement
         image = apply_enhancement_optimized(image, pattern_type, is_wedding_ring)
         
-        # Quality check for second correction (now for both ac_bc and a_only)
+        # Quality check for second correction (only for ac_bc pattern)
         second_correction_applied = False
         correction_reasons = []
         quality_metrics = None
         
-        if pattern_type in ["ac_bc", "a_only"]:  # V134: Extended to a_only
+        if pattern_type == "ac_bc":  # CHANGED: Only ac_bc pattern
             quality_metrics = calculate_quality_metrics(image)
             needs_correction, reasons = needs_second_correction(quality_metrics, pattern_type)
             
@@ -656,7 +656,7 @@ def process_enhancement(job):
             }
         }
         
-        # Add quality metrics for ac_bc and a_only patterns
+        # Add quality metrics for ac_bc pattern only
         if quality_metrics:
             output["output"]["quality_check"] = {
                 "brightness": round(float(quality_metrics["brightness"]), 1),
