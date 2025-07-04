@@ -13,6 +13,7 @@ import replicate
 import requests
 import string
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
