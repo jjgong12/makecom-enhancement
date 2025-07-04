@@ -9,11 +9,15 @@ from PIL import Image, ImageEnhance, ImageFilter
 import cv2
 import logging
 import re
+import replicate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V137-BackgroundSafe-Fixed"
+VERSION = "V138-Replicate-Enhanced"
+
+# Replicate client initialization (will need API key)
+# replicate_client = replicate.Client(api_token=os.environ.get("REPLICATE_API_TOKEN"))
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -265,6 +269,97 @@ def detect_wedding_ring_fast(image: Image.Image) -> bool:
         return bool(bright_ratio > 0.15)
     except:
         return False
+
+def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, pattern_type: str, use_replicate: bool = True) -> Image.Image:
+    """Apply Replicate API enhancement if enabled"""
+    if not use_replicate:
+        return image
+    
+    try:
+        # Convert image to base64 for Replicate
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        buffered.seek(0)
+        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        img_data_url = f"data:image/png;base64,{img_base64}"
+        
+        # For wedding rings, use more aggressive enhancement
+        if is_wedding_ring:
+            logger.info("Applying Replicate enhancement for wedding ring")
+            
+            # Use magic-image-refiner for wedding rings
+            output = replicate.run(
+                "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
+                input={
+                    "image": img_data_url,
+                    "scale": 2,  # 2x upscale
+                    "resemblance": 0.85,  # High resemblance to preserve ring details
+                    "prompt": "highly detailed wedding ring, sharp metallic edges, brilliant diamond sparkle, professional jewelry photography, crisp focus"
+                }
+            )
+            
+            # Additional pass with swin2sr for extra sharpness
+            if output:
+                output = replicate.run(
+                    "mv-lab/swin2sr:a01b0512004918ca55d02e554914a9eca63909fa83a29ff0f115c78a7045574f",
+                    input={
+                        "image": output,
+                        "task": "real_sr",
+                        "scale": 2,
+                        "large_model": True
+                    }
+                )
+        
+        # For ac_bc pattern (무도금화이트), focus on white metal enhancement
+        elif pattern_type == "ac_bc":
+            logger.info("Applying Replicate enhancement for unplated white gold")
+            
+            output = replicate.run(
+                "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
+                input={
+                    "image": img_data_url,
+                    "scale": 2,
+                    "resemblance": 0.8,
+                    "prompt": "pure white gold jewelry, clean white metal surface, professional product photography, bright and clean"
+                }
+            )
+        
+        # For other patterns, standard enhancement
+        else:
+            logger.info("Applying standard Replicate enhancement")
+            
+            # Use Real-ESRGAN for general enhancement (faster and cheaper)
+            output = replicate.run(
+                "nightmareai/real-esrgan:350d32041630ffbe63c8352783a26d94126809164e54085352f8326e53999085",
+                input={
+                    "image": img_data_url,
+                    "scale": 2,
+                    "face_enhance": False
+                }
+            )
+        
+        if output:
+            # Convert output back to PIL Image
+            if isinstance(output, str):
+                # If output is URL
+                import requests
+                response = requests.get(output)
+                enhanced_image = Image.open(BytesIO(response.content))
+            else:
+                # If output is base64 or data URL
+                if hasattr(output, 'read'):
+                    enhanced_image = Image.open(output)
+                else:
+                    enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
+            
+            return enhanced_image
+        else:
+            logger.warning("Replicate enhancement failed, returning original image")
+            return image
+            
+    except Exception as e:
+        logger.error(f"Replicate enhancement error: {str(e)}")
+        return image
 
 def auto_white_balance(image: Image.Image) -> Image.Image:
     """Apply automatic white balance correction"""
@@ -573,6 +668,12 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
     
     return image
 
+def needs_upscaling(image: Image.Image) -> bool:
+    """Determine if image needs upscaling"""
+    width, height = image.size
+    # If width is less than 2400px or height is less than 3200px, needs upscaling
+    return width < 2400 or height < 3200
+
 def resize_to_width_1200(image: Image.Image) -> Image.Image:
     """Resize image to width 1200px maintaining aspect ratio"""
     width, height = image.size
@@ -583,7 +684,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing with quality check system"""
+    """Main enhancement processing with quality check system and Replicate integration"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input type: {type(job)}")
     
@@ -591,6 +692,18 @@ def process_enhancement(job):
         logger.info(f"Input keys: {list(job.keys())[:10]}")
     
     try:
+        # Check if Replicate should be used
+        use_replicate = job.get('use_replicate', False) if isinstance(job, dict) else False
+        replicate_api_token = None
+        
+        if isinstance(job, dict):
+            replicate_api_token = job.get('replicate_api_token') or os.environ.get('REPLICATE_API_TOKEN')
+        
+        if use_replicate and replicate_api_token:
+            global replicate
+            replicate = replicate.Client(api_token=replicate_api_token)
+            logger.info("Replicate API initialized")
+        
         # Comprehensive filename extraction
         filename = find_filename_comprehensive(job)
         logger.info(f"Filename found: {filename}")
@@ -656,6 +769,16 @@ def process_enhancement(job):
         
         # Fast wedding ring detection - returns Python bool
         is_wedding_ring = detect_wedding_ring_fast(image)
+        
+        # Check if upscaling is needed before basic enhancement
+        needs_upscale = needs_upscaling(image)
+        replicate_applied = False
+        
+        # Apply Replicate enhancement BEFORE basic enhancement if needed
+        if use_replicate and replicate_api_token and (is_wedding_ring or needs_upscale):
+            logger.info(f"Applying Replicate enhancement - Wedding ring: {is_wedding_ring}, Needs upscale: {needs_upscale}")
+            image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type, True)
+            replicate_applied = True
         
         # Basic enhancement with original brightness
         brightness = ImageEnhance.Brightness(image)
@@ -740,6 +863,13 @@ def process_enhancement(job):
                 "white_balance_applied": True,
                 "cool_tone_reduced": True,
                 "background_correction": "subtle",
+                "replicate_enhancement": {
+                    "applied": replicate_applied,
+                    "upscaling_needed": needs_upscale,
+                    "model_used": "magic-image-refiner + swin2sr" if is_wedding_ring else 
+                                  "magic-image-refiner" if pattern_type == "ac_bc" else 
+                                  "real-esrgan"
+                } if replicate_applied else None,
                 "wedding_ring_enhancements": {
                     "highlight_enhancement": "10%",
                     "highlight_threshold": "220",
