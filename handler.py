@@ -13,7 +13,6 @@ import replicate
 import requests
 import string
 
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -321,6 +320,23 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
         raise ValueError("Replicate API token not configured. Please set REPLICATE_API_TOKEN environment variable.")
     
     try:
+        # Check image size and resize if necessary
+        original_size = image.size
+        width, height = original_size
+        total_pixels = width * height
+        MAX_PIXELS = 2000000  # Safe limit under 2,096,704
+        
+        need_resize = False
+        if total_pixels > MAX_PIXELS:
+            # Calculate resize factor
+            resize_factor = (MAX_PIXELS / total_pixels) ** 0.5
+            new_width = int(width * resize_factor)
+            new_height = int(height * resize_factor)
+            
+            logger.info(f"⚠️ Image too large ({width}x{height}={total_pixels} pixels). Resizing to {new_width}x{new_height}")
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            need_resize = True
+        
         # Convert image to base64 for Replicate
         buffered = BytesIO()
         image.save(buffered, format="PNG")
@@ -343,18 +359,21 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
                 }
             )
             
-            # Additional pass with swin2sr for extra sharpness
-            if output:
+            # Skip second pass with swin2sr if image was too large
+            if output and not need_resize:
                 logger.info("🔷 Applying second pass with swin2sr")
-                output = REPLICATE_CLIENT.run(
-                    "mv-lab/swin2sr:a01b0512004918ca55d02e554914a9eca63909fa83a29ff0f115c78a7045574f",
-                    input={
-                        "image": output,
-                        "task": "real_sr",
-                        "scale": 2,
-                        "large_model": True
-                    }
-                )
+                try:
+                    output = REPLICATE_CLIENT.run(
+                        "mv-lab/swin2sr:a01b0512004918ca55d02e554914a9eca63909fa83a29ff0f115c78a7045574f",
+                        input={
+                            "image": output,
+                            "task": "real_sr",
+                            "scale": 2,
+                            "large_model": True
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Swin2sr pass failed (likely size issue), using first pass result: {str(e)}")
         
         # For ac_bc pattern (무도금화이트), focus on white metal enhancement
         elif pattern_type == "ac_bc":
@@ -396,6 +415,11 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
                     enhanced_image = Image.open(output)
                 else:
                     enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
+            
+            # Resize back to original size if needed
+            if need_resize:
+                logger.info(f"🔄 Resizing back to original size: {original_size}")
+                enhanced_image = enhanced_image.resize(original_size, Image.Resampling.LANCZOS)
             
             logger.info("✅ Replicate enhancement successful")
             return enhanced_image
@@ -847,12 +871,27 @@ def process_enhancement(job):
         # Check if upscaling is needed before basic enhancement
         needs_upscale = needs_upscaling(image)
         replicate_applied = False
+        replicate_resized = False
         
         # Apply Replicate enhancement if available (웨딩링이므로 항상 적용)
         if USE_REPLICATE:
             logger.info(f"Applying Replicate enhancement - Wedding ring: {is_wedding_ring}, Needs upscale: {needs_upscale}")
-            image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type)
-            replicate_applied = True
+            try:
+                original_replicate_size = image.size
+                image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type)
+                replicate_applied = True
+                # Check if image was resized for Replicate
+                total_pixels = original_replicate_size[0] * original_replicate_size[1]
+                replicate_resized = total_pixels > 2000000
+            except Exception as e:
+                logger.error(f"Replicate enhancement failed: {str(e)}")
+                return {
+                    "output": {
+                        "error": f"Replicate enhancement failed: {str(e)}",
+                        "status": "error",
+                        "version": VERSION
+                    }
+                }
         
         # Basic enhancement with original brightness
         brightness = ImageEnhance.Brightness(image)
@@ -942,6 +981,7 @@ def process_enhancement(job):
                     "applied": replicate_applied,
                     "upscaling_needed": needs_upscale,
                     "available": USE_REPLICATE,
+                    "input_resized_for_gpu": replicate_resized if replicate_applied else None,
                     "model_used": "magic-image-refiner + swin2sr" if is_wedding_ring else 
                                   "magic-image-refiner" if pattern_type == "ac_bc" else 
                                   "real-esrgan"
