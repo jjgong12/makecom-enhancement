@@ -13,7 +13,7 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V134-Updated-WhiteOverlay"
+VERSION = "V134-Enhanced-Wedding"
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename - optimized"""
@@ -455,26 +455,36 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         # V134: Add subtle center focus to other patterns too
         image = apply_center_focus(image, 0.015)
     
-    # Wedding ring focus enhancement - APPLIED TO ALL PATTERNS!
+    # Wedding ring focus enhancement - ENHANCED VERSION!
     if is_wedding_ring:
-        # First apply sharpening
+        # 1. Highlight Enhancement (NEW) - 밝은 영역 강조
+        img_array = np.array(image, dtype=np.float32)
+        bright_mask = img_array > 200  # 밝은 영역 감지
+        img_array[bright_mask] *= 1.15  # 15% 밝기 증가
+        img_array = np.clip(img_array, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # 2. Enhanced sharpening (UPDATED)
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.15)
+        image = sharpness.enhance(1.25)  # Increased from 1.15
         
-        # Then apply contrast
+        # 3. Enhanced contrast (UPDATED)
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.015)
+        image = contrast.enhance(1.025)  # Increased from 1.015
         
-        # IMPORTANT: Center focus enhancement for wedding rings - additional 3%
+        # 4. Structure Enhancement (NEW) - Unsharp mask for micro details
+        image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=2))
+        
+        # 5. Enhanced Center focus (UPDATED) - additional 5%
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # Additional 3% for wedding rings (total 12% with base 9%)
-        center_mask = 1 + 0.03 * np.exp(-distance**2 * 1.8)
-        center_mask = np.clip(center_mask, 1.0, 1.03)
+        # Additional 5% for wedding rings (UPDATED from 3%)
+        center_mask = 1 + 0.05 * np.exp(-distance**2 * 1.8)
+        center_mask = np.clip(center_mask, 1.0, 1.05)
         
         # Apply center brightening
         img_array = np.array(image, dtype=np.float32)
@@ -483,13 +493,25 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Additional edge darkening for more focus
-        edge_mask = 0.99 + 0.01 * np.exp(-distance**2 * 0.8)
-        edge_mask = np.clip(edge_mask, 0.99, 1.0)
+        # 6. Enhanced edge darkening (UPDATED)
+        edge_mask = 0.97 + 0.03 * np.exp(-distance**2 * 0.8)
+        edge_mask = np.clip(edge_mask, 0.97, 1.0)  # Updated from 0.99-1.0
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
             img_array[:, :, i] *= edge_mask
+        img_array = np.clip(img_array, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+        
+        # 7. Micro Contrast (NEW) - Local contrast enhancement
+        # Simple implementation using high-pass filter
+        gray = image.convert('L')
+        edges = gray.filter(ImageFilter.FIND_EDGES)
+        edges_array = np.array(edges, dtype=np.float32) * 0.12  # 12% micro contrast
+        
+        img_array = np.array(image, dtype=np.float32)
+        for i in range(3):
+            img_array[:, :, i] += edges_array
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
     
@@ -652,7 +674,16 @@ def process_enhancement(job):
                     "other": "none"
                 },
                 "has_center_focus": True,
-                "center_focus_intensity": "9%"
+                "center_focus_intensity": "9%",
+                "wedding_ring_enhancements": {
+                    "highlight_enhancement": "15%",
+                    "micro_contrast": "12%",
+                    "structure_enhancement": "enabled",
+                    "enhanced_sharpness": "1.25",
+                    "enhanced_contrast": "1.025",
+                    "enhanced_center_focus": "5%",
+                    "enhanced_edge_darkening": "0.97-1.0"
+                } if is_wedding_ring else None
             }
         }
         
