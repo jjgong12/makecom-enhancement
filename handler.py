@@ -161,7 +161,7 @@ def find_filename_comprehensive(data, depth=0):
     return None
 
 def decode_base64_ultra_safe(base64_str: str) -> bytes:
-    """ULTRA SAFE base64 decode - V142 with aggressive error handling"""
+    """ULTRA SAFE base64 decode - V142 FINAL with Make.com compatibility"""
     try:
         if not base64_str:
             raise ValueError("Empty base64 string")
@@ -171,8 +171,7 @@ def decode_base64_ultra_safe(base64_str: str) -> bytes:
             
         base64_str = str(base64_str)
         
-        # AGGRESSIVE cleaning
-        # 1. Remove ALL possible prefixes
+        # Step 1: Remove ALL possible prefixes
         if 'base64,' in base64_str:
             base64_str = base64_str.split('base64,')[-1]
         elif 'data:' in base64_str:
@@ -182,101 +181,132 @@ def decode_base64_ultra_safe(base64_str: str) -> bytes:
             else:
                 base64_str = base64_str.split('base64')[-1].lstrip(',')
         
-        # 2. ULTRA clean - remove everything except valid base64
+        # Step 2: ULTRA clean - remove everything except valid base64
         base64_str = base64_str.strip()
         base64_str = ''.join(base64_str.split())
         
-        # 3. Handle common encoding issues
+        # Step 3: Handle common encoding issues
         replacements = [
             ('%2B', '+'), ('%2F', '/'), ('%3D', '='),
             ('%2b', '+'), ('%2f', '/'), ('%3d', '='),
             (' ', ''), ('\n', ''), ('\r', ''), ('\t', ''),
             ('\\n', ''), ('\\r', ''), ('\\t', ''),
-            ('"', ''), ("'", '')
+            ('"', ''), ("'", ''), ('\\', ''),  # Added backslash removal
+            ('&quot;', ''), ('&apos;', ''), ('&amp;', ''),  # HTML entities
+            ('\u0020', ''), ('\u000A', ''), ('\u000D', '')  # Unicode spaces
         ]
         
         for old, new in replacements:
             base64_str = base64_str.replace(old, new)
         
-        # 4. Keep ONLY valid base64 characters
+        # Step 4: Keep ONLY valid base64 characters
         valid_chars = set(string.ascii_letters + string.digits + '+/=')
         base64_str = ''.join(c for c in base64_str if c in valid_chars)
         
-        # 5. Check minimum length
+        # Step 5: Check minimum length
         if len(base64_str) < 50:
             raise ValueError(f"Base64 too short: {len(base64_str)} chars")
         
-        # 6. Try multiple padding strategies
+        logger.info(f"Cleaned base64 length: {len(base64_str)}, first 50 chars: {base64_str[:50]}")
+        
+        # Step 6: Create strategies (MAKE.COM OPTIMIZED ORDER)
         strategies = []
         
         # Remove all padding first
         no_pad = base64_str.rstrip('=')
         
-        # Strategy order (Make.com compatible):
-        # 1. No padding (Make.com style)
-        strategies.append(no_pad)
+        # CRITICAL: Make.com sends without padding, so try this FIRST
+        strategies.append(no_pad)  # Strategy 0: No padding (Make.com style)
         
-        # 2. Correct padding
+        # Calculate correct padding
         padding_needed = (4 - len(no_pad) % 4) % 4
-        strategies.append(no_pad + ('=' * padding_needed))
+        correct_padded = no_pad + ('=' * padding_needed)
+        strategies.append(correct_padded)  # Strategy 1: Correct padding
         
-        # 3. Original (if it had padding)
-        if base64_str != no_pad:
-            strategies.append(base64_str)
+        # Original string (if different)
+        if base64_str != no_pad and base64_str != correct_padded:
+            strategies.append(base64_str)  # Strategy 2: Original
         
-        # 4. All padding variants
+        # All possible padding combinations
         for i in range(4):
             padded = no_pad + ('=' * i)
             if padded not in strategies:
-                strategies.append(padded)
+                strategies.append(padded)  # Strategy 3-6: All padding variants
         
-        # 7. Try each strategy with both standard and urlsafe
+        # Step 7: Try each strategy with multiple methods
         last_error = None
         for i, test_str in enumerate(strategies):
             if not test_str:
                 continue
             
-            # Try standard base64
+            # Method 1: Standard base64 with validation
             try:
                 decoded = base64.b64decode(test_str, validate=True)
                 # Verify it's valid image data
-                Image.open(BytesIO(decoded))
-                logger.info(f"✅ Decoded successfully with strategy {i} (standard)")
+                img = Image.open(BytesIO(decoded))
+                img.verify()  # Quick verify
+                logger.info(f"✅ SUCCESS: Decoded with strategy {i} (standard, validated)")
                 return decoded
             except Exception as e:
                 last_error = e
             
-            # Try urlsafe base64
+            # Method 2: Standard base64 without validation
+            try:
+                decoded = base64.b64decode(test_str, validate=False)
+                # Verify it's valid image data
+                img = Image.open(BytesIO(decoded))
+                img.verify()
+                logger.info(f"✅ SUCCESS: Decoded with strategy {i} (standard, no validation)")
+                return decoded
+            except Exception as e:
+                last_error = e
+            
+            # Method 3: URL-safe base64
             try:
                 url_safe = test_str.replace('+', '-').replace('/', '_')
                 decoded = base64.urlsafe_b64decode(url_safe)
                 # Verify it's valid image data
-                Image.open(BytesIO(decoded))
-                logger.info(f"✅ Decoded successfully with strategy {i} (urlsafe)")
+                img = Image.open(BytesIO(decoded))
+                img.verify()
+                logger.info(f"✅ SUCCESS: Decoded with strategy {i} (urlsafe)")
                 return decoded
-            except:
-                pass
+            except Exception as e:
+                last_error = e
             
-            # Try with b64decode without validation
+            # Method 4: Alternative base64 (handle weird cases)
             try:
-                decoded = base64.b64decode(test_str, validate=False)
-                # Verify it's valid image data
-                Image.open(BytesIO(decoded))
-                logger.info(f"✅ Decoded successfully with strategy {i} (no validation)")
+                # Try with standard lib directly
+                import binascii
+                decoded = binascii.a2b_base64(test_str)
+                img = Image.open(BytesIO(decoded))
+                img.verify()
+                logger.info(f"✅ SUCCESS: Decoded with strategy {i} (binascii)")
                 return decoded
             except:
                 pass
         
-        # If all strategies fail, log detailed info
-        logger.error(f"❌ All decode attempts failed")
+        # If all strategies fail, provide detailed error info
+        logger.error(f"❌ CRITICAL: All decode attempts failed")
         logger.error(f"Original length: {len(base64_str)}")
+        logger.error(f"No padding length: {len(no_pad)}")
+        logger.error(f"Padding needed: {padding_needed}")
         logger.error(f"First 100 chars: {base64_str[:100]}")
         logger.error(f"Last 100 chars: {base64_str[-100:]}")
+        logger.error(f"Last error: {last_error}")
         
-        raise ValueError(f"Base64 decode failed after all strategies: {last_error}")
+        # Last resort: try to decode ignoring errors
+        try:
+            decoded = base64.b64decode(no_pad + '==', validate=False)
+            img = Image.open(BytesIO(decoded))
+            logger.warning("⚠️ FALLBACK: Decoded with forced padding")
+            return decoded
+        except:
+            pass
+        
+        raise ValueError(f"Base64 decode failed after all attempts. Last error: {last_error}")
         
     except Exception as e:
-        logger.error(f"Base64 decode error: {str(e)}")
+        logger.error(f"Fatal base64 decode error: {str(e)}")
         raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def detect_pattern_type(filename: str) -> str:
@@ -334,7 +364,7 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
             need_resize = True
         
-        # Convert to base64
+        # Convert to base64 for Replicate
         buffered = BytesIO()
         image.save(buffered, format="PNG")
         buffered.seek(0)
@@ -537,7 +567,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing - V142"""
+    """Main enhancement processing - V142 FINAL"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Replicate available: {USE_REPLICATE}")
     
@@ -566,13 +596,15 @@ def process_enhancement(job):
         try:
             image_bytes = decode_base64_ultra_safe(image_data)
             image = Image.open(BytesIO(image_bytes))
+            logger.info("✅ Successfully decoded and opened image")
         except Exception as e:
             logger.error(f"Failed to decode/open image: {str(e)}")
             return {
                 "output": {
                     "error": f"Invalid base64 data: {str(e)}",
                     "status": "error",
-                    "version": VERSION
+                    "version": VERSION,
+                    "decode_attempts": "all strategies failed"
                 }
             }
         
@@ -646,8 +678,9 @@ def process_enhancement(job):
         buffered.seek(0)
         enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
-        # Remove padding for Make.com
+        # CRITICAL: Remove padding for Make.com
         enhanced_base64_no_padding = enhanced_base64.rstrip('=')
+        logger.info(f"Output base64 length: {len(enhanced_base64_no_padding)} (padding removed)")
         
         # Build enhanced filename
         enhanced_filename = filename
@@ -674,11 +707,12 @@ def process_enhancement(job):
                 "center_spotlight": "15% strong",
                 "wedding_ring_enhancement": "metallic_highlights + cubic_focus" if is_wedding_ring else None,
                 "replicate_applied": replicate_applied,
-                "base64_decode_method": "ultra_safe_v142"
+                "base64_decode_method": "ultra_safe_v142_final",
+                "make_com_compatible": True
             }
         }
         
-        logger.info("Enhancement completed successfully")
+        logger.info("✅ Enhancement completed successfully")
         return output
         
     except Exception as e:
