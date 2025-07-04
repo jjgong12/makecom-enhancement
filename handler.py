@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V139-EnvOptimized"
+VERSION = "V140-Base64Fix-Enhanced"
 
 # ===== REPLICATE INITIALIZATION (환경변수 최적화) =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -50,13 +50,13 @@ def extract_file_number(filename: str) -> str:
     return None
 
 def find_input_data_comprehensive(data, depth=0):
-    """Comprehensive search for input data with multiple strategies"""
+    """Comprehensive search for input data with better base64 validation"""
     if depth > 5:  # Prevent infinite recursion
         return None
     
     # If data is already a string, check if it's base64
     if isinstance(data, str):
-        if len(data) > 100:  # Likely base64
+        if len(data) > 100 and not data.startswith('http'):  # Likely base64
             return data
     
     if isinstance(data, dict):
@@ -72,9 +72,19 @@ def find_input_data_comprehensive(data, depth=0):
         for key in image_keys:
             if key in data:
                 value = data[key]
-                if isinstance(value, str) and len(value) > 100:
-                    logger.info(f"Found image data at key: {key}")
-                    return value
+                if isinstance(value, str):
+                    # Skip URLs unless they're in url-specific keys
+                    if value.startswith('http'):
+                        if key in ['url', 'image_url']:
+                            logger.info(f"Found image URL at key: {key}")
+                            return value
+                    # Check if it's valid base64
+                    elif len(value) > 100:
+                        # Quick validation - check if it contains valid base64 chars
+                        sample = value[:100].replace('data:', '').replace('image/', '').replace('base64,', '')
+                        if any(c in sample for c in string.ascii_letters + string.digits + '+/='):
+                            logger.info(f"Found base64 data at key: {key}")
+                            return value
                 elif isinstance(value, dict):
                     result = find_input_data_comprehensive(value, depth + 1)
                     if result:
@@ -147,8 +157,11 @@ def find_input_data_comprehensive(data, depth=0):
             if isinstance(value, str) and len(value) > 100:
                 # Check if it looks like base64
                 if not value.startswith('http') and not '/' in value[:50]:
-                    logger.info(f"Found potential image data at key: {key}")
-                    return value
+                    # More thorough base64 check
+                    sample = value[:100].replace('data:', '').replace('image/', '').replace('base64,', '')
+                    if any(c in sample for c in string.ascii_letters + string.digits + '+/='):
+                        logger.info(f"Found potential base64 data at key: {key}")
+                        return value
             elif isinstance(value, dict):
                 result = find_input_data_comprehensive(value, depth + 1)
                 if result:
@@ -216,13 +229,22 @@ def find_filename_comprehensive(data, depth=0):
     return None
 
 def decode_base64_safe(base64_str: str) -> bytes:
-    """Safely decode base64 with comprehensive error handling"""
+    """Safely decode base64 with comprehensive error handling - V140 Enhanced"""
     try:
+        # Handle empty or invalid input
+        if not base64_str or not isinstance(base64_str, str):
+            raise ValueError("Invalid base64 input: empty or not string")
+            
         # Remove data URL prefix if present
         if 'base64,' in base64_str:
             base64_str = base64_str.split('base64,')[1]
         elif base64_str.startswith('data:'):
-            base64_str = base64_str.split(',')[1]
+            parts = base64_str.split(',')
+            if len(parts) > 1:
+                base64_str = parts[1]
+            else:
+                # Handle malformed data URLs
+                base64_str = base64_str.split('base64,')[-1]
         
         # Clean the string - remove all whitespace, newlines, and special chars
         base64_str = base64_str.strip()
@@ -230,53 +252,51 @@ def decode_base64_safe(base64_str: str) -> bytes:
         base64_str = base64_str.replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '')
         
         # Remove any non-base64 characters (keep only A-Za-z0-9+/=)
-        import string
         valid_chars = string.ascii_letters + string.digits + '+/='
         base64_str = ''.join(c for c in base64_str if c in valid_chars)
         
+        # Check minimum length
+        if len(base64_str) < 100:
+            raise ValueError(f"Base64 string too short: {len(base64_str)} characters")
+        
         # Try decoding with different padding strategies
-        # Strategy 1: Try as-is
+        # Strategy 1: Try as-is with validation
         try:
-            return base64.b64decode(base64_str)
-        except:
-            pass
+            return base64.b64decode(base64_str, validate=True)
+        except Exception as e1:
+            logger.debug(f"Strategy 1 failed: {str(e1)}")
         
-        # Strategy 2: Remove all padding and add correct padding
+        # Strategy 2: Fix padding
         base64_str_no_pad = base64_str.rstrip('=')
-        padding = 4 - (len(base64_str_no_pad) % 4)
-        if padding != 4:
-            base64_str_padded = base64_str_no_pad + ('=' * padding)
-        else:
-            base64_str_padded = base64_str_no_pad
+        padding_needed = (4 - len(base64_str_no_pad) % 4) % 4
+        base64_str_padded = base64_str_no_pad + ('=' * padding_needed)
         
-        try:
-            return base64.b64decode(base64_str_padded)
-        except:
-            pass
-        
-        # Strategy 3: Try with standard base64 (not urlsafe)
         try:
             return base64.b64decode(base64_str_padded, validate=True)
-        except:
-            pass
+        except Exception as e2:
+            logger.debug(f"Strategy 2 failed: {str(e2)}")
+        
+        # Strategy 3: Try without validation
+        try:
+            return base64.b64decode(base64_str_padded)
+        except Exception as e3:
+            logger.debug(f"Strategy 3 failed: {str(e3)}")
         
         # Strategy 4: Try URL-safe base64
         try:
-            # Replace standard base64 chars with URL-safe equivalents
             urlsafe_str = base64_str_no_pad.replace('+', '-').replace('/', '_')
-            padding = 4 - (len(urlsafe_str) % 4)
-            if padding != 4:
-                urlsafe_str += '=' * padding
-            return base64.urlsafe_b64decode(urlsafe_str)
-        except:
-            pass
+            padding_needed = (4 - len(urlsafe_str) % 4) % 4
+            urlsafe_str_padded = urlsafe_str + ('=' * padding_needed)
+            return base64.urlsafe_b64decode(urlsafe_str_padded)
+        except Exception as e4:
+            logger.debug(f"Strategy 4 failed: {str(e4)}")
         
-        # If all strategies fail, raise error
-        raise ValueError("All base64 decoding strategies failed")
+        # If all strategies fail, provide detailed error
+        raise ValueError(f"All base64 decoding strategies failed. String length: {len(base64_str)}, First 50 chars: {base64_str[:50]}")
         
     except Exception as e:
-        logger.error(f"Base64 decode error after all attempts: {str(e)}")
-        raise ValueError(f"Failed to decode base64: {str(e)}")
+        logger.error(f"Base64 decode error: {str(e)}")
+        raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def detect_pattern_type(filename: str) -> str:
     """Detect pattern type - optimized"""
@@ -314,7 +334,7 @@ def detect_wedding_ring_fast(image: Image.Image) -> bool:
         return False
 
 def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, pattern_type: str) -> Image.Image:
-    """Apply Replicate API enhancement using pre-initialized client"""
+    """Apply Replicate API enhancement with V140 upscaling improvements"""
     if not USE_REPLICATE or not REPLICATE_CLIENT:
         logger.error("❌ Replicate not available - API token not configured")
         raise ValueError("Replicate API token not configured. Please set REPLICATE_API_TOKEN environment variable.")
@@ -344,24 +364,24 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         img_data_url = f"data:image/png;base64,{img_base64}"
         
-        # For wedding rings, use more aggressive enhancement
+        # V140: Enhanced upscaling for wedding rings
         if is_wedding_ring:
-            logger.info("🔷 Applying Replicate enhancement for wedding ring")
+            logger.info("🔷 Applying Replicate enhancement for wedding ring with detail focus")
             
-            # Use magic-image-refiner for wedding rings
+            # Use magic-image-refiner for wedding rings with detail-focused prompt
             output = REPLICATE_CLIENT.run(
                 "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
                 input={
                     "image": img_data_url,
                     "scale": 2,  # 2x upscale
                     "resemblance": 0.85,  # High resemblance to preserve ring details
-                    "prompt": "highly detailed wedding ring, sharp metallic edges, brilliant diamond sparkle, professional jewelry photography, crisp focus"
+                    "prompt": "highly detailed wedding ring with perfect cubic zirconia sparkle, sharp metallic edges, brilliant diamond-like crystals, professional jewelry photography, crisp focus on center stone and details"  # V140: Enhanced prompt
                 }
             )
             
             # Skip second pass with swin2sr if image was too large
             if output and not need_resize:
-                logger.info("🔷 Applying second pass with swin2sr")
+                logger.info("🔷 Applying second pass with swin2sr for maximum detail")
                 try:
                     output = REPLICATE_CLIENT.run(
                         "mv-lab/swin2sr:a01b0512004918ca55d02e554914a9eca63909fa83a29ff0f115c78a7045574f",
@@ -385,21 +405,22 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
                     "image": img_data_url,
                     "scale": 2,
                     "resemblance": 0.8,
-                    "prompt": "pure white gold jewelry, clean white metal surface, professional product photography, bright and clean"
+                    "prompt": "pure white gold jewelry with bright cubic details, clean white metal surface, professional product photography, bright and clean with enhanced center details"  # V140: Enhanced prompt
                 }
             )
         
-        # For other patterns, standard enhancement
+        # For other patterns, standard enhancement with detail focus
         else:
-            logger.info("🔶 Applying standard Replicate enhancement")
+            logger.info("🔶 Applying standard Replicate enhancement with detail focus")
             
-            # Use Real-ESRGAN for general enhancement (faster and cheaper)
+            # V140: Use Real-ESRGAN with 4x for better detail
             output = REPLICATE_CLIENT.run(
                 "nightmareai/real-esrgan:350d32041630ffbe63c8352783a26d94126809164e54085352f8326e53999085",
                 input={
                     "image": img_data_url,
-                    "scale": 2,
-                    "face_enhance": False
+                    "scale": 4,  # V140: 4x for better detail
+                    "face_enhance": False,
+                    "model": "RealESRGAN_x4plus"  # V140: 4x model
                 }
             )
         
@@ -465,7 +486,7 @@ def auto_white_balance(image: Image.Image) -> Image.Image:
     return Image.fromarray(img_array.astype(np.uint8))
 
 def correct_background_color_subtle(image: Image.Image) -> Image.Image:
-    """Subtle background correction - V136 less aggressive"""
+    """Subtle background correction - V140 less aggressive"""
     img_array = np.array(image, dtype=np.float32)
     
     # Detect very bright background areas only
@@ -509,15 +530,15 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
     }
 
 def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
-    """Determine if second correction is needed - V136 original standards"""
+    """Determine if second correction is needed - V140 adjusted standards"""
     # Apply ONLY to ac_bc pattern (무도금화이트)
     if pattern_type != "ac_bc":  # Only ac_bc pattern
         return False, None
     
-    # V136: Original quality criteria
+    # V140: Adjusted quality criteria for brighter output
     reasons = []
     
-    if metrics["brightness"] < 241:
+    if metrics["brightness"] < 243:  # V140: Increased threshold
         reasons.append("brightness_low")
     
     if metrics["cool_tone_diff"] < 3:
@@ -532,12 +553,12 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check - V136 original with reduced cool tone"""
+    """Apply second correction based on quality check - V140 enhanced brightness"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
     # Enhanced white overlay for pure white
     if "brightness_low" in reasons:
-        white_overlay_percent = 0.18  # Original value
+        white_overlay_percent = 0.20  # V140: Increased from 0.18
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay_percent) + 255 * white_overlay_percent
         image = Image.fromarray(img_array.astype(np.uint8))
@@ -553,22 +574,22 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     
     # Detail enhancement with edge preservation
     if any(r in reasons for r in ["brightness_low", "saturation_high"]):
-        # Apply unsharp mask for detail
-        image = image.filter(ImageFilter.UnsharpMask(radius=1, percent=30, threshold=3))
+        # V140: Enhanced unsharp mask for detail
+        image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=50, threshold=2))
     
     return image
 
 def apply_center_focus(image: Image.Image, intensity: float = 0.02) -> Image.Image:
-    """Apply subtle center focus effect - V136"""
+    """Apply subtle center focus effect - V140 enhanced"""
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
     X, Y = np.meshgrid(x, y)
     distance = np.sqrt(X**2 + Y**2)
     
-    # Subtle center focus
-    focus_mask = 1 + intensity * np.exp(-distance**2 * 1.8)
-    focus_mask = np.clip(focus_mask, 1.0, 1.0 + intensity)
+    # V140: Enhanced center focus
+    focus_mask = 1 + intensity * 1.5 * np.exp(-distance**2 * 1.5)
+    focus_mask = np.clip(focus_mask, 1.0, 1.0 + intensity * 1.5)
     
     img_array = np.array(image, dtype=np.float32)
     for i in range(3):
@@ -578,32 +599,32 @@ def apply_center_focus(image: Image.Image, intensity: float = 0.02) -> Image.Ima
     return Image.fromarray(img_array.astype(np.uint8))
 
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
-    """Optimized enhancement with pattern-specific settings - V139 with 5% overlay for a/b patterns"""
+    """Optimized enhancement with pattern-specific settings - V140 enhanced brightness and focus"""
     
     if pattern_type == "ac_bc":
-        # Unplated white enhancement - V136 original
+        # Unplated white enhancement - V140 enhanced
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.04)
+        image = brightness.enhance(1.06)  # V140: Increased from 1.04
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # More desaturated
         
-        # V136: Original white overlay for ac_bc - 0.14
-        white_overlay = 0.14  # RESTORED
+        # V140: White overlay for ac_bc - slightly increased
+        white_overlay = 0.15  # V140: Increased from 0.14
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V136: Original center focus for ac_ pattern - 9%
+        # V140: Enhanced center focus for ac_ pattern - 10%
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V136: 9% center focus (RESTORED)
-        focus_mask = 1 + 0.09 * np.exp(-distance**2 * 1.5)
-        focus_mask = np.clip(focus_mask, 1.0, 1.09)
+        # V140: 10% center focus
+        focus_mask = 1 + 0.10 * np.exp(-distance**2 * 1.3)
+        focus_mask = np.clip(focus_mask, 1.0, 1.10)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -611,37 +632,36 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V136: Additional subtle center focus
-        image = apply_center_focus(image, 0.02)
+        # V140: Enhanced subtle center focus
+        image = apply_center_focus(image, 0.03)  # Increased from 0.02
         
     elif pattern_type == "a_only":
-        # a_ pattern enhancement - V139 UPDATED to 5%
+        # a_ pattern enhancement - V140 enhanced
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.04)
+        image = brightness.enhance(1.06)  # V140: Increased
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # Same desaturation as ac_bc
         
-        # V139: UPDATED white overlay for a_ pattern - 0.05 (5%)
-        white_overlay = 0.05  # CHANGED from 0.07 to 0.05
+        # V140: White overlay for a_ pattern - 0.05 (5%)
+        white_overlay = 0.05
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Enhanced sharpness for a_ pattern
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.15)
+        image = sharpness.enhance(1.20)  # V140: Increased from 1.15
         
-        # V136: Original center focus for a_ pattern - 9%
+        # V140: 10% center focus
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V136: 9% center focus (RESTORED)
-        focus_mask = 1 + 0.09 * np.exp(-distance**2 * 1.2)
-        focus_mask = np.clip(focus_mask, 1.0, 1.09)
+        focus_mask = 1 + 0.10 * np.exp(-distance**2 * 1.2)
+        focus_mask = np.clip(focus_mask, 1.0, 1.10)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -649,18 +669,18 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V136: Additional subtle center focus
-        image = apply_center_focus(image, 0.02)
+        # V140: Enhanced subtle center focus
+        image = apply_center_focus(image, 0.03)
         
     elif pattern_type == "b_only":
-        # b_ pattern enhancement - V139 NEW with 5% overlay
+        # b_ pattern enhancement - V140 enhanced
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.04)
+        image = brightness.enhance(1.06)
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)  # Same desaturation as a_
         
-        # V139: NEW white overlay for b_ pattern - 0.05 (5%)
+        # V140: White overlay for b_ pattern - 0.05 (5%)
         white_overlay = 0.05
         img_array = np.array(image)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
@@ -668,17 +688,17 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         
         # Enhanced sharpness for b_ pattern
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.15)
+        image = sharpness.enhance(1.20)
         
-        # 9% center focus for b_ pattern
+        # 10% center focus for b_ pattern
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        focus_mask = 1 + 0.09 * np.exp(-distance**2 * 1.2)
-        focus_mask = np.clip(focus_mask, 1.0, 1.09)
+        focus_mask = 1 + 0.10 * np.exp(-distance**2 * 1.2)
+        focus_mask = np.clip(focus_mask, 1.0, 1.10)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -687,23 +707,23 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         image = Image.fromarray(img_array.astype(np.uint8))
         
         # Additional subtle center focus
-        image = apply_center_focus(image, 0.02)
+        image = apply_center_focus(image, 0.03)
         
     else:
-        # Standard enhancement (other patterns)
+        # Standard enhancement (other patterns) - V140 enhanced
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.025)
+        image = brightness.enhance(1.04)  # V140: Increased from 1.025
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.985)
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.01)
+        image = contrast.enhance(1.02)  # V140: Increased from 1.01
         
-        # V136: Add subtle center focus to other patterns too
-        image = apply_center_focus(image, 0.015)
+        # V140: Enhanced center focus to other patterns too
+        image = apply_center_focus(image, 0.025)  # Increased from 0.015
     
-    # Wedding ring focus enhancement - V136 REDUCED HIGHLIGHT
+    # Wedding ring focus enhancement - V140 Enhanced for cubic details
     if is_wedding_ring:
         # 1. Highlight Enhancement - ONLY FOR NON-BACKGROUND AREAS
         img_array = np.array(image, dtype=np.float32)
@@ -719,31 +739,31 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         
         # Apply bright enhancement only to non-background bright areas
         bright_mask = (img_array > 220) & (~is_background[:,:,np.newaxis])
-        img_array[bright_mask] *= 1.10  # Reduced from 1.15
+        img_array[bright_mask] *= 1.12  # V140: Increased from 1.10
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 2. Enhanced sharpening (KEPT SAME)
+        # 2. Enhanced sharpening for cubic details
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.25)
+        image = sharpness.enhance(1.35)  # V140: Increased from 1.25
         
-        # 3. Enhanced contrast (KEPT SAME)
+        # 3. Enhanced contrast
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.025)
+        image = contrast.enhance(1.04)  # V140: Increased from 1.025
         
-        # 4. Structure Enhancement (KEPT SAME)
-        image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=2))
+        # 4. Structure Enhancement for cubic details
+        image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=100, threshold=1))  # V140: Enhanced
         
-        # 5. Enhanced Center focus - 5% (RESTORED)
+        # 5. Enhanced Center focus - 6% for cubic details
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # Additional 5% for wedding rings (RESTORED)
-        center_mask = 1 + 0.05 * np.exp(-distance**2 * 1.8)
-        center_mask = np.clip(center_mask, 1.0, 1.05)
+        # V140: 6% for wedding rings
+        center_mask = 1 + 0.06 * np.exp(-distance**2 * 1.5)
+        center_mask = np.clip(center_mask, 1.0, 1.06)
         
         # Apply center brightening
         img_array = np.array(image, dtype=np.float32)
@@ -752,9 +772,9 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 6. Enhanced edge darkening (KEPT SAME)
-        edge_mask = 0.97 + 0.03 * np.exp(-distance**2 * 0.8)
-        edge_mask = np.clip(edge_mask, 0.97, 1.0)
+        # 6. Enhanced edge darkening
+        edge_mask = 0.96 + 0.04 * np.exp(-distance**2 * 0.8)
+        edge_mask = np.clip(edge_mask, 0.96, 1.0)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -762,10 +782,10 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 7. Micro Contrast (KEPT SAME)
+        # 7. Micro Contrast for cubic detail
         gray = image.convert('L')
         edges = gray.filter(ImageFilter.FIND_EDGES)
-        edges_array = np.array(edges, dtype=np.float32) * 0.12  # 12% micro contrast
+        edges_array = np.array(edges, dtype=np.float32) * 0.15  # V140: 15% micro contrast
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -791,7 +811,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing with quality check system and Replicate integration"""
+    """Main enhancement processing with quality check system and Replicate integration - V140"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Input type: {type(job)}")
     logger.info(f"Replicate available: {USE_REPLICATE}")
@@ -832,7 +852,7 @@ def process_enhancement(job):
             logger.error(f"Failed to decode/open image: {str(e)}")
             return {
                 "output": {
-                    "error": f"Failed to decode image: {str(e)}",
+                    "error": f"Invalid base64 data: {str(e)}",
                     "status": "error",
                     "version": VERSION
                 }
@@ -856,7 +876,7 @@ def process_enhancement(job):
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_bc": "무도금화이트(0.14)",
+            "ac_bc": "무도금화이트(0.15)",  # V140: Updated
             "a_only": "a_패턴(0.05)",
             "b_only": "b_패턴(0.05)",
             "other": "기타색상"
@@ -893,12 +913,12 @@ def process_enhancement(job):
                     }
                 }
         
-        # Basic enhancement with original brightness
+        # Basic enhancement with V140 increased brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.025)
+        image = brightness.enhance(1.04)  # V140: Increased from 1.025
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.02)
+        image = contrast.enhance(1.03)  # V140: Increased from 1.02
         
         color = ImageEnhance.Color(image)
         image = color.enhance(1.01)
@@ -922,10 +942,10 @@ def process_enhancement(job):
                 # Recalculate metrics after correction
                 quality_metrics = calculate_quality_metrics(image)
         
-        # V136: Original final sharpening
+        # V140: Enhanced final sharpening
         if not is_wedding_ring:
             sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.15)
+            image = sharpness.enhance(1.20)  # V140: Increased from 1.15
         
         # Apply SUBTLE background correction for final touch
         image = correct_background_color_subtle(image)
@@ -967,16 +987,18 @@ def process_enhancement(job):
                 "second_correction_applied": bool(second_correction_applied),
                 "correction_reasons": correction_reasons,
                 "white_overlay_info": {
-                    "ac_bc": "0.14",
+                    "ac_bc": "0.15",  # V140: Updated
                     "a_only": "0.05",
                     "b_only": "0.05",
                     "other": "none"
                 },
                 "has_center_focus": True,
-                "center_focus_intensity": "9%",
+                "center_focus_intensity": "10%",  # V140: Updated
                 "white_balance_applied": True,
                 "cool_tone_reduced": True,
                 "background_correction": "subtle",
+                "brightness_enhanced": True,  # V140: New flag
+                "detail_enhancement": "enhanced",  # V140: New flag
                 "replicate_enhancement": {
                     "applied": replicate_applied,
                     "upscaling_needed": needs_upscale,
@@ -984,17 +1006,17 @@ def process_enhancement(job):
                     "input_resized_for_gpu": replicate_resized if replicate_applied else None,
                     "model_used": "magic-image-refiner + swin2sr" if is_wedding_ring else 
                                   "magic-image-refiner" if pattern_type == "ac_bc" else 
-                                  "real-esrgan"
+                                  "real-esrgan-x4plus"  # V140: Updated
                 },
                 "wedding_ring_enhancements": {
-                    "highlight_enhancement": "10%",
+                    "highlight_enhancement": "12%",  # V140: Updated
                     "highlight_threshold": "220",
-                    "micro_contrast": "12%",
-                    "structure_enhancement": "enabled",
-                    "enhanced_sharpness": "1.25",
-                    "enhanced_contrast": "1.025",
-                    "enhanced_center_focus": "5%",
-                    "enhanced_edge_darkening": "0.97-1.0"
+                    "micro_contrast": "15%",  # V140: Updated
+                    "structure_enhancement": "enhanced",  # V140: Updated
+                    "enhanced_sharpness": "1.35",  # V140: Updated
+                    "enhanced_contrast": "1.04",  # V140: Updated
+                    "enhanced_center_focus": "6%",  # V140: Updated
+                    "enhanced_edge_darkening": "0.96-1.0"
                 } if is_wedding_ring else None
             }
         }
