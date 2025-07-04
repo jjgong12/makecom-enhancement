@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V140-Base64Fix-Enhanced"
+VERSION = "V141-Ultra-Safe"
 
 # ===== REPLICATE INITIALIZATION (환경변수 최적화) =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -50,137 +50,115 @@ def extract_file_number(filename: str) -> str:
     return None
 
 def find_input_data_comprehensive(data, depth=0):
-    """Comprehensive search for input data with better base64 validation"""
-    if depth > 5:  # Prevent infinite recursion
+    """Comprehensive search for input data - ULTRA SAFE for Make.com"""
+    if depth > 5:
         return None
     
-    # If data is already a string, check if it's base64
+    # If already string, return it
     if isinstance(data, str):
-        if len(data) > 100 and not data.startswith('http'):  # Likely base64
+        if len(data) > 50 and not data.startswith('http'):
             return data
     
     if isinstance(data, dict):
-        # Extended list of possible image keys
+        # Extended image keys
         image_keys = [
             'enhanced_image', 'image', 'image_data', 'base64_image',
             'imageBase64', 'image_base64', 'base64', 'img', 'photo',
             'picture', 'file', 'content', 'data', 'b64', 'base64_data',
-            'image_content', 'file_content', 'image_url', 'url'
+            'image_content', 'file_content', 'thumbnail', 'raw_image'
         ]
         
-        # 1. Check direct keys
+        # 1. Direct key check
         for key in image_keys:
             if key in data:
                 value = data[key]
                 if isinstance(value, str):
-                    # Skip URLs unless they're in url-specific keys
-                    if value.startswith('http'):
-                        if key in ['url', 'image_url']:
-                            logger.info(f"Found image URL at key: {key}")
-                            return value
-                    # Check if it's valid base64
-                    elif len(value) > 100:
-                        # Quick validation - check if it contains valid base64 chars
-                        sample = value[:100].replace('data:', '').replace('image/', '').replace('base64,', '')
-                        if any(c in sample for c in string.ascii_letters + string.digits + '+/='):
-                            logger.info(f"Found base64 data at key: {key}")
-                            return value
+                    if value.startswith('http') and key in ['url', 'image_url']:
+                        logger.info(f"Found URL at key: {key}")
+                        return value
+                    elif len(value) > 50:
+                        logger.info(f"Found base64 at key: {key}")
+                        return value
                 elif isinstance(value, dict):
                     result = find_input_data_comprehensive(value, depth + 1)
                     if result:
                         return result
         
-        # 2. Check 'input' variations
-        input_keys = ['input', 'inputs', 'data', 'payload', 'body', 'request']
+        # 2. Check nested common structures
+        input_keys = ['input', 'inputs', 'data', 'payload', 'body', 'request', 
+                     'params', 'arguments', 'job', 'event']
         for input_key in input_keys:
             if input_key in data:
-                if isinstance(data[input_key], str) and len(data[input_key]) > 100:
+                if isinstance(data[input_key], str) and len(data[input_key]) > 50:
                     logger.info(f"Found image data at {input_key}")
                     return data[input_key]
                 elif isinstance(data[input_key], dict):
+                    # Check image keys within nested structure
                     for key in image_keys:
                         if key in data[input_key]:
                             value = data[input_key][key]
-                            if isinstance(value, str) and len(value) > 100:
-                                logger.info(f"Found image data at {input_key}.{key}")
+                            if isinstance(value, str) and len(value) > 50:
+                                logger.info(f"Found image at {input_key}.{key}")
                                 return value
+                    # Recursive search
+                    result = find_input_data_comprehensive(data[input_key], depth + 1)
+                    if result:
+                        return result
         
-        # 3. Check numeric keys (Make.com patterns)
-        for i in range(20):  # Check more numeric keys
+        # 3. Numeric keys (Make.com)
+        for i in range(20):
             key = str(i)
             if key in data:
-                if isinstance(data[key], str) and len(data[key]) > 100:
-                    logger.info(f"Found image data at numeric key: {key}")
+                if isinstance(data[key], str) and len(data[key]) > 50:
+                    logger.info(f"Found at numeric key: {key}")
                     return data[key]
                 elif isinstance(data[key], dict):
                     result = find_input_data_comprehensive(data[key], depth + 1)
                     if result:
                         return result
         
-        # 4. Check nested structures - common API patterns
+        # 4. Make.com specific paths
         nested_paths = [
-            ['job', 'input'],
-            ['job', 'data'],
-            ['data', 'image'],
-            ['data', 'input'],
-            ['payload', 'image'],
-            ['body', 'data'],
-            ['request', 'data'],
-            ['output', 'enhanced_image'],
-            ['result', 'image'],
-            ['response', 'data'],
-            # Make.com specific paths
             ['4', 'data', 'output', 'output', 'enhanced_image'],
             ['3', 'data', 'output', 'enhanced_image'],
             ['2', 'data', 'image'],
             ['1', 'image'],
-            ['0', 'data']
+            ['0', 'data'],
+            ['output', 'enhanced_image'],
+            ['result', 'image'],
+            ['response', 'data', 'image']
         ]
         
         for path in nested_paths:
-            obj = data
             try:
+                obj = data
                 for key in path:
-                    obj = obj[key]
-                if isinstance(obj, str) and len(obj) > 100:
-                    logger.info(f"Found image data at path: {'.'.join(path)}")
+                    if isinstance(obj, dict):
+                        obj = obj.get(key)
+                    else:
+                        break
+                if isinstance(obj, str) and len(obj) > 50:
+                    logger.info(f"Found at path: {'.'.join(path)}")
                     return obj
-                elif isinstance(obj, dict):
-                    result = find_input_data_comprehensive(obj, depth + 1)
-                    if result:
-                        return result
             except:
                 continue
         
-        # 5. Deep search all string values
+        # 5. Deep value search - last resort
         for key, value in data.items():
-            if isinstance(value, str) and len(value) > 100:
-                # Check if it looks like base64
-                if not value.startswith('http') and not '/' in value[:50]:
-                    # More thorough base64 check
-                    sample = value[:100].replace('data:', '').replace('image/', '').replace('base64,', '')
-                    if any(c in sample for c in string.ascii_letters + string.digits + '+/='):
-                        logger.info(f"Found potential base64 data at key: {key}")
-                        return value
-            elif isinstance(value, dict):
+            if isinstance(value, str) and len(value) > 50:
+                # Basic base64 pattern check
+                if not value.startswith('http') and any(c in value[:100] for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'):
+                    logger.info(f"Found potential base64 at key: {key}")
+                    return value
+            elif isinstance(value, (dict, list)):
                 result = find_input_data_comprehensive(value, depth + 1)
                 if result:
                     return result
-            elif isinstance(value, list) and len(value) > 0:
-                for item in value:
-                    if isinstance(item, dict):
-                        result = find_input_data_comprehensive(item, depth + 1)
-                        if result:
-                            return result
-                    elif isinstance(item, str) and len(item) > 100:
-                        logger.info(f"Found image data in list at key: {key}")
-                        return item
     
     elif isinstance(data, list):
-        # Check list items
         for i, item in enumerate(data):
-            if isinstance(item, str) and len(item) > 100:
-                logger.info(f"Found image data in list at index: {i}")
+            if isinstance(item, str) and len(item) > 50:
+                logger.info(f"Found in list at index: {i}")
                 return item
             elif isinstance(item, dict):
                 result = find_input_data_comprehensive(item, depth + 1)
@@ -229,70 +207,100 @@ def find_filename_comprehensive(data, depth=0):
     return None
 
 def decode_base64_safe(base64_str: str) -> bytes:
-    """Safely decode base64 with comprehensive error handling - V140 Enhanced"""
+    """Safely decode base64 - V141 ULTRA SAFE for Make.com"""
     try:
-        # Handle empty or invalid input
-        if not base64_str or not isinstance(base64_str, str):
-            raise ValueError("Invalid base64 input: empty or not string")
+        # Handle various input types
+        if not base64_str:
+            raise ValueError("Empty base64 string")
             
-        # Remove data URL prefix if present
-        if 'base64,' in base64_str:
-            base64_str = base64_str.split('base64,')[1]
-        elif base64_str.startswith('data:'):
-            parts = base64_str.split(',')
-            if len(parts) > 1:
-                base64_str = parts[1]
+        if isinstance(base64_str, bytes):
+            return base64_str
+            
+        base64_str = str(base64_str)
+        
+        # Remove all possible prefixes
+        prefixes = [
+            'data:image/png;base64,', 'data:image/jpeg;base64,', 
+            'data:image/jpg;base64,', 'data:image/webp;base64,',
+            'data:image/gif;base64,', 'data:image/bmp;base64,',
+            'data:application/octet-stream;base64,', 'base64,'
+        ]
+        
+        for prefix in prefixes:
+            if prefix in base64_str:
+                base64_str = base64_str.split(prefix)[-1]
+                break
+        
+        # If still has data: prefix, remove it
+        if base64_str.startswith('data:'):
+            if ',' in base64_str:
+                base64_str = base64_str.split(',')[-1]
             else:
-                # Handle malformed data URLs
                 base64_str = base64_str.split('base64,')[-1]
         
-        # Clean the string - remove all whitespace, newlines, and special chars
+        # Clean thoroughly
         base64_str = base64_str.strip()
-        base64_str = ''.join(base64_str.split())  # Remove all whitespace
+        base64_str = ''.join(base64_str.split())
         base64_str = base64_str.replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '')
         
-        # Remove any non-base64 characters (keep only A-Za-z0-9+/=)
+        # Handle URL encoding
+        base64_str = base64_str.replace('%2B', '+').replace('%2F', '/').replace('%3D', '=')
+        base64_str = base64_str.replace('%2b', '+').replace('%2f', '/').replace('%3d', '=')
+        
+        # Keep only valid base64 characters
         valid_chars = string.ascii_letters + string.digits + '+/='
         base64_str = ''.join(c for c in base64_str if c in valid_chars)
         
-        # Check minimum length
-        if len(base64_str) < 100:
-            raise ValueError(f"Base64 string too short: {len(base64_str)} characters")
+        # Check length
+        if len(base64_str) < 50:
+            raise ValueError(f"Base64 too short: {len(base64_str)} chars")
         
-        # Try decoding with different padding strategies
-        # Strategy 1: Try as-is with validation
-        try:
-            return base64.b64decode(base64_str, validate=True)
-        except Exception as e1:
-            logger.debug(f"Strategy 1 failed: {str(e1)}")
+        # Try multiple strategies
+        strategies = []
         
-        # Strategy 2: Fix padding
-        base64_str_no_pad = base64_str.rstrip('=')
-        padding_needed = (4 - len(base64_str_no_pad) % 4) % 4
-        base64_str_padded = base64_str_no_pad + ('=' * padding_needed)
+        # Remove padding for all strategies
+        no_pad = base64_str.rstrip('=')
         
-        try:
-            return base64.b64decode(base64_str_padded, validate=True)
-        except Exception as e2:
-            logger.debug(f"Strategy 2 failed: {str(e2)}")
+        # Strategy 1: As is
+        strategies.append(base64_str)
         
-        # Strategy 3: Try without validation
-        try:
-            return base64.b64decode(base64_str_padded)
-        except Exception as e3:
-            logger.debug(f"Strategy 3 failed: {str(e3)}")
+        # Strategy 2: No padding (Make.com style)
+        strategies.append(no_pad)
         
-        # Strategy 4: Try URL-safe base64
-        try:
-            urlsafe_str = base64_str_no_pad.replace('+', '-').replace('/', '_')
-            padding_needed = (4 - len(urlsafe_str) % 4) % 4
-            urlsafe_str_padded = urlsafe_str + ('=' * padding_needed)
-            return base64.urlsafe_b64decode(urlsafe_str_padded)
-        except Exception as e4:
-            logger.debug(f"Strategy 4 failed: {str(e4)}")
+        # Strategy 3: Correct padding
+        padding = (4 - len(no_pad) % 4) % 4
+        strategies.append(no_pad + ('=' * padding))
         
-        # If all strategies fail, provide detailed error
-        raise ValueError(f"All base64 decoding strategies failed. String length: {len(base64_str)}, First 50 chars: {base64_str[:50]}")
+        # Strategy 4: All padding variations
+        for i in range(4):
+            strategies.append(no_pad + ('=' * i))
+        
+        # Try each strategy
+        last_error = None
+        for i, test_str in enumerate(strategies):
+            if not test_str:
+                continue
+                
+            try:
+                # Standard base64
+                decoded = base64.b64decode(test_str)
+                logger.debug(f"Decoded with strategy {i}")
+                return decoded
+            except Exception as e:
+                last_error = e
+                
+            try:
+                # URL-safe base64
+                url_safe = test_str.replace('+', '-').replace('/', '_')
+                decoded = base64.urlsafe_b64decode(url_safe)
+                logger.debug(f"Decoded with URL-safe strategy {i}")
+                return decoded
+            except:
+                pass
+        
+        # If all fail
+        logger.error(f"All decode attempts failed. Length: {len(base64_str)}, Sample: {base64_str[:100]}")
+        raise ValueError(f"Base64 decode failed: {last_error}")
         
     except Exception as e:
         logger.error(f"Base64 decode error: {str(e)}")
@@ -580,16 +588,16 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     return image
 
 def apply_center_focus(image: Image.Image, intensity: float = 0.02) -> Image.Image:
-    """Apply subtle center focus effect - V140 enhanced"""
+    """Apply subtle center focus effect - V141 reduced bleeding"""
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
     X, Y = np.meshgrid(x, y)
     distance = np.sqrt(X**2 + Y**2)
     
-    # V140: Enhanced center focus
-    focus_mask = 1 + intensity * 1.5 * np.exp(-distance**2 * 1.5)
-    focus_mask = np.clip(focus_mask, 1.0, 1.0 + intensity * 1.5)
+    # V141: Reduced center focus
+    focus_mask = 1 + intensity * np.exp(-distance**2 * 1.8)  # Reduced multiplier
+    focus_mask = np.clip(focus_mask, 1.0, 1.0 + intensity)
     
     img_array = np.array(image, dtype=np.float32)
     for i in range(3):
@@ -615,16 +623,16 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V140: Enhanced center focus for ac_ pattern - 10%
+        # V141: REDUCED center focus for ac_ pattern - 8%
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V140: 10% center focus
-        focus_mask = 1 + 0.10 * np.exp(-distance**2 * 1.3)
-        focus_mask = np.clip(focus_mask, 1.0, 1.10)
+        # V141: 8% center focus (reduced from 10%)
+        focus_mask = 1 + 0.08 * np.exp(-distance**2 * 1.5)
+        focus_mask = np.clip(focus_mask, 1.0, 1.08)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -632,8 +640,8 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # V140: Enhanced subtle center focus
-        image = apply_center_focus(image, 0.03)  # Increased from 0.02
+        # V141: Reduced subtle center focus
+        image = apply_center_focus(image, 0.02)  # Back to original
         
     elif pattern_type == "a_only":
         # a_ pattern enhancement - V140 enhanced
@@ -653,15 +661,15 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.20)  # V140: Increased from 1.15
         
-        # V140: 10% center focus
+        # V141: 8% center focus
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        focus_mask = 1 + 0.10 * np.exp(-distance**2 * 1.2)
-        focus_mask = np.clip(focus_mask, 1.0, 1.10)
+        focus_mask = 1 + 0.08 * np.exp(-distance**2 * 1.2)
+        focus_mask = np.clip(focus_mask, 1.0, 1.08)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -690,15 +698,15 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.20)
         
-        # 10% center focus for b_ pattern
+        # 8% center focus for b_ pattern
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        focus_mask = 1 + 0.10 * np.exp(-distance**2 * 1.2)
-        focus_mask = np.clip(focus_mask, 1.0, 1.10)
+        focus_mask = 1 + 0.08 * np.exp(-distance**2 * 1.2)
+        focus_mask = np.clip(focus_mask, 1.0, 1.08)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -723,9 +731,9 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         # V140: Enhanced center focus to other patterns too
         image = apply_center_focus(image, 0.025)  # Increased from 0.015
     
-    # Wedding ring focus enhancement - V140 Enhanced for cubic details
+    # Wedding ring focus enhancement - V141 REDUCED for less bleeding
     if is_wedding_ring:
-        # 1. Highlight Enhancement - ONLY FOR NON-BACKGROUND AREAS
+        # 1. Highlight Enhancement - CONSERVATIVE
         img_array = np.array(image, dtype=np.float32)
         
         # Detect background (very bright and low saturation)
@@ -737,33 +745,33 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         # Background mask: very bright AND low saturation
         is_background = (gray > 245) & (saturation < 0.05)
         
-        # Apply bright enhancement only to non-background bright areas
-        bright_mask = (img_array > 220) & (~is_background[:,:,np.newaxis])
-        img_array[bright_mask] *= 1.12  # V140: Increased from 1.10
+        # Apply REDUCED bright enhancement
+        bright_mask = (img_array > 230) & (~is_background[:,:,np.newaxis])  # Higher threshold
+        img_array[bright_mask] *= 1.08  # V141: Reduced from 1.12
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 2. Enhanced sharpening for cubic details
+        # 2. Enhanced sharpening for cubic details - MODERATE
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.35)  # V140: Increased from 1.25
+        image = sharpness.enhance(1.25)  # V141: Reduced from 1.35
         
-        # 3. Enhanced contrast
+        # 3. Enhanced contrast - REDUCED
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.04)  # V140: Increased from 1.025
+        image = contrast.enhance(1.03)  # V141: Reduced from 1.04
         
-        # 4. Structure Enhancement for cubic details
-        image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=100, threshold=1))  # V140: Enhanced
+        # 4. Structure Enhancement for cubic details - MODERATE
+        image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=70, threshold=2))  # V141: Reduced
         
-        # 5. Enhanced Center focus - 6% for cubic details
+        # 5. Enhanced Center focus - 4% for less bleeding
         width, height = image.size
         x = np.linspace(-1, 1, width)
         y = np.linspace(-1, 1, height)
         X, Y = np.meshgrid(x, y)
         distance = np.sqrt(X**2 + Y**2)
         
-        # V140: 6% for wedding rings
-        center_mask = 1 + 0.06 * np.exp(-distance**2 * 1.5)
-        center_mask = np.clip(center_mask, 1.0, 1.06)
+        # V141: 4% for wedding rings
+        center_mask = 1 + 0.04 * np.exp(-distance**2 * 1.8)  # Reduced from 0.06
+        center_mask = np.clip(center_mask, 1.0, 1.04)
         
         # Apply center brightening
         img_array = np.array(image, dtype=np.float32)
@@ -772,9 +780,9 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 6. Enhanced edge darkening
-        edge_mask = 0.96 + 0.04 * np.exp(-distance**2 * 0.8)
-        edge_mask = np.clip(edge_mask, 0.96, 1.0)
+        # 6. Enhanced edge darkening - SUBTLE
+        edge_mask = 0.97 + 0.03 * np.exp(-distance**2 * 0.8)
+        edge_mask = np.clip(edge_mask, 0.97, 1.0)
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -782,10 +790,10 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str, is_weddin
         img_array = np.clip(img_array, 0, 255)
         image = Image.fromarray(img_array.astype(np.uint8))
         
-        # 7. Micro Contrast for cubic detail
+        # 7. Micro Contrast for cubic detail - REDUCED
         gray = image.convert('L')
         edges = gray.filter(ImageFilter.FIND_EDGES)
-        edges_array = np.array(edges, dtype=np.float32) * 0.15  # V140: 15% micro contrast
+        edges_array = np.array(edges, dtype=np.float32) * 0.08  # V141: Reduced from 0.15
         
         img_array = np.array(image, dtype=np.float32)
         for i in range(3):
@@ -993,7 +1001,7 @@ def process_enhancement(job):
                     "other": "none"
                 },
                 "has_center_focus": True,
-                "center_focus_intensity": "10%",  # V140: Updated
+                "center_focus_intensity": "8%",  # V141: Reduced
                 "white_balance_applied": True,
                 "cool_tone_reduced": True,
                 "background_correction": "subtle",
@@ -1009,14 +1017,14 @@ def process_enhancement(job):
                                   "real-esrgan-x4plus"  # V140: Updated
                 },
                 "wedding_ring_enhancements": {
-                    "highlight_enhancement": "12%",  # V140: Updated
-                    "highlight_threshold": "220",
-                    "micro_contrast": "15%",  # V140: Updated
-                    "structure_enhancement": "enhanced",  # V140: Updated
-                    "enhanced_sharpness": "1.35",  # V140: Updated
-                    "enhanced_contrast": "1.04",  # V140: Updated
-                    "enhanced_center_focus": "6%",  # V140: Updated
-                    "enhanced_edge_darkening": "0.96-1.0"
+                    "highlight_enhancement": "8%",  # V141: Reduced
+                    "highlight_threshold": "230",  # V141: Increased
+                    "micro_contrast": "8%",  # V141: Reduced
+                    "structure_enhancement": "moderate",  # V141: Reduced
+                    "enhanced_sharpness": "1.25",  # V141: Reduced
+                    "enhanced_contrast": "1.03",  # V141: Reduced
+                    "enhanced_center_focus": "4%",  # V141: Reduced
+                    "enhanced_edge_darkening": "0.97-1.0"
                 } if is_wedding_ring else None
             }
         }
