@@ -16,22 +16,21 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V142-NoReplicate"
+VERSION = "V142-RealESRGAN"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
 REPLICATE_CLIENT = None
-USE_REPLICATE = False  # DISABLED due to model version issues
+USE_REPLICATE = False
 
-# Temporarily disabled due to model permission issues
-# if REPLICATE_API_TOKEN:
-#     try:
-#         REPLICATE_CLIENT = replicate.Client(api_token=REPLICATE_API_TOKEN)
-#         USE_REPLICATE = True
-#         logger.info("✅ Replicate client initialized successfully")
-#     except Exception as e:
-#         logger.error(f"❌ Failed to initialize Replicate client: {e}")
-#         USE_REPLICATE = False
+if REPLICATE_API_TOKEN:
+    try:
+        REPLICATE_CLIENT = replicate.Client(api_token=REPLICATE_API_TOKEN)
+        USE_REPLICATE = True
+        logger.info("✅ Replicate client initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Replicate client: {e}")
+        USE_REPLICATE = False
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename"""
@@ -530,7 +529,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
 def process_enhancement(job):
     """Main enhancement processing - Wedding Ring Optimized"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info(f"Replicate: DISABLED (model version issues)")
+    logger.info(f"Replicate available: {USE_REPLICATE}")
     
     try:
         # Extract filename
@@ -601,8 +600,14 @@ def process_enhancement(job):
         
         # Apply Replicate enhancement if available
         replicate_applied = False
-        # Replicate temporarily disabled due to model version issues
-        logger.info("Replicate is currently disabled - using basic enhancement only")
+        if USE_REPLICATE:
+            try:
+                image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type)
+                replicate_applied = True
+            except Exception as e:
+                logger.error(f"Replicate enhancement failed: {str(e)}")
+                # Continue with basic enhancement instead of returning error
+                logger.warning("Continuing with basic enhancement only")
         
         # Basic enhancement (increased brightness and contrast)
         brightness = ImageEnhance.Brightness(image)
