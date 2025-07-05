@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V142-Ultra-Enhanced"
+VERSION = "V142-Wedding-Optimized"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -326,20 +326,8 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def detect_wedding_ring_fast(image: Image.Image) -> bool:
-    """Fast wedding ring detection"""
-    try:
-        width, height = image.size
-        center_crop = image.crop((width//3, height//3, 2*width//3, 2*height//3))
-        gray = center_crop.convert('L')
-        gray_array = np.array(gray)
-        
-        bright_pixels = np.sum(gray_array > 200)
-        total_pixels = gray_array.size
-        bright_ratio = bright_pixels / total_pixels
-        
-        return bool(bright_ratio > 0.15)
-    except:
-        return False
+    """Always return True since all images are wedding rings"""
+    return True
 
 def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, pattern_type: str) -> Image.Image:
     """Apply Replicate API enhancement"""
@@ -371,31 +359,18 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         img_data_url = f"data:image/png;base64,{img_base64}"
         
-        # Apply enhancement based on type
-        if is_wedding_ring:
-            logger.info("🔷 Applying Replicate enhancement for wedding ring")
-            
-            output = REPLICATE_CLIENT.run(
-                "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
-                input={
-                    "image": img_data_url,
-                    "scale": 2,
-                    "resemblance": 0.85,
-                    "prompt": "highly detailed wedding ring with perfect cubic zirconia sparkle, sharp metallic edges, brilliant crystals, professional jewelry photography"
-                }
-            )
-        else:
-            logger.info("🔶 Applying standard Replicate enhancement")
-            
-            output = REPLICATE_CLIENT.run(
-                "nightmareai/real-esrgan:350d32041630ffbe63c8352783a26d94126809164e54085352f8326e53999085",
-                input={
-                    "image": img_data_url,
-                    "scale": 4,
-                    "face_enhance": False,
-                    "model": "RealESRGAN_x4plus"
-                }
-            )
+        # Always apply wedding ring enhancement
+        logger.info("🔷 Applying Replicate enhancement for wedding ring")
+        
+        output = REPLICATE_CLIENT.run(
+            "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
+            input={
+                "image": img_data_url,
+                "scale": 2,
+                "resemblance": 0.85,
+                "prompt": "highly detailed wedding ring with perfect cubic zirconia sparkle, sharp metallic edges, brilliant crystals, professional jewelry photography"
+            }
+        )
         
         if output:
             # Convert output back to PIL Image
@@ -449,15 +424,15 @@ def auto_white_balance(image: Image.Image) -> Image.Image:
     img_array = np.clip(img_array, 0, 255)
     return Image.fromarray(img_array.astype(np.uint8))
 
-def apply_center_spotlight(image: Image.Image, intensity: float = 0.15) -> Image.Image:
-    """Apply STRONG center spotlight effect - V142 Enhanced"""
+def apply_center_spotlight(image: Image.Image, intensity: float = 0.10) -> Image.Image:
+    """Apply center spotlight effect - Reduced for wedding rings"""
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
     X, Y = np.meshgrid(x, y)
     distance = np.sqrt(X**2 + Y**2)
     
-    # Strong spotlight mask
+    # Reduced spotlight mask
     spotlight_mask = 1 + intensity * np.exp(-distance**2 * 0.8)
     spotlight_mask = np.clip(spotlight_mask, 1.0, 1.0 + intensity)
     
@@ -469,8 +444,8 @@ def apply_center_spotlight(image: Image.Image, intensity: float = 0.15) -> Image
     return Image.fromarray(img_array.astype(np.uint8))
 
 def apply_wedding_ring_enhancement(image: Image.Image) -> Image.Image:
-    """Enhanced wedding ring processing - V142 Quality Focus"""
-    # 1. Smart highlight enhancement
+    """Enhanced wedding ring processing - Reduced metallic highlight"""
+    # 1. Smart highlight enhancement (REDUCED)
     img_array = np.array(image, dtype=np.float32)
     
     # Detect bright metallic areas (not background)
@@ -482,29 +457,29 @@ def apply_wedding_ring_enhancement(image: Image.Image) -> Image.Image:
     # Metallic areas: bright but with some saturation
     metallic_mask = (gray > 200) & (gray < 250) & (saturation > 0.02)
     
-    # Enhance metallic highlights
-    img_array[metallic_mask] *= 1.15
+    # Enhance metallic highlights (REDUCED from 1.15 to 1.07)
+    img_array[metallic_mask] *= 1.07
     img_array = np.clip(img_array, 0, 255)
     image = Image.fromarray(img_array.astype(np.uint8))
     
-    # 2. Strong center spotlight for cubic
-    image = apply_center_spotlight(image, 0.12)
+    # 2. Reduced center spotlight for cubic
+    image = apply_center_spotlight(image, 0.08)
     
     # 3. Enhanced sharpness for cubic details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.4)
+    image = sharpness.enhance(1.3)
     
-    # 4. Contrast for depth
+    # 4. Contrast for depth (reduced)
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.05)
+    image = contrast.enhance(1.03)
     
     # 5. Detail enhancement
-    image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=100, threshold=2))
+    image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=80, threshold=2))
     
     return image
 
 def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
-    """V142 Enhancement with 3% white overlay and strong spotlight"""
+    """V142 Enhancement with reduced brightness for wedding rings"""
     
     # Apply 3% white overlay to ALL patterns (as requested)
     white_overlay = 0.03
@@ -531,7 +506,7 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
     elif pattern_type in ["a_only", "b_only"]:
         # a_ and b_ patterns
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.02)
+        image = brightness.enhance(1.01)  # Reduced from 1.02
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)
@@ -546,14 +521,13 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
         image = brightness.enhance(1.0)
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.03)
+        image = contrast.enhance(1.02)  # Reduced from 1.03
     
-    # Apply STRONG center spotlight to all
-    image = apply_center_spotlight(image, 0.15)
+    # Apply reduced center spotlight
+    image = apply_center_spotlight(image, 0.10)  # Reduced from 0.15
     
-    # Wedding ring special enhancement
-    if is_wedding_ring:
-        image = apply_wedding_ring_enhancement(image)
+    # Wedding ring special enhancement (always applied)
+    image = apply_wedding_ring_enhancement(image)
     
     return image
 
@@ -567,7 +541,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing - V142 FINAL"""
+    """Main enhancement processing - Wedding Ring Optimized"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Replicate available: {USE_REPLICATE}")
     
@@ -634,9 +608,9 @@ def process_enhancement(job):
         
         logger.info(f"Pattern type: {pattern_type}, Detected type: {detected_type}")
         
-        # Detect wedding ring
-        is_wedding_ring = detect_wedding_ring_fast(image)
-        logger.info(f"Wedding ring detected: {is_wedding_ring}")
+        # Always wedding ring
+        is_wedding_ring = True
+        logger.info(f"Wedding ring: Always True")
         
         # Apply Replicate enhancement if available
         replicate_applied = False
@@ -654,19 +628,19 @@ def process_enhancement(job):
                     }
                 }
         
-        # Basic enhancement
+        # Basic enhancement (reduced for wedding rings)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.02)
+        image = brightness.enhance(1.01)  # Reduced from 1.02
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.03)
+        image = contrast.enhance(1.02)  # Reduced from 1.03
         
         # Apply V142 enhancement
         image = apply_enhancement_v142(image, pattern_type, is_wedding_ring)
         
         # Final sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.2)
+        image = sharpness.enhance(1.15)  # Reduced from 1.2
         
         # Resize to 1200px width
         image = resize_to_width_1200(image)
@@ -695,7 +669,7 @@ def process_enhancement(job):
                 "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
-                "is_wedding_ring": bool(is_wedding_ring),
+                "is_wedding_ring": True,
                 "filename": filename,
                 "enhanced_filename": enhanced_filename,
                 "file_number": file_number,
@@ -704,8 +678,8 @@ def process_enhancement(job):
                 "version": VERSION,
                 "status": "success",
                 "white_overlay_applied": "3% base + pattern specific",
-                "center_spotlight": "15% strong",
-                "wedding_ring_enhancement": "metallic_highlights + cubic_focus" if is_wedding_ring else None,
+                "center_spotlight": "10% reduced",
+                "wedding_ring_enhancement": "metallic_highlights_1.07 + cubic_focus",
                 "replicate_applied": replicate_applied,
                 "base64_decode_method": "ultra_safe_v142_final",
                 "make_com_compatible": True
