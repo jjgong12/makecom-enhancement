@@ -16,21 +16,22 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V142-Bright-Enhanced-Failsafe"
+VERSION = "V142-NoReplicate"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
 REPLICATE_CLIENT = None
-USE_REPLICATE = False
+USE_REPLICATE = False  # DISABLED due to model version issues
 
-if REPLICATE_API_TOKEN:
-    try:
-        REPLICATE_CLIENT = replicate.Client(api_token=REPLICATE_API_TOKEN)
-        USE_REPLICATE = True
-        logger.info("✅ Replicate client initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize Replicate client: {e}")
-        USE_REPLICATE = False
+# Temporarily disabled due to model permission issues
+# if REPLICATE_API_TOKEN:
+#     try:
+#         REPLICATE_CLIENT = replicate.Client(api_token=REPLICATE_API_TOKEN)
+#         USE_REPLICATE = True
+#         logger.info("✅ Replicate client initialized successfully")
+#     except Exception as e:
+#         logger.error(f"❌ Failed to initialize Replicate client: {e}")
+#         USE_REPLICATE = False
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename"""
@@ -453,11 +454,11 @@ def apply_wedding_ring_enhancement(image: Image.Image) -> Image.Image:
     
     # 2. Enhanced sharpness for cubic details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.5)  # Increased from 1.3
+    image = sharpness.enhance(1.4)  # Reduced from 1.5
     
     # 3. Contrast for depth
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.08)  # Increased from 1.03
+    image = contrast.enhance(1.03)  # Reduced to 1.03
     
     # 4. Detail enhancement with stronger settings
     image = image.filter(ImageFilter.UnsharpMask(radius=2, percent=120, threshold=2))
@@ -499,7 +500,7 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
         
         # Enhanced sharpness
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.5)  # Increased from 1.25
+        image = sharpness.enhance(1.4)  # Reduced from 1.5
         
     else:
         # Standard enhancement
@@ -507,7 +508,7 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
         image = brightness.enhance(1.05)  # Increased from 1.0
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.08)  # Increased from 1.02
+        image = contrast.enhance(1.03)  # Reduced to 1.03
     
     # Apply reduced center spotlight
     image = apply_center_spotlight(image, 0.10)  # Reduced from 0.15
@@ -529,7 +530,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
 def process_enhancement(job):
     """Main enhancement processing - Wedding Ring Optimized"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info(f"Replicate available: {USE_REPLICATE}")
+    logger.info(f"Replicate: DISABLED (model version issues)")
     
     try:
         # Extract filename
@@ -600,28 +601,22 @@ def process_enhancement(job):
         
         # Apply Replicate enhancement if available
         replicate_applied = False
-        if USE_REPLICATE:
-            try:
-                image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type)
-                replicate_applied = True
-            except Exception as e:
-                logger.error(f"Replicate enhancement failed: {str(e)}")
-                # Continue with basic enhancement instead of returning error
-                logger.warning("Continuing with basic enhancement only")
+        # Replicate temporarily disabled due to model version issues
+        logger.info("Replicate is currently disabled - using basic enhancement only")
         
         # Basic enhancement (increased brightness and contrast)
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.1)  # Increased to 1.1 as requested
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.08)  # Increased from 1.02
+        image = contrast.enhance(1.03)  # Reduced to 1.03
         
         # Apply V142 enhancement
         image = apply_enhancement_v142(image, pattern_type, is_wedding_ring)
         
         # Final sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.4)  # Increased from 1.15
+        image = sharpness.enhance(1.3)  # Reduced from 1.4
         
         # Resize to 1200px width
         image = resize_to_width_1200(image)
