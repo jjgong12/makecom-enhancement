@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V142-Bright-Enhanced"
+VERSION = "V142-Bright-Enhanced-Failsafe"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -362,13 +362,14 @@ def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, patte
         # Always apply wedding ring enhancement
         logger.info("🔷 Applying Replicate enhancement for wedding ring")
         
+        # Changed to Real-ESRGAN (same as thumbnail) due to permission issues
         output = REPLICATE_CLIENT.run(
-            "batouresearch/magic-image-refiner:a1ba4c13e7af9ae078be742e276e14bbe4cdcbe43f088ad5b9e2b6cf0f3620a9",
+            "nightmareai/real-esrgan:350d32041630ffbe63c8352783a26d94126809164e54085352f8326e53999085",
             input={
                 "image": img_data_url,
                 "scale": 2,
-                "resemblance": 0.85,
-                "prompt": "highly detailed wedding ring with perfect cubic zirconia sparkle, sharp metallic edges, brilliant crystals, professional jewelry photography"
+                "face_enhance": False,
+                "model": "RealESRGAN_x4plus"
             }
         )
         
@@ -605,13 +606,8 @@ def process_enhancement(job):
                 replicate_applied = True
             except Exception as e:
                 logger.error(f"Replicate enhancement failed: {str(e)}")
-                return {
-                    "output": {
-                        "error": f"Replicate enhancement failed: {str(e)}",
-                        "status": "error",
-                        "version": VERSION
-                    }
-                }
+                # Continue with basic enhancement instead of returning error
+                logger.warning("Continuing with basic enhancement only")
         
         # Basic enhancement (increased brightness and contrast)
         brightness = ImageEnhance.Brightness(image)
