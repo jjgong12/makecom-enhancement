@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V142-Wedding-Optimized"
+VERSION = "V142-Bright-Enhanced"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -444,37 +444,22 @@ def apply_center_spotlight(image: Image.Image, intensity: float = 0.10) -> Image
     return Image.fromarray(img_array.astype(np.uint8))
 
 def apply_wedding_ring_enhancement(image: Image.Image) -> Image.Image:
-    """Enhanced wedding ring processing - Reduced metallic highlight"""
-    # 1. Smart highlight enhancement (REDUCED)
-    img_array = np.array(image, dtype=np.float32)
+    """Enhanced wedding ring processing - WITHOUT metallic highlight"""
+    # Metallic highlight removed - skip this step entirely
     
-    # Detect bright metallic areas (not background)
-    gray = np.mean(img_array, axis=2)
-    max_rgb = np.max(img_array, axis=2)
-    min_rgb = np.min(img_array, axis=2)
-    saturation = np.where(max_rgb > 0, (max_rgb - min_rgb) / max_rgb, 0)
-    
-    # Metallic areas: bright but with some saturation
-    metallic_mask = (gray > 200) & (gray < 250) & (saturation > 0.02)
-    
-    # Enhance metallic highlights (REDUCED from 1.15 to 1.07)
-    img_array[metallic_mask] *= 1.07
-    img_array = np.clip(img_array, 0, 255)
-    image = Image.fromarray(img_array.astype(np.uint8))
-    
-    # 2. Reduced center spotlight for cubic
+    # 1. Center spotlight for cubic
     image = apply_center_spotlight(image, 0.08)
     
-    # 3. Enhanced sharpness for cubic details
+    # 2. Enhanced sharpness for cubic details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.3)
+    image = sharpness.enhance(1.5)  # Increased from 1.3
     
-    # 4. Contrast for depth (reduced)
+    # 3. Contrast for depth
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.03)
+    image = contrast.enhance(1.08)  # Increased from 1.03
     
-    # 5. Detail enhancement
-    image = image.filter(ImageFilter.UnsharpMask(radius=1.5, percent=80, threshold=2))
+    # 4. Detail enhancement with stronger settings
+    image = image.filter(ImageFilter.UnsharpMask(radius=2, percent=120, threshold=2))
     
     return image
 
@@ -491,7 +476,7 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
     if pattern_type == "ac_bc":
         # Unplated white - additional processing
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(0.98)  # Slightly reduce as requested
+        image = brightness.enhance(1.02)  # Increased from 0.98
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)
@@ -506,22 +491,22 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
     elif pattern_type in ["a_only", "b_only"]:
         # a_ and b_ patterns
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.01)  # Reduced from 1.02
+        image = brightness.enhance(1.08)  # Increased from 1.01
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)
         
         # Enhanced sharpness
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.25)
+        image = sharpness.enhance(1.5)  # Increased from 1.25
         
     else:
         # Standard enhancement
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.0)
+        image = brightness.enhance(1.05)  # Increased from 1.0
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.02)  # Reduced from 1.03
+        image = contrast.enhance(1.08)  # Increased from 1.02
     
     # Apply reduced center spotlight
     image = apply_center_spotlight(image, 0.10)  # Reduced from 0.15
@@ -628,19 +613,19 @@ def process_enhancement(job):
                     }
                 }
         
-        # Basic enhancement (reduced for wedding rings)
+        # Basic enhancement (increased brightness and contrast)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.01)  # Reduced from 1.02
+        image = brightness.enhance(1.1)  # Increased to 1.1 as requested
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.02)  # Reduced from 1.03
+        image = contrast.enhance(1.08)  # Increased from 1.02
         
         # Apply V142 enhancement
         image = apply_enhancement_v142(image, pattern_type, is_wedding_ring)
         
         # Final sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.15)  # Reduced from 1.2
+        image = sharpness.enhance(1.4)  # Increased from 1.15
         
         # Resize to 1200px width
         image = resize_to_width_1200(image)
@@ -679,7 +664,7 @@ def process_enhancement(job):
                 "status": "success",
                 "white_overlay_applied": "3% base + pattern specific",
                 "center_spotlight": "10% reduced",
-                "wedding_ring_enhancement": "metallic_highlights_1.07 + cubic_focus",
+                "wedding_ring_enhancement": "cubic_focus_only_no_metallic",
                 "replicate_applied": replicate_applied,
                 "base64_decode_method": "ultra_safe_v142_final",
                 "make_com_compatible": True
