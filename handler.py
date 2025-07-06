@@ -153,19 +153,9 @@ def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
         return image
     
     try:
-        # Resize if too large (optimize for speed)
+        # Keep original size - no resize for SwinIR
         width, height = image.size
-        MAX_SIZE = 1500  # Reduced from 2000000 pixels
-        
-        if width > MAX_SIZE or height > MAX_SIZE:
-            scale = MAX_SIZE / max(width, height)
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            original_size = (width, height)
-            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            need_resize_back = True
-        else:
-            need_resize_back = False
+        logger.info(f"Processing SwinIR at original size: {width}x{height}")
         
         # Convert to base64
         buffered = BytesIO()
@@ -193,10 +183,6 @@ def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
                 enhanced_image = Image.open(BytesIO(response.content))
             else:
                 enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
-            
-            # Resize back if needed
-            if need_resize_back:
-                enhanced_image = enhanced_image.resize(original_size, Image.Resampling.LANCZOS)
             
             logger.info("✅ SwinIR enhancement successful")
             return enhanced_image
