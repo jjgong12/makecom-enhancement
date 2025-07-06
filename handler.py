@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V146-No-White-Overlay"
+VERSION = "V147-White-12-15"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -161,7 +161,7 @@ def find_filename_comprehensive(data, depth=0):
     return None
 
 def decode_base64_ultra_safe(base64_str: str) -> bytes:
-    """ULTRA SAFE base64 decode - V146"""
+    """ULTRA SAFE base64 decode - V148"""
     try:
         if not base64_str:
             raise ValueError("Empty base64 string")
@@ -329,6 +329,51 @@ def detect_wedding_ring_fast(image: Image.Image) -> bool:
     """Always return True since all images are wedding rings"""
     return True
 
+def apply_swinir_enhancement(image: Image.Image) -> Image.Image:
+    """Apply SwinIR for noise reduction and detail enhancement"""
+    if not USE_REPLICATE or not REPLICATE_CLIENT:
+        logger.warning("SwinIR not available - Replicate not configured")
+        return image
+    
+    try:
+        # Convert to base64
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        buffered.seek(0)
+        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        img_data_url = f"data:image/png;base64,{img_base64}"
+        
+        logger.info("🔷 Applying SwinIR for detail enhancement")
+        
+        # Use SwinIR for noise reduction and detail preservation
+        output = REPLICATE_CLIENT.run(
+            "jingyunliang/swinir:660d922d33153019e8c263a3bba265de882e7f4f70396546b6c9c8f9d47a021a",
+            input={
+                "image": img_data_url,
+                "task_type": "Real-World Image Super-Resolution-Large",
+                "noise_level": 15,
+                "jpeg_quality": 40
+            }
+        )
+        
+        if output:
+            # Convert output back
+            if isinstance(output, str):
+                response = requests.get(output)
+                enhanced_image = Image.open(BytesIO(response.content))
+            else:
+                enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
+            
+            logger.info("✅ SwinIR enhancement successful")
+            return enhanced_image
+        else:
+            logger.warning("SwinIR enhancement failed - no output")
+            return image
+            
+    except Exception as e:
+        logger.warning(f"SwinIR enhancement error: {str(e)}")
+        return image
+
 def apply_replicate_enhancement(image: Image.Image, is_wedding_ring: bool, pattern_type: str) -> Image.Image:
     """Apply Replicate API enhancement"""
     if not USE_REPLICATE or not REPLICATE_CLIENT:
@@ -426,14 +471,14 @@ def auto_white_balance(image: Image.Image) -> Image.Image:
     return Image.fromarray(img_array.astype(np.uint8))
 
 def apply_center_spotlight(image: Image.Image, intensity: float = 0.05) -> Image.Image:
-    """Apply center spotlight effect - V146 with reduced intensity"""
+    """Apply center spotlight effect - V148 with reduced intensity"""
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
     X, Y = np.meshgrid(x, y)
     distance = np.sqrt(X**2 + Y**2)
     
-    # V146: Much reduced spotlight for less gradient
+    # V148: Much reduced spotlight for less gradient
     spotlight_mask = 1 + intensity * np.exp(-distance**2 * 1.2)  # Increased spread
     spotlight_mask = np.clip(spotlight_mask, 1.0, 1.0 + intensity)
     
@@ -446,7 +491,7 @@ def apply_center_spotlight(image: Image.Image, intensity: float = 0.05) -> Image
 
 def apply_wedding_ring_enhancement(image: Image.Image) -> Image.Image:
     """Enhanced wedding ring processing - WITHOUT metallic highlight"""
-    # V146: Reduced center spotlight
+    # V148: Reduced center spotlight
     image = apply_center_spotlight(image, 0.04)  # Reduced from 0.08
     
     # Enhanced sharpness for cubic details
@@ -463,7 +508,7 @@ def apply_wedding_ring_enhancement(image: Image.Image) -> Image.Image:
     return image
 
 def calculate_quality_metrics(image: Image.Image) -> dict:
-    """Calculate quality metrics for second correction - V146 Balanced"""
+    """Calculate quality metrics for second correction - V148 Balanced"""
     img_array = np.array(image)
     r_avg = np.mean(img_array[:,:,0])
     g_avg = np.mean(img_array[:,:,1])
@@ -492,12 +537,12 @@ def calculate_quality_metrics(image: Image.Image) -> dict:
     }
 
 def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
-    """Determine if second correction is needed - V146 BALANCED CRITERIA"""
+    """Determine if second correction is needed - V148 BALANCED CRITERIA"""
     # Apply ONLY to ac_bc pattern (무도금화이트)
     if pattern_type != "ac_bc":
         return False, None
     
-    # V146: Balanced criteria (between old and new)
+    # V148: Balanced criteria (between old and new)
     reasons = []
     
     if metrics["brightness"] < 243:  # Between 241 and 245
@@ -515,10 +560,10 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check - V146 with 15% white overlay"""
+    """Apply second correction based on quality check - V148 with 15% white overlay"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
-    # V146: Apply 15% white overlay for quality check failures
+    # V148: Apply 15% white overlay for quality check failures
     if any(reason in reasons for reason in ["saturation_high", "brightness_low", "insufficient_cool_tone", "rgb_deviation_high"]):
         # Apply 15% white overlay for second correction
         white_overlay = 0.15  # 15% white overlay for second correction
@@ -531,10 +576,10 @@ def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
     logger.info("Second correction applied successfully")
     return image
 
-def apply_enhancement_v146(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
-    """V146 Enhancement - White overlay only for unplated white"""
+def apply_enhancement_v148(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
+    """V148 Enhancement - White overlay only for unplated white with SwinIR"""
     
-    # V146: Apply white overlay ONLY to ac_bc pattern (unplated white)
+    # V148: Apply white overlay ONLY to ac_bc pattern (unplated white)
     if pattern_type == "ac_bc":
         # Unplated white - apply white overlay
         white_overlay = 0.12  # 12% white overlay for unplated white
@@ -570,7 +615,7 @@ def apply_enhancement_v146(image: Image.Image, pattern_type: str, is_wedding_rin
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.03)
     
-    # V146: Much reduced center spotlight
+    # V148: Much reduced center spotlight
     if pattern_type in ["a_only", "b_only"]:
         # Even more reduced for a_ and b_ patterns
         image = apply_center_spotlight(image, 0.03)
@@ -581,7 +626,7 @@ def apply_enhancement_v146(image: Image.Image, pattern_type: str, is_wedding_rin
     # Wedding ring special enhancement (always applied - all files are wedding rings)
     image = apply_wedding_ring_enhancement(image)
     
-    # V146: Apply quality check and second correction
+    # V148: Apply quality check and second correction
     quality_metrics = calculate_quality_metrics(image)
     needs_correction, correction_reasons = needs_second_correction(quality_metrics, pattern_type)
     
@@ -607,7 +652,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing - V146 Final"""
+    """Main enhancement processing - V148 Final"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Replicate available: {USE_REPLICATE}")
     
@@ -680,10 +725,18 @@ def process_enhancement(job):
         
         # Apply Replicate enhancement if available
         replicate_applied = False
+        swinir_applied = False
         if USE_REPLICATE:
             try:
                 image = apply_replicate_enhancement(image, is_wedding_ring, pattern_type)
                 replicate_applied = True
+                
+                # Apply SwinIR additionally for unplated white patterns
+                if pattern_type == "ac_bc":
+                    logger.info("Applying additional SwinIR enhancement for unplated white")
+                    image = apply_swinir_enhancement(image)
+                    swinir_applied = True
+                    
             except Exception as e:
                 logger.error(f"Replicate enhancement failed: {str(e)}")
                 # Continue with basic enhancement instead of returning error
@@ -696,8 +749,8 @@ def process_enhancement(job):
         contrast = ImageEnhance.Contrast(image)
         image = contrast.enhance(1.03)
         
-        # Apply V146 enhancement with no white overlay except unplated white
-        image = apply_enhancement_v146(image, pattern_type, is_wedding_ring)
+        # Apply V148 enhancement with no white overlay except unplated white
+        image = apply_enhancement_v148(image, pattern_type, is_wedding_ring)
         
         # Final sharpening
         sharpness = ImageEnhance.Sharpness(image)
@@ -743,11 +796,13 @@ def process_enhancement(job):
                 "brightness_increase": "ac_bc: 1.05, a/b: 1.10, other: 1.08",
                 "wedding_ring_enhancement": "cubic_focus_only_no_metallic (all files)",
                 "replicate_applied": replicate_applied,
-                "base64_decode_method": "ultra_safe_v146",
+                "swinir_applied": swinir_applied,
+                "base64_decode_method": "ultra_safe_v148",
                 "make_com_compatible": True,
                 "quality_check": "balanced (243/4/4/1.7)",
                 "second_correction": "15% white overlay",
-                "adjustments": "12% primary, 15% secondary for unplated white"
+                "adjustments": "12% primary, 15% secondary for unplated white",
+                "enhancement_models": "Real-ESRGAN + SwinIR for unplated white"
             }
         }
         
