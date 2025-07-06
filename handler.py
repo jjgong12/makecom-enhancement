@@ -515,15 +515,18 @@ def needs_second_correction(metrics: dict, pattern_type: str) -> tuple:
     return len(reasons) > 0, reasons
 
 def apply_second_correction(image: Image.Image, reasons: list) -> Image.Image:
-    """Apply second correction based on quality check - V146 saturation only"""
+    """Apply second correction based on quality check - V146 with 15% white overlay"""
     logger.info(f"Applying second correction for reasons: {reasons}")
     
-    # V146: Only apply saturation reduction for quality check failures
+    # V146: Apply 15% white overlay for quality check failures
     if any(reason in reasons for reason in ["saturation_high", "brightness_low", "insufficient_cool_tone", "rgb_deviation_high"]):
-        # Just reduce saturation slightly
-        color = ImageEnhance.Color(image)
-        image = color.enhance(0.90)  # Reduce saturation by 10%
-        logger.info("Applied saturation reduction (0.90)")
+        # Apply 15% white overlay for second correction
+        white_overlay = 0.15  # 15% white overlay for second correction
+        img_array = np.array(image, dtype=np.float32)
+        img_array = img_array * (1 - white_overlay) + 255 * white_overlay
+        img_array = np.clip(img_array, 0, 255)
+        image = Image.fromarray(img_array.astype(np.uint8))
+        logger.info("Applied 15% white overlay for second correction")
     
     logger.info("Second correction applied successfully")
     return image
@@ -534,7 +537,7 @@ def apply_enhancement_v146(image: Image.Image, pattern_type: str, is_wedding_rin
     # V146: Apply white overlay ONLY to ac_bc pattern (unplated white)
     if pattern_type == "ac_bc":
         # Unplated white - apply white overlay
-        white_overlay = 0.18  # 18% total white overlay for unplated white
+        white_overlay = 0.12  # 12% white overlay for unplated white
         img_array = np.array(image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
@@ -663,7 +666,7 @@ def process_enhancement(job):
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_bc": "무도금화이트(0.18)",
+            "ac_bc": "무도금화이트(0.12)",
             "a_only": "a_패턴(no_overlay+spotlight3%)",
             "b_only": "b_패턴(no_overlay+spotlight3%)",
             "other": "기타색상(no_overlay)"
@@ -735,7 +738,7 @@ def process_enhancement(job):
                 "final_size": list(image.size),
                 "version": VERSION,
                 "status": "success",
-                "white_overlay_applied": "18% for ac_bc only, 0% for others",
+                "white_overlay_applied": "12% for ac_bc only, 0% for others",
                 "center_spotlight": "3% for a/b patterns, 5% for others",
                 "brightness_increase": "ac_bc: 1.05, a/b: 1.10, other: 1.08",
                 "wedding_ring_enhancement": "cubic_focus_only_no_metallic (all files)",
@@ -743,8 +746,8 @@ def process_enhancement(job):
                 "base64_decode_method": "ultra_safe_v146",
                 "make_com_compatible": True,
                 "quality_check": "balanced (243/4/4/1.7)",
-                "second_correction": "saturation_only_0.90",
-                "adjustments": "no white overlay except unplated white"
+                "second_correction": "15% white overlay",
+                "adjustments": "12% primary, 15% secondary for unplated white"
             }
         }
         
