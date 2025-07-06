@@ -16,21 +16,20 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V152-Speed-Optimized"
+VERSION = "V152-Speed-Optimized-Modified"
 
-# ===== REPLICATE INITIALIZATION =====
+# ===== REPLICATE INITIALIZATION - FORCED USE =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
-REPLICATE_CLIENT = None
-USE_REPLICATE = False
+if not REPLICATE_API_TOKEN:
+    raise ValueError("REPLICATE_API_TOKEN is required. Please set the environment variable.")
 
-if REPLICATE_API_TOKEN:
-    try:
-        REPLICATE_CLIENT = replicate.Client(api_token=REPLICATE_API_TOKEN)
-        USE_REPLICATE = True
-        logger.info("✅ Replicate client initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize Replicate client: {e}")
-        USE_REPLICATE = False
+try:
+    REPLICATE_CLIENT = replicate.Client(api_token=REPLICATE_API_TOKEN)
+    USE_REPLICATE = True  # Always True
+    logger.info("✅ Replicate client initialized successfully (FORCED MODE)")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Replicate client: {e}")
+    raise ValueError(f"Replicate initialization failed: {e}")
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename"""
@@ -148,10 +147,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
-    """Apply SwinIR - OPTIMIZED VERSION"""
-    if not USE_REPLICATE or not REPLICATE_CLIENT:
-        return image
-    
+    """Apply SwinIR - FORCED USE (Always runs when called)"""
     try:
         # Keep original size - no resize for SwinIR
         width, height = image.size
@@ -164,7 +160,7 @@ def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         img_data_url = f"data:image/png;base64,{img_base64}"
         
-        logger.info("🔷 Applying SwinIR (optimized)")
+        logger.info("🔷 Applying SwinIR (FORCED MODE)")
         
         # Use SwinIR with optimized settings
         output = REPLICATE_CLIENT.run(
@@ -187,11 +183,12 @@ def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
             logger.info("✅ SwinIR enhancement successful")
             return enhanced_image
         else:
+            logger.warning("SwinIR returned empty output, using original image")
             return image
             
     except Exception as e:
-        logger.warning(f"SwinIR error: {str(e)}")
-        return image
+        logger.error(f"SwinIR error: {str(e)}")
+        raise Exception(f"SwinIR processing failed: {str(e)}")
 
 def enhance_cubic_details_simple(image: Image.Image) -> Image.Image:
     """Simple cubic enhancement without LAB conversion - faster"""
@@ -270,12 +267,12 @@ def apply_wedding_ring_enhancement_fast(image: Image.Image) -> Image.Image:
     return image
 
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Optimized enhancement - Reduced white overlay & brightness"""
+    """Optimized enhancement - Modified white overlay (10% primary, 3% additional)"""
     
-    # Apply white overlay ONLY to ac_bc pattern (reduced to 7%)
+    # Apply white overlay ONLY to ac_bc pattern (10% primary)
     if pattern_type == "ac_bc":
-        # Unplated white - 7% white overlay (reduced from 12%)
-        white_overlay = 0.07
+        # Unplated white - 10% white overlay (MODIFIED from 7%)
+        white_overlay = 0.10  # Changed from 0.07 to 0.10
         img_array = np.array(image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
@@ -351,7 +348,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing - SPEED OPTIMIZED"""
+    """Main enhancement processing - SPEED OPTIMIZED with FORCED REPLICATE"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -391,7 +388,7 @@ def process_enhancement(job):
         # Detect pattern
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_bc": "무도금화이트(0.07)",  # Reduced from 0.12
+            "ac_bc": "무도금화이트(0.10+0.03)",  # Updated from 0.07
             "a_only": "a_패턴(no_overlay+spotlight2%)",
             "b_only": "b_패턴(no_overlay+spotlight2%)",
             "other": "기타색상(no_overlay)"
@@ -401,15 +398,12 @@ def process_enhancement(job):
         
         # NO MIRNet - removed for speed
         
-        # SwinIR ONLY for unplated white (ac_bc) and b pattern (b_only)
+        # SwinIR ONLY for unplated white (ac_bc) and b pattern (b_only) - FORCED USE
         swinir_applied = False
-        if USE_REPLICATE and pattern_type in ["ac_bc", "b_only"]:
-            try:
-                logger.info(f"Applying SwinIR for {pattern_type}")
-                image = apply_swinir_enhancement_fast(image)
-                swinir_applied = True
-            except Exception as e:
-                logger.warning(f"SwinIR failed: {str(e)}")
+        if pattern_type in ["ac_bc", "b_only"]:
+            logger.info(f"Applying SwinIR for {pattern_type} (FORCED MODE)")
+            image = apply_swinir_enhancement_fast(image)
+            swinir_applied = True
         else:
             logger.info(f"Skipping SwinIR for {pattern_type} (speed optimization)")
         
@@ -454,8 +448,8 @@ def process_enhancement(job):
         if pattern_type == "ac_bc":
             metrics = calculate_quality_metrics_fast(image)
             if metrics["brightness"] < 240:  # Simple check
-                # Apply 10% white overlay as correction (reduced from 15%)
-                white_overlay = 0.10
+                # Apply 3% additional white overlay (MODIFIED from 10%)
+                white_overlay = 0.03  # Changed from 0.10 to 0.03 (total 13%)
                 img_array = np.array(image, dtype=np.float32)
                 img_array = img_array * (1 - white_overlay) + 255 * white_overlay
                 img_array = np.clip(img_array, 0, 255)
@@ -481,17 +475,18 @@ def process_enhancement(job):
                 "final_size": list(image.size),
                 "version": VERSION,
                 "status": "success",
-                "white_overlay": "7% for ac_bc, 0% for others",
+                "white_overlay": "10% primary + 3% additional for ac_bc, 0% for others",
                 "brightness_reduced": True,
                 "sharpness_increased": "1.5-1.6",
                 "spotlight_reduced": "2-3%",
                 "mirnet_removed": True,
                 "swinir_applied": swinir_applied,
                 "swinir_patterns": ["ac_bc", "b_only"],
+                "replicate_mode": "FORCED",
                 "cubic_enhancement": "simple (no LAB)",
                 "speed_optimizations": [
                     "NO MIRNet (removed completely)",
-                    "SwinIR only for ac_bc and b_only",
+                    "SwinIR only for ac_bc and b_only (FORCED MODE)",
                     "Simple cubic enhancement (no LAB conversion)",
                     "Fast quality check"
                 ],
