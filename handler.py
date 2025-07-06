@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V142-RealESRGAN"
+VERSION = "V143-ReducedGlow"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -161,7 +161,7 @@ def find_filename_comprehensive(data, depth=0):
     return None
 
 def decode_base64_ultra_safe(base64_str: str) -> bytes:
-    """ULTRA SAFE base64 decode - V142 FINAL with Make.com compatibility"""
+    """ULTRA SAFE base64 decode - V143"""
     try:
         if not base64_str:
             raise ValueError("Empty base64 string")
@@ -426,7 +426,7 @@ def auto_white_balance(image: Image.Image) -> Image.Image:
     return Image.fromarray(img_array.astype(np.uint8))
 
 def apply_center_spotlight(image: Image.Image, intensity: float = 0.10) -> Image.Image:
-    """Apply center spotlight effect - Reduced for wedding rings"""
+    """Apply center spotlight effect - V143 with adjustable intensity"""
     width, height = image.size
     x = np.linspace(-1, 1, width)
     y = np.linspace(-1, 1, height)
@@ -464,8 +464,8 @@ def apply_wedding_ring_enhancement(image: Image.Image) -> Image.Image:
     
     return image
 
-def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
-    """V142 Enhancement with reduced brightness for wedding rings"""
+def apply_enhancement_v143(image: Image.Image, pattern_type: str, is_wedding_ring: bool) -> Image.Image:
+    """V143 Enhancement with adjusted brightness for less glow"""
     
     # Apply 3% white overlay to ALL patterns (as requested)
     white_overlay = 0.03
@@ -475,15 +475,15 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
     image = Image.fromarray(img_array.astype(np.uint8))
     
     if pattern_type == "ac_bc":
-        # Unplated white - additional processing
+        # Unplated white - increased processing with lower brightness
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.02)  # Increased from 0.98
+        image = brightness.enhance(0.98)  # Lowered from 1.02
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)
         
-        # Additional white overlay for ac_bc (total 18%)
-        white_overlay = 0.15
+        # Additional white overlay for ac_bc (total 21% as requested)
+        white_overlay = 0.18  # 3% + 18% = 21%
         img_array = np.array(image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
@@ -492,25 +492,30 @@ def apply_enhancement_v142(image: Image.Image, pattern_type: str, is_wedding_rin
     elif pattern_type in ["a_only", "b_only"]:
         # a_ and b_ patterns
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)  # Increased from 1.01
+        image = brightness.enhance(1.08)  # Keep original
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.96)
         
         # Enhanced sharpness
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.4)  # Reduced from 1.5
+        image = sharpness.enhance(1.4)
         
     else:
         # Standard enhancement
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.05)  # Increased from 1.0
+        image = brightness.enhance(1.05)  # Keep original
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.03)  # Reduced to 1.03
+        image = contrast.enhance(1.03)
     
-    # Apply reduced center spotlight
-    image = apply_center_spotlight(image, 0.10)  # Reduced from 0.15
+    # Apply center spotlight with pattern-specific intensity
+    if pattern_type in ["a_only", "b_only"]:
+        # Reduced spotlight for a_ and b_ patterns (half of original)
+        image = apply_center_spotlight(image, 0.05)  # 5% instead of 10%
+    else:
+        # Keep original for ac_bc and other patterns
+        image = apply_center_spotlight(image, 0.10)
     
     # Wedding ring special enhancement (always applied)
     image = apply_wedding_ring_enhancement(image)
@@ -527,7 +532,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing - Wedding Ring Optimized"""
+    """Main enhancement processing - V143 with reduced glow"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info(f"Replicate available: {USE_REPLICATE}")
     
@@ -586,9 +591,9 @@ def process_enhancement(job):
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_bc": "무도금화이트(0.15+0.03)",
-            "a_only": "a_패턴(0.03)",
-            "b_only": "b_패턴(0.03)",
+            "ac_bc": "무도금화이트(0.21)",  # Updated to 21%
+            "a_only": "a_패턴(0.03+spotlight5%)",  # Updated spotlight
+            "b_only": "b_패턴(0.03+spotlight5%)",  # Updated spotlight
             "other": "기타색상(0.03)"
         }.get(pattern_type, "기타색상(0.03)")
         
@@ -611,17 +616,17 @@ def process_enhancement(job):
         
         # Basic enhancement (increased brightness and contrast)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.1)  # Increased to 1.1 as requested
+        image = brightness.enhance(1.1)  # Keep as requested
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.03)  # Reduced to 1.03
+        image = contrast.enhance(1.03)  # Keep as requested
         
-        # Apply V142 enhancement
-        image = apply_enhancement_v142(image, pattern_type, is_wedding_ring)
+        # Apply V143 enhancement with reduced glow
+        image = apply_enhancement_v143(image, pattern_type, is_wedding_ring)
         
         # Final sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.3)  # Reduced from 1.4
+        image = sharpness.enhance(1.3)  # Keep as before
         
         # Resize to 1200px width
         image = resize_to_width_1200(image)
@@ -659,11 +664,12 @@ def process_enhancement(job):
                 "version": VERSION,
                 "status": "success",
                 "white_overlay_applied": "3% base + pattern specific",
-                "center_spotlight": "10% reduced",
+                "center_spotlight": "5% for a/b patterns, 10% for others",
                 "wedding_ring_enhancement": "cubic_focus_only_no_metallic",
                 "replicate_applied": replicate_applied,
-                "base64_decode_method": "ultra_safe_v142_final",
-                "make_com_compatible": True
+                "base64_decode_method": "ultra_safe_v143",
+                "make_com_compatible": True,
+                "adjustments": "ac_bc: 21% white + lower brightness, a/b: 50% reduced spotlight"
             }
         }
         
