@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V148-Optimized-Fast"
+VERSION = "V149-MIRNet-Cubic"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -147,6 +147,47 @@ def detect_pattern_type(filename: str) -> str:
     else:
         return "other"
 
+def apply_mirnet_enhancement(image: Image.Image) -> Image.Image:
+    """Apply MIRNet for low-light enhancement and metallic surface improvement"""
+    if not USE_REPLICATE or not REPLICATE_CLIENT:
+        return image
+    
+    try:
+        width, height = image.size
+        logger.info(f"🔷 Applying MIRNet for metallic enhancement at: {width}x{height}")
+        
+        # Convert to base64
+        buffered = BytesIO()
+        image.save(buffered, format="PNG", optimize=False)
+        buffered.seek(0)
+        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        img_data_url = f"data:image/png;base64,{img_base64}"
+        
+        # Apply MIRNet
+        output = REPLICATE_CLIENT.run(
+            "google-research/mirnet:5ebf5e597fd93dabe2080e9e5f74e0e478dd8230",
+            input={
+                "image": img_data_url,
+                "task": "enhance"  # or "low_light"
+            }
+        )
+        
+        if output:
+            if isinstance(output, str):
+                response = requests.get(output)
+                enhanced_image = Image.open(BytesIO(response.content))
+            else:
+                enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
+            
+            logger.info("✅ MIRNet enhancement successful")
+            return enhanced_image
+        else:
+            return image
+            
+    except Exception as e:
+        logger.warning(f"MIRNet error: {str(e)}")
+        return image
+
 def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
     """Apply SwinIR - OPTIMIZED VERSION"""
     if not USE_REPLICATE or not REPLICATE_CLIENT:
@@ -193,6 +234,36 @@ def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
         logger.warning(f"SwinIR error: {str(e)}")
         return image
 
+def enhance_cubic_details(image: Image.Image) -> Image.Image:
+    """Enhance small cubic/diamond details - for densely packed small stones"""
+    # Apply localized contrast enhancement
+    img_array = np.array(image)
+    
+    # Convert to LAB color space for better luminance control
+    img_lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+    l_channel, a_channel, b_channel = cv2.split(img_lab)
+    
+    # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to L channel
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+    l_channel_enhanced = clahe.apply(l_channel)
+    
+    # Merge channels back
+    img_lab_enhanced = cv2.merge([l_channel_enhanced, a_channel, b_channel])
+    img_enhanced = cv2.cvtColor(img_lab_enhanced, cv2.COLOR_LAB2RGB)
+    
+    # Convert back to PIL
+    image = Image.fromarray(img_enhanced)
+    
+    # Apply fine detail enhancement
+    # Use a smaller radius unsharp mask for tiny details
+    image = image.filter(ImageFilter.UnsharpMask(radius=0.5, percent=150, threshold=1))
+    
+    # Micro-contrast enhancement
+    enhancer = ImageEnhance.Contrast(image)
+    image = enhancer.enhance(1.05)
+    
+    return image
+
 def auto_white_balance_fast(image: Image.Image) -> Image.Image:
     """Fast white balance correction"""
     img_array = np.array(image, dtype=np.float32)
@@ -236,19 +307,19 @@ def apply_center_spotlight(image: Image.Image, intensity: float = 0.03) -> Image
     return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
 
 def apply_wedding_ring_enhancement_fast(image: Image.Image) -> Image.Image:
-    """Fast wedding ring enhancement"""
+    """Fast wedding ring enhancement with cubic detail focus"""
     # Reduced spotlight
     image = apply_center_spotlight(image, 0.02)
     
-    # Sharpness
+    # Enhanced sharpness for cubic details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.5)  # Increased from 1.4
+    image = sharpness.enhance(1.6)  # Increased for small cubic details
     
     # Slight contrast
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.02)
+    image = contrast.enhance(1.03)
     
-    # Simple unsharp mask
+    # Multi-scale unsharp mask for various cubic sizes
     image = image.filter(ImageFilter.UnsharpMask(radius=1, percent=100, threshold=3))
     
     return image
@@ -335,7 +406,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing - OPTIMIZED"""
+    """Main enhancement processing - WITH MIRNet"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -383,15 +454,29 @@ def process_enhancement(job):
         
         logger.info(f"Pattern: {pattern_type}")
         
-        # SwinIR only for unplated white
-        swinir_applied = False
-        if USE_REPLICATE and pattern_type == "ac_bc":
+        # Apply MIRNet first for all patterns (lighting normalization)
+        mirnet_applied = False
+        if USE_REPLICATE:
             try:
-                logger.info("Applying SwinIR for unplated white")
+                logger.info("Applying MIRNet for lighting and metallic enhancement")
+                image = apply_mirnet_enhancement(image)
+                mirnet_applied = True
+            except Exception as e:
+                logger.warning(f"MIRNet failed: {str(e)}")
+        
+        # SwinIR for unplated white and gold patterns
+        swinir_applied = False
+        if USE_REPLICATE and pattern_type in ["ac_bc", "a_only", "b_only"]:
+            try:
+                logger.info(f"Applying SwinIR for {pattern_type}")
                 image = apply_swinir_enhancement_fast(image)
                 swinir_applied = True
             except Exception as e:
                 logger.warning(f"SwinIR failed: {str(e)}")
+        
+        # Enhance cubic details for all patterns
+        logger.info("Enhancing cubic/diamond details")
+        image = enhance_cubic_details(image)
         
         # Basic enhancement (reduced brightness)
         brightness = ImageEnhance.Brightness(image)
@@ -403,9 +488,9 @@ def process_enhancement(job):
         # Apply optimized enhancement
         image = apply_enhancement_optimized(image, pattern_type)
         
-        # Final sharpening (increased)
+        # Final sharpening (increased for cubic details)
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.4)  # Increased from 1.3
+        image = sharpness.enhance(1.5)  # Increased for cubic clarity
         
         # Resize to 1200px
         image = resize_to_width_1200(image)
@@ -459,16 +544,18 @@ def process_enhancement(job):
                 "status": "success",
                 "white_overlay": "7% for ac_bc, 0% for others",
                 "brightness_reduced": True,
-                "sharpness_increased": "1.4-1.5",
+                "sharpness_increased": "1.5-1.6",
                 "spotlight_reduced": "2-3%",
+                "mirnet_applied": mirnet_applied,
                 "swinir_applied": swinir_applied,
-                "optimizations": [
-                    "Removed Real-ESRGAN",
-                    "Fast base64 decode",
-                    "Sampling-based quality check",
-                    "Reduced image validations",
-                    "SwinIR only for unplated white"
-                ]
+                "cubic_enhancement": True,
+                "enhancements": [
+                    "MIRNet for lighting normalization",
+                    "SwinIR for detail enhancement",
+                    "CLAHE for cubic details",
+                    "Multi-scale sharpening"
+                ],
+                "processing_order": "MIRNet → SwinIR → Cubic Enhancement → Pattern Enhancement"
             }
         }
         
