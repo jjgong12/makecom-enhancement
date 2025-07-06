@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V149-MIRNet-Cubic"
+VERSION = "V150-SwinIR-Cubic-Only"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -146,47 +146,6 @@ def detect_pattern_type(filename: str) -> str:
         return "b_only"
     else:
         return "other"
-
-def apply_mirnet_enhancement(image: Image.Image) -> Image.Image:
-    """Apply MIRNet for low-light enhancement and metallic surface improvement"""
-    if not USE_REPLICATE or not REPLICATE_CLIENT:
-        return image
-    
-    try:
-        width, height = image.size
-        logger.info(f"🔷 Applying MIRNet for metallic enhancement at: {width}x{height}")
-        
-        # Convert to base64
-        buffered = BytesIO()
-        image.save(buffered, format="PNG", optimize=False)
-        buffered.seek(0)
-        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        img_data_url = f"data:image/png;base64,{img_base64}"
-        
-        # Apply MIRNet
-        output = REPLICATE_CLIENT.run(
-            "google-research/mirnet:5ebf5e597fd93dabe2080e9e5f74e0e478dd8230",
-            input={
-                "image": img_data_url,
-                "task": "enhance"  # or "low_light"
-            }
-        )
-        
-        if output:
-            if isinstance(output, str):
-                response = requests.get(output)
-                enhanced_image = Image.open(BytesIO(response.content))
-            else:
-                enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
-            
-            logger.info("✅ MIRNet enhancement successful")
-            return enhanced_image
-        else:
-            return image
-            
-    except Exception as e:
-        logger.warning(f"MIRNet error: {str(e)}")
-        return image
 
 def apply_swinir_enhancement_fast(image: Image.Image) -> Image.Image:
     """Apply SwinIR - OPTIMIZED VERSION"""
@@ -406,7 +365,7 @@ def resize_to_width_1200(image: Image.Image) -> Image.Image:
     return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
 def process_enhancement(job):
-    """Main enhancement processing - WITH MIRNet"""
+    """Main enhancement processing - NO MIRNet"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -454,17 +413,7 @@ def process_enhancement(job):
         
         logger.info(f"Pattern: {pattern_type}")
         
-        # Apply MIRNet first for all patterns (lighting normalization)
-        mirnet_applied = False
-        if USE_REPLICATE:
-            try:
-                logger.info("Applying MIRNet for lighting and metallic enhancement")
-                image = apply_mirnet_enhancement(image)
-                mirnet_applied = True
-            except Exception as e:
-                logger.warning(f"MIRNet failed: {str(e)}")
-        
-        # SwinIR for unplated white and gold patterns
+        # SwinIR for unplated white and gold patterns (NO MIRNet)
         swinir_applied = False
         if USE_REPLICATE and pattern_type in ["ac_bc", "a_only", "b_only"]:
             try:
@@ -546,16 +495,16 @@ def process_enhancement(job):
                 "brightness_reduced": True,
                 "sharpness_increased": "1.5-1.6",
                 "spotlight_reduced": "2-3%",
-                "mirnet_applied": mirnet_applied,
+                "mirnet_removed": True,
                 "swinir_applied": swinir_applied,
                 "cubic_enhancement": True,
                 "enhancements": [
-                    "MIRNet for lighting normalization",
                     "SwinIR for detail enhancement",
                     "CLAHE for cubic details",
-                    "Multi-scale sharpening"
+                    "Multi-scale sharpening",
+                    "NO MIRNet (background preserved)"
                 ],
-                "processing_order": "MIRNet → SwinIR → Cubic Enhancement → Pattern Enhancement"
+                "processing_order": "White Balance → SwinIR → Cubic Enhancement → Pattern Enhancement"
             }
         }
         
