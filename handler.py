@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V156-Ring-Hole-Detection"
+VERSION = "V157-Safe-Ring-Processing"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -144,7 +144,7 @@ def detect_pattern_type(filename: str) -> str:
     else:
         return "other"
 
-def create_background(size, color="#F5F5F5", style="gradient"):
+def create_background(size, color="#F0F0F0", style="gradient"):
     """Create background for jewelry"""
     width, height = size
     
@@ -171,13 +171,13 @@ def create_background(size, color="#F5F5F5", style="gradient"):
         return Image.new('RGB', size, color)
 
 def remove_background_with_replicate(image: Image.Image) -> Image.Image:
-    """Remove background using Replicate API - IMPROVED FOR RINGS"""
+    """Remove background using Replicate API - OPTIMIZED FOR JEWELRY"""
     if not USE_REPLICATE or not REPLICATE_CLIENT:
         logger.warning("Replicate not available for background removal")
         return image
     
     try:
-        logger.info("🔷 Removing background with Replicate (ring-optimized)")
+        logger.info("🔷 Removing background with Replicate")
         
         # Convert to base64
         buffered = BytesIO()
@@ -186,16 +186,16 @@ def remove_background_with_replicate(image: Image.Image) -> Image.Image:
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         img_data_url = f"data:image/png;base64,{img_base64}"
         
-        # Use rembg model with OPTIMIZED settings for rings
+        # Use rembg model with settings for jewelry (including ring holes)
         output = REPLICATE_CLIENT.run(
             "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003",
             input={
                 "image": img_data_url,
-                "model": "u2net",  # Better for rings with holes
+                "model": "u2net_human_seg",  # Better for jewelry with holes
                 "alpha_matting": True,
-                "alpha_matting_foreground_threshold": 240,  # Lowered for ring holes
-                "alpha_matting_background_threshold": 20,   # Lowered for better detection
-                "alpha_matting_erode_size": 5              # Reduced for finer details
+                "alpha_matting_foreground_threshold": 250,  # High for jewelry
+                "alpha_matting_background_threshold": 15,    # Low for holes
+                "alpha_matting_erode_size": 8              # Standard for jewelry
             }
         )
         
@@ -205,10 +205,6 @@ def remove_background_with_replicate(image: Image.Image) -> Image.Image:
                 result_image = Image.open(BytesIO(response.content))
             else:
                 result_image = Image.open(BytesIO(base64.b64decode(output)))
-            
-            # POST-PROCESS: Detect and clean ring holes
-            if result_image.mode == 'RGBA':
-                result_image = clean_ring_holes(result_image)
             
             logger.info("✅ Background removal successful")
             return result_image
@@ -220,40 +216,7 @@ def remove_background_with_replicate(image: Image.Image) -> Image.Image:
         logger.error(f"Background removal error: {str(e)}")
         return image
 
-def clean_ring_holes(image: Image.Image) -> Image.Image:
-    """Post-process to ensure ring holes are transparent"""
-    if image.mode != 'RGBA':
-        return image
-    
-    # Convert to numpy array
-    img_array = np.array(image)
-    alpha = img_array[:, :, 3]
-    
-    # Find contours in alpha channel
-    _, binary = cv2.threshold(alpha, 128, 255, cv2.THRESH_BINARY)
-    contours, _ = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Create mask for holes
-    h, w = alpha.shape
-    hole_mask = np.zeros((h, w), dtype=np.uint8)
-    
-    # Find internal contours (holes)
-    for i, contour in enumerate(contours):
-        area = cv2.contourArea(contour)
-        # Check if it's a hole (small area inside the ring)
-        if 100 < area < (h * w * 0.1):  # Adjust these values as needed
-            x, y, cw, ch = cv2.boundingRect(contour)
-            # Check if it's in the center region
-            center_x, center_y = w // 2, h // 2
-            if abs(x + cw//2 - center_x) < w * 0.3 and abs(y + ch//2 - center_y) < h * 0.3:
-                cv2.drawContours(hole_mask, [contour], -1, 255, -1)
-    
-    # Apply hole mask to alpha channel
-    img_array[:, :, 3] = np.where(hole_mask > 0, 0, img_array[:, :, 3])
-    
-    return Image.fromarray(img_array)
-
-def composite_with_background(image, background_color="#F5F5F5"):
+def composite_with_background(image, background_color="#F0F0F0"):
     """Composite PNG image with background"""
     if image.mode == 'RGBA':
         # Create background
@@ -510,7 +473,7 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
         return resized
 
 def process_enhancement(job):
-    """Main enhancement processing - PNG SUPPORT + POST-RESIZE SWINIR + RING HOLE FIX"""
+    """Main enhancement processing - CLEAR ORDER: Background Removal → Enhancement → Composite"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -520,7 +483,7 @@ def process_enhancement(job):
         image_data = find_input_data_fast(job)
         
         # Get background color if specified
-        background_color = job.get('background_color', '#F5F5F5')
+        background_color = job.get('background_color', '#F0F0F0')  # Slightly gray
         if isinstance(job.get('input'), dict):
             background_color = job.get('input', {}).get('background_color', background_color)
         
@@ -537,38 +500,42 @@ def process_enhancement(job):
         image_bytes = decode_base64_fast(image_data)
         image = Image.open(BytesIO(image_bytes))
         
-        # Handle PNG with transparency
+        # STEP 1: BACKGROUND REMOVAL (PNG files only)
         original_mode = image.mode
         has_transparency = image.mode == 'RGBA'
+        needs_background_removal = False
         
-        # PNG 파일이면 무조건 누끼 따기
         if filename and filename.lower().endswith('.png'):
-            logger.info("PNG file detected - will remove background")
+            logger.info("📸 STEP 1: PNG detected - removing background")
             image = remove_background_with_replicate(image)
             has_transparency = image.mode == 'RGBA'
+            needs_background_removal = True
         
+        # Keep original for later compositing if transparent
         if has_transparency:
-            logger.info("PNG with transparency detected - will composite with background")
+            logger.info("Transparency detected - keeping original for compositing")
+            original_transparent = image.copy()
         
-        # Convert to RGB if needed (but keep original for compositing)
+        # Convert to RGB for processing
         if image.mode != 'RGB':
             if image.mode == 'RGBA':
-                # Keep original for later compositing
-                original_image = image.copy()
-                # Convert to RGB for processing
-                background = Image.new('RGB', image.size, (255, 255, 255))
-                background.paste(image, mask=image.split()[3])
-                image = background
+                # Temporary white background for processing
+                temp_bg = Image.new('RGB', image.size, (255, 255, 255))
+                temp_bg.paste(image, mask=image.split()[3])
+                image = temp_bg
             else:
                 image = image.convert('RGB')
         
         original_size = image.size
-        logger.info(f"Image size: {original_size}")
+        logger.info(f"Original size: {original_size}")
+        
+        # STEP 2: ENHANCEMENT (on isolated product)
+        logger.info("🎨 STEP 2: Applying enhancements")
         
         # Fast white balance
         image = auto_white_balance_fast(image)
         
-        # Detect pattern - SIMPLIFIED
+        # Detect pattern
         pattern_type = detect_pattern_type(filename)
         detected_type = {
             "ac_pattern": "무도금화이트(0.12)",
@@ -577,52 +544,75 @@ def process_enhancement(job):
         
         logger.info(f"Pattern: {pattern_type}")
         
-        # Simple cubic enhancement (no LAB conversion for speed)
-        logger.info("Enhancing cubic/diamond details (simple method)")
+        # Cubic enhancement
         image = enhance_cubic_details_simple(image)
         
-        # Basic enhancement (adjusted for better gold visibility)
+        # Basic enhancement (stronger for jewelry)
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.10)  # Increased from 1.08
+        image = brightness.enhance(1.12)  # Increased
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.03)  # Increased from 1.02
+        image = contrast.enhance(1.05)  # Increased
         
-        # Apply optimized enhancement
+        # Apply pattern-specific enhancement
         image = apply_enhancement_optimized(image, pattern_type)
         
-        # RESIZE FIRST (before SwinIR)
+        # RESIZE
         logger.info(f"Resizing from {image.size} to 1200x1560")
         image = resize_to_target_dimensions(image, 1200, 1560)
         
-        # Apply SwinIR AFTER resize - REMOVED FILTER, applies to all patterns
+        # Apply SwinIR AFTER resize
         swinir_applied = False
         if USE_REPLICATE:
             try:
-                logger.info(f"Applying SwinIR AFTER resize for {pattern_type}")
+                logger.info("Applying SwinIR enhancement")
                 image = apply_swinir_enhancement_after_resize(image)
                 swinir_applied = True
             except Exception as e:
                 logger.warning(f"SwinIR failed: {str(e)}")
         
-        # Final sharpening (increased for cubic details)
+        # Final sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.6)  # Increased from 1.5
+        image = sharpness.enhance(1.7)
         
-        # Handle transparency compositing if original was PNG
-        if has_transparency and 'original_image' in locals():
-            logger.info("Compositing with background")
-            # Resize original PNG to target size
-            original_resized = original_image.resize((1200, 1560), Image.Resampling.LANCZOS)
+        # STEP 3: BACKGROUND COMPOSITE (if transparent)
+        if has_transparency and 'original_transparent' in locals():
+            logger.info("🖼️ STEP 3: Compositing with background")
+            # Apply all enhancements to transparent version
+            enhanced_transparent = original_transparent.copy()
+            
+            # Resize transparent version
+            enhanced_transparent = enhanced_transparent.resize((1200, 1560), Image.Resampling.LANCZOS)
+            
+            # Apply enhancements to RGBA
+            if enhanced_transparent.mode == 'RGBA':
+                # Split channels
+                r, g, b, a = enhanced_transparent.split()
+                rgb_image = Image.merge('RGB', (r, g, b))
+                
+                # Apply same enhancements
+                rgb_image = auto_white_balance_fast(rgb_image)
+                brightness = ImageEnhance.Brightness(rgb_image)
+                rgb_image = brightness.enhance(1.12)
+                contrast = ImageEnhance.Contrast(rgb_image)
+                rgb_image = contrast.enhance(1.05)
+                sharpness = ImageEnhance.Sharpness(rgb_image)
+                rgb_image = sharpness.enhance(1.7)
+                
+                # Merge back with alpha
+                r2, g2, b2 = rgb_image.split()
+                enhanced_transparent = Image.merge('RGBA', (r2, g2, b2, a))
+            
             # Composite with background
-            image = composite_with_background(original_resized, background_color)
-            # Apply final enhancements after compositing
+            image = composite_with_background(enhanced_transparent, background_color)
+            
+            # Final touch after compositing
             sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.3)  # Increased from 1.2
+            image = sharpness.enhance(1.2)
         
         # Save to base64
         buffered = BytesIO()
-        image.save(buffered, format="PNG", optimize=False, quality=92)
+        image.save(buffered, format="PNG", optimize=False, quality=95)
         buffered.seek(0)
         enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
@@ -636,11 +626,11 @@ def process_enhancement(job):
             extension = filename.rsplit('.', 1)[1] if '.' in filename else 'jpg'
             enhanced_filename = f"{base_name}_enhanced.{extension}"
         
-        # Fast quality check (only for ac_pattern)
+        # Quality check for ac_pattern
         if pattern_type == "ac_pattern":
             metrics = calculate_quality_metrics_fast(image)
             if metrics["brightness"] < 240:
-                # Apply 15% white overlay as correction (2차: 10% → 15%, 5% 증가)
+                # Apply correction
                 white_overlay = 0.15
                 img_array = np.array(image, dtype=np.float32)
                 img_array = img_array * (1 - white_overlay) + 255 * white_overlay
@@ -649,7 +639,7 @@ def process_enhancement(job):
                 
                 # Re-encode
                 buffered = BytesIO()
-                image.save(buffered, format="PNG", optimize=False, quality=92)
+                image.save(buffered, format="PNG", optimize=False, quality=95)
                 buffered.seek(0)
                 enhanced_base64_no_padding = base64.b64encode(buffered.getvalue()).decode('utf-8').rstrip('=')
         
@@ -668,26 +658,25 @@ def process_enhancement(job):
                 "version": VERSION,
                 "status": "success",
                 "white_overlay": "12% for ac_, 0% for others",
-                "brightness_increased": "Gold colors +10%, AC +2%",
-                "sharpness_increased": "1.6-1.7",
+                "brightness_increased": "12% all patterns",
+                "contrast_increased": "5%",
+                "sharpness_increased": "1.7",
                 "spotlight_reduced": "2-3%",
-                "mirnet_removed": True,
                 "swinir_applied": swinir_applied,
-                "swinir_timing": "AFTER resize (ALL PATTERNS)",
+                "swinir_timing": "AFTER resize",
                 "png_support": True,
                 "has_transparency": has_transparency,
                 "background_composite": has_transparency,
-                "background_removal_applied": filename.lower().endswith('.png') if filename else False,
-                "ring_hole_detection": True,
-                "rembg_optimized": "Lower thresholds for ring holes",
-                "input_ratio_check": True,
+                "background_removal": needs_background_removal,
+                "background_color": background_color,
+                "processing_order": "1.Background Removal → 2.Enhancement → 3.Background Composite",
+                "quality": "95",
                 "expected_input": "2000x2600",
-                "output_size": "1200x1560",
-                "processing_order": "Background Removal (PNG) → Ring Hole Clean → White Balance → Cubic Enhancement → Pattern Enhancement → RESIZE → SwinIR → Final Sharpen → Background Composite"
+                "output_size": "1200x1560"
             }
         }
         
-        logger.info("✅ Enhancement completed")
+        logger.info("✅ Enhancement completed successfully")
         return output
         
     except Exception as e:
