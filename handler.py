@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V5-Gray-Background  
+# VERSION: V5.1-Natural-Gray  
 ################################
 
-VERSION = "V5-Gray-Background"
+VERSION = "V5.1-Natural-Gray"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -222,7 +222,7 @@ def remove_background_with_replicate(image: Image.Image) -> Image.Image:
         return image
 
 def add_natural_edge_feathering(image: Image.Image) -> Image.Image:
-    """Add MORE natural feathering to edges"""
+    """Add STRONGER natural feathering to edges - V5.1 IMPROVED"""
     if image.mode != 'RGBA':
         return image
     
@@ -232,30 +232,30 @@ def add_natural_edge_feathering(image: Image.Image) -> Image.Image:
     # Apply stronger Gaussian blur to alpha channel
     a_array = np.array(a, dtype=np.float32)
     
-    # Create edge mask
-    edges = cv2.Canny(a_array.astype(np.uint8), 30, 100)  # Lower thresholds
+    # Create edge mask with lower thresholds for softer edges
+    edges = cv2.Canny(a_array.astype(np.uint8), 20, 80)  # Lower thresholds
     
     # Dilate edges more
-    kernel = np.ones((5, 5), np.uint8)  # Larger kernel
-    edges_dilated = cv2.dilate(edges, kernel, iterations=2)  # More iterations
+    kernel = np.ones((7, 7), np.uint8)  # Larger kernel
+    edges_dilated = cv2.dilate(edges, kernel, iterations=3)  # More iterations
     
     # Apply stronger Gaussian blur to edges
-    edge_blur = cv2.GaussianBlur(edges_dilated.astype(np.float32), (9, 9), 2.5)  # Stronger blur
+    edge_blur = cv2.GaussianBlur(edges_dilated.astype(np.float32), (15, 15), 4.0)  # Much stronger blur
     
-    # Blend original alpha with blurred edges more strongly
+    # Blend original alpha with blurred edges more aggressively
     alpha_feathered = np.where(edge_blur > 0, 
-                               a_array * 0.8 + edge_blur * 0.2,  # More feathering
+                               a_array * 0.7 + edge_blur * 0.3,  # More feathering
                                a_array)
     
-    # Apply overall blur to alpha for smoothness
-    alpha_final = cv2.GaussianBlur(alpha_feathered, (5, 5), 1.0)  # Stronger overall blur
+    # Apply stronger overall blur to alpha for smoothness
+    alpha_final = cv2.GaussianBlur(alpha_feathered, (7, 7), 2.0)  # Stronger overall blur
     
     # Create new image with feathered alpha
     a_new = Image.fromarray(alpha_final.astype(np.uint8))
     return Image.merge('RGBA', (r, g, b, a_new))
 
-def composite_with_light_gray_background(image, background_color="#F0F0F0"):
-    """Natural composite with minimal 5px shadow"""
+def composite_with_light_gray_background(image, background_color="#E8E8E8"):
+    """Natural composite with 15px shadow - V5.1 IMPROVED"""
     if image.mode == 'RGBA':
         # Apply strong edge feathering first
         image = add_natural_edge_feathering(image)
@@ -266,23 +266,27 @@ def composite_with_light_gray_background(image, background_color="#F0F0F0"):
         # Get alpha channel
         alpha = image.split()[3]
         
-        # Create VERY MINIMAL shadow (5px only)
+        # Create STRONGER 15px shadow (increased from 10px)
         shadow_array = np.array(alpha, dtype=np.float32) / 255.0
         
-        # Single minimal shadow layer (5px blur)
-        shadow = cv2.GaussianBlur(shadow_array, (5, 5), 1.0)
-        shadow = (shadow * 0.025 * 255).astype(np.uint8)  # Very subtle 2.5%
+        # Multiple shadow layers for more natural effect
+        shadow1 = cv2.GaussianBlur(shadow_array, (15, 15), 4.0)  # 15px blur
+        shadow2 = cv2.GaussianBlur(shadow_array, (25, 25), 6.0)  # Softer outer shadow
         
-        # Create shadow image with minimal offset
+        # Combine shadows with increased opacity
+        shadow = (shadow1 * 0.05 + shadow2 * 0.03) * 255  # 5% + 3% = 8% total (increased from 3.5%)
+        shadow = shadow.astype(np.uint8)
+        
+        # Create shadow image with slightly larger offset
         shadow_img = Image.fromarray(shadow, mode='L')
         shadow_offset = Image.new('L', image.size, 0)
         
-        # Minimal offset (1 pixel)
-        shadow_offset.paste(shadow_img, (1, 1))
+        # Slightly larger offset (2 pixels)
+        shadow_offset.paste(shadow_img, (2, 2))
         
-        # Apply shadow to background - use very light gray shadow
-        # Very light gray shadow color
-        shadow_color = (235, 235, 235)  # Almost same as background
+        # Apply shadow to background - use darker gray shadow
+        # Darker gray shadow color for better visibility
+        shadow_color = (210, 210, 210)  # Darker than before (220, 220, 220)
         
         shadow_layer = Image.new('RGB', image.size, shadow_color)
         background.paste(shadow_layer, mask=shadow_offset)
@@ -367,21 +371,21 @@ def apply_swinir_enhancement_after_resize(image: Image.Image) -> Image.Image:
         return image
 
 def enhance_cubic_details_simple(image: Image.Image) -> Image.Image:
-    """Enhanced cubic details with stronger sharpening"""
-    # Stronger contrast for better cubic visibility
+    """Enhanced cubic details with moderate sharpening - V5.1 ADJUSTED"""
+    # Moderate contrast for better cubic visibility
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.12)  # Increased from 1.08
+    image = contrast.enhance(1.10)  # Reduced from 1.12
     
-    # Strong detail enhancement
-    image = image.filter(ImageFilter.UnsharpMask(radius=0.6, percent=150, threshold=2))  # Increased
+    # Moderate detail enhancement
+    image = image.filter(ImageFilter.UnsharpMask(radius=0.6, percent=130, threshold=2))  # Reduced from 150
     
-    # Additional micro-contrast
+    # Subtle micro-contrast
     contrast2 = ImageEnhance.Contrast(image)
-    image = contrast2.enhance(1.05)  # Increased from 1.03
+    image = contrast2.enhance(1.04)  # Reduced from 1.05
     
-    # Extra sharpness pass
+    # Moderate sharpness pass
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.3)  # Added extra sharpness
+    image = sharpness.enhance(1.25)  # Reduced from 1.3
     
     return image
 
@@ -410,8 +414,8 @@ def auto_white_balance_fast(image: Image.Image) -> Image.Image:
     
     return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
 
-def apply_center_spotlight(image: Image.Image, intensity: float = 0.04) -> Image.Image:
-    """Apply center spotlight - Slightly increased"""
+def apply_center_spotlight(image: Image.Image, intensity: float = 0.035) -> Image.Image:
+    """Apply center spotlight - V5.1 ADJUSTED"""
     width, height = image.size
     
     # Create spotlight mask more efficiently
@@ -428,30 +432,30 @@ def apply_center_spotlight(image: Image.Image, intensity: float = 0.04) -> Image
     return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
 
 def apply_wedding_ring_enhancement_fast(image: Image.Image) -> Image.Image:
-    """Enhanced wedding ring processing with stronger cubic detail"""
-    # Slightly increased spotlight
-    image = apply_center_spotlight(image, 0.03)
+    """Enhanced wedding ring processing with moderate cubic detail - V5.1 ADJUSTED"""
+    # Moderate spotlight
+    image = apply_center_spotlight(image, 0.025)  # Reduced from 0.03
     
-    # Much stronger sharpness for cubic details
+    # Moderate sharpness for cubic details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.8)  # Increased from 1.6
+    image = sharpness.enhance(1.7)  # Reduced from 1.8
     
-    # Stronger contrast
+    # Moderate contrast
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.06)  # Increased from 1.03
+    image = contrast.enhance(1.05)  # Reduced from 1.06
     
-    # Strong multi-scale unsharp mask
-    image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=130, threshold=3))
+    # Moderate multi-scale unsharp mask
+    image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=3))  # Reduced from 130
     
     return image
 
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Optimized enhancement - 17% white overlay for ac_ (1차)"""
+    """Optimized enhancement - 15% white overlay for ac_ (1차) - V5.1 REDUCED"""
     
-    # Apply white overlay ONLY to ac_pattern (17% - increased from 12%)
+    # Apply white overlay ONLY to ac_pattern (15% - reduced from 17%)
     if pattern_type == "ac_pattern":
-        # Unplated white - 17% white overlay (1차: 12% → 17%, 5% 증가)
-        white_overlay = 0.17
+        # Unplated white - 15% white overlay (reduced from 17%)
+        white_overlay = 0.15
         img_array = np.array(image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
@@ -459,25 +463,25 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str) -> Image.
         
         # Reduced brightness for ac_
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.02)
+        image = brightness.enhance(1.01)  # Reduced from 1.02
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.96)
+        image = color.enhance(0.97)  # Slightly increased from 0.96
         
     else:
-        # All other patterns - stronger enhancement for gold colors
+        # All other patterns - moderate enhancement for gold colors
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.14)  # Increased from 1.10
+        image = brightness.enhance(1.12)  # Reduced from 1.14
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.98)
         
-        # Enhanced sharpness
+        # Moderate sharpness
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.7)  # Increased from 1.6
+        image = sharpness.enhance(1.6)  # Reduced from 1.7
     
-    # Slightly increased center spotlight
-    image = apply_center_spotlight(image, 0.04)
+    # Moderate center spotlight
+    image = apply_center_spotlight(image, 0.035)  # Reduced from 0.04
     
     # Wedding ring enhancement
     image = apply_wedding_ring_enhancement_fast(image)
@@ -540,7 +544,7 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
         return resized
 
 def process_enhancement(job):
-    """Main enhancement processing - LIGHT GRAY SHADOW VERSION"""
+    """Main enhancement processing - V5.1 NATURAL GRAY VERSION"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -602,7 +606,7 @@ def process_enhancement(job):
         # Detect pattern
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_pattern": "무도금화이트(0.17/0.20)",
+            "ac_pattern": "무도금화이트(0.15/0.18)",
             "other": "기타색상(no_overlay)"
         }.get(pattern_type, "기타색상(no_overlay)")
         
@@ -611,12 +615,12 @@ def process_enhancement(job):
         # Enhanced cubic details
         image = enhance_cubic_details_simple(image)
         
-        # Stronger basic enhancement
+        # Moderate basic enhancement - V5.1 REDUCED
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.15)  # Increased from 1.12
+        image = brightness.enhance(1.12)  # Reduced from 1.15
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.08)  # Increased from 1.05
+        image = contrast.enhance(1.06)  # Reduced from 1.08
         
         # Apply pattern-specific enhancement
         image = apply_enhancement_optimized(image, pattern_type)
@@ -635,13 +639,13 @@ def process_enhancement(job):
             except Exception as e:
                 logger.warning(f"SwinIR failed: {str(e)}")
         
-        # Strong final sharpening
+        # Moderate final sharpening - V5.1 REDUCED
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.9)  # Increased from 1.7
+        image = sharpness.enhance(1.8)  # Reduced from 1.9
         
         # STEP 3: BACKGROUND COMPOSITE (if transparent)
         if has_transparency and 'original_transparent' in locals():
-            logger.info(f"🖼️ STEP 3: Light gray background compositing: {background_color}")
+            logger.info(f"🖼️ STEP 3: Natural gray background compositing: {background_color}")
             # Apply all enhancements to transparent version
             enhanced_transparent = original_transparent.copy()
             
@@ -658,16 +662,16 @@ def process_enhancement(job):
                 rgb_image = auto_white_balance_fast(rgb_image)
                 rgb_image = enhance_cubic_details_simple(rgb_image)
                 brightness = ImageEnhance.Brightness(rgb_image)
-                rgb_image = brightness.enhance(1.15)
+                rgb_image = brightness.enhance(1.12)  # Reduced
                 contrast = ImageEnhance.Contrast(rgb_image)
-                rgb_image = contrast.enhance(1.08)
+                rgb_image = contrast.enhance(1.06)  # Reduced
                 sharpness = ImageEnhance.Sharpness(rgb_image)
-                rgb_image = sharpness.enhance(1.9)
+                rgb_image = sharpness.enhance(1.8)  # Reduced
                 
                 # Pattern-specific enhancement
                 if pattern_type == "ac_pattern":
-                    # 17% white overlay
-                    white_overlay = 0.17
+                    # 15% white overlay - V5.1 REDUCED
+                    white_overlay = 0.15
                     img_array = np.array(rgb_image, dtype=np.float32)
                     img_array = img_array * (1 - white_overlay) + 255 * white_overlay
                     rgb_image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
@@ -681,7 +685,7 @@ def process_enhancement(job):
             
             # Final touch after compositing
             sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.2)  # Reduced for more natural look
+            image = sharpness.enhance(1.15)  # Reduced for more natural look
         
         # Save to base64
         buffered = BytesIO()
@@ -703,8 +707,8 @@ def process_enhancement(job):
         if pattern_type == "ac_pattern":
             metrics = calculate_quality_metrics_fast(image)
             if metrics["brightness"] < 240:
-                # Apply 20% white overlay as correction (2차: 15% → 20%, 5% 증가)
-                white_overlay = 0.20
+                # Apply 18% white overlay as correction - V5.1 REDUCED
+                white_overlay = 0.18  # Reduced from 20%
                 img_array = np.array(image, dtype=np.float32)
                 img_array = img_array * (1 - white_overlay) + 255 * white_overlay
                 img_array = np.clip(img_array, 0, 255)
@@ -730,12 +734,12 @@ def process_enhancement(job):
                 "final_size": list(image.size),
                 "version": VERSION,
                 "status": "success",
-                "white_overlay": "17% for ac_ (1차), 20% (2차)",
-                "brightness_increased": "15% all patterns",
-                "contrast_increased": "8%",
-                "sharpness_increased": "1.9 + extra passes",
-                "spotlight_increased": "3-4%",
-                "cubic_enhancement": "Stronger (150% unsharp)",
+                "white_overlay": "15% for ac_ (1차), 18% (2차) - REDUCED",
+                "brightness_increased": "12% all patterns - REDUCED",
+                "contrast_increased": "6% - REDUCED",
+                "sharpness_increased": "1.8 + extra passes - REDUCED",
+                "spotlight_increased": "2.5-3.5% - REDUCED",
+                "cubic_enhancement": "Moderate (130% unsharp) - REDUCED",
                 "swinir_applied": swinir_applied,
                 "swinir_timing": "AFTER resize",
                 "png_support": True,
@@ -744,13 +748,13 @@ def process_enhancement(job):
                 "background_removal": needs_background_removal,
                 "background_color": background_color,
                 "background_style": "Gray gradient (#E8E8E8)",
-                "shadow_color": "Gray (220, 220, 220)",
-                "shadow_opacity": "Subtle 3.5% (10px blur)",
-                "shadow_size": "10 pixels",
-                "edge_processing": "Strong natural feathering",
+                "shadow_color": "Darker gray (210, 210, 210)",
+                "shadow_opacity": "8% (15px blur) - INCREASED",
+                "shadow_size": "15 pixels - INCREASED",
+                "edge_processing": "STRONGER natural feathering",
                 "composite_method": "Premultiplied alpha blending",
                 "rembg_settings": "Aggressive (270/10/10)",
-                "processing_order": "1.Background Removal → 2.Enhancement → 3.Light Gray Composite",
+                "processing_order": "1.Background Removal → 2.Enhancement → 3.Natural Gray Composite",
                 "quality": "95",
                 "expected_input": "2000x2600",
                 "output_size": "1200x1560"
