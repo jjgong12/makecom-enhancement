@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V4-Minimal-Shadow  
+# VERSION: V5-Gray-Background  
 ################################
 
-VERSION = "V4-Minimal-Shadow"
+VERSION = "V5-Gray-Background"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -149,8 +149,8 @@ def detect_pattern_type(filename: str) -> str:
     else:
         return "other"
 
-def create_background(size, color="#F0F0F0", style="gradient"):
-    """Create natural light gray background for jewelry"""
+def create_background(size, color="#E8E8E8", style="gradient"):
+    """Create natural gray background for jewelry"""
     width, height = size
     
     if style == "gradient":
@@ -549,8 +549,8 @@ def process_enhancement(job):
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
         
-        # Fixed light gray background
-        background_color = '#F0F0F0'  # Light gray
+        # Fixed gray background
+        background_color = '#E8E8E8'  # Gray background
         
         if not image_data:
             return {
@@ -743,10 +743,10 @@ def process_enhancement(job):
                 "background_composite": has_transparency,
                 "background_removal": needs_background_removal,
                 "background_color": background_color,
-                "background_style": "Light gray gradient (#F0F0F0)",
-                "shadow_color": "Light gray (235, 235, 235)",
-                "shadow_opacity": "Minimal 2.5% (5px blur only)",
-                "shadow_size": "5 pixels",
+                "background_style": "Gray gradient (#E8E8E8)",
+                "shadow_color": "Gray (220, 220, 220)",
+                "shadow_opacity": "Subtle 3.5% (10px blur)",
+                "shadow_size": "10 pixels",
                 "edge_processing": "Strong natural feathering",
                 "composite_method": "Premultiplied alpha blending",
                 "rembg_settings": "Aggressive (270/10/10)",
