@@ -16,7 +16,7 @@ import string
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VERSION = "V159-Natural-Edge-Processing"
+VERSION = "NEW-V1-Natural-Background"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -144,8 +144,8 @@ def detect_pattern_type(filename: str) -> str:
     else:
         return "other"
 
-def create_background(size, color="#F0F0F0", style="gradient"):
-    """Create background for jewelry"""
+def create_background(size, color="#F5F2ED", style="gradient"):
+    """Create natural background for jewelry - warm gray beige"""
     width, height = size
     
     if style == "gradient":
@@ -158,9 +158,9 @@ def create_background(size, color="#F0F0F0", style="gradient"):
         center_x, center_y = width / 2, height / 2
         distance = np.sqrt((x - center_x)**2 + (y - center_y)**2) / max(width, height)
         
-        # Subtle gradient
-        gradient = 1 - (distance * 0.15)  # 15% darkening at edges
-        gradient = np.clip(gradient, 0.85, 1.0)
+        # Very subtle gradient for natural look
+        gradient = 1 - (distance * 0.08)  # Only 8% darkening at edges
+        gradient = np.clip(gradient, 0.92, 1.0)
         
         # Apply gradient
         bg_array *= gradient[:, :, np.newaxis]
@@ -217,42 +217,42 @@ def remove_background_with_replicate(image: Image.Image) -> Image.Image:
         return image
 
 def add_natural_edge_feathering(image: Image.Image) -> Image.Image:
-    """Add natural feathering to edges for smooth transition"""
+    """Add MORE natural feathering to edges"""
     if image.mode != 'RGBA':
         return image
     
     # Get alpha channel
     r, g, b, a = image.split()
     
-    # Apply Gaussian blur to alpha channel for feathering
+    # Apply stronger Gaussian blur to alpha channel
     a_array = np.array(a, dtype=np.float32)
     
     # Create edge mask
-    edges = cv2.Canny(a_array.astype(np.uint8), 50, 150)
+    edges = cv2.Canny(a_array.astype(np.uint8), 30, 100)  # Lower thresholds
     
-    # Dilate edges slightly
-    kernel = np.ones((3, 3), np.uint8)
-    edges_dilated = cv2.dilate(edges, kernel, iterations=1)
+    # Dilate edges more
+    kernel = np.ones((5, 5), np.uint8)  # Larger kernel
+    edges_dilated = cv2.dilate(edges, kernel, iterations=2)  # More iterations
     
-    # Apply Gaussian blur to edges
-    edge_blur = cv2.GaussianBlur(edges_dilated.astype(np.float32), (5, 5), 1.5)
+    # Apply stronger Gaussian blur to edges
+    edge_blur = cv2.GaussianBlur(edges_dilated.astype(np.float32), (9, 9), 2.5)  # Stronger blur
     
-    # Blend original alpha with blurred edges
+    # Blend original alpha with blurred edges more strongly
     alpha_feathered = np.where(edge_blur > 0, 
-                               a_array * 0.9 + edge_blur * 0.1,  # Soften edges
+                               a_array * 0.8 + edge_blur * 0.2,  # More feathering
                                a_array)
     
-    # Apply overall slight blur to alpha for smoothness
-    alpha_final = cv2.GaussianBlur(alpha_feathered, (3, 3), 0.5)
+    # Apply overall blur to alpha for smoothness
+    alpha_final = cv2.GaussianBlur(alpha_feathered, (5, 5), 1.0)  # Stronger overall blur
     
     # Create new image with feathered alpha
     a_new = Image.fromarray(alpha_final.astype(np.uint8))
     return Image.merge('RGBA', (r, g, b, a_new))
 
-def composite_with_background_natural(image, background_color="#F0F0F0"):
-    """Natural composite with soft shadows and proper blending"""
+def composite_with_background_natural(image, background_color="#F5F2ED"):
+    """Ultra natural composite with warm background"""
     if image.mode == 'RGBA':
-        # Apply edge feathering first
+        # Apply strong edge feathering first
         image = add_natural_edge_feathering(image)
         
         # Create background
@@ -261,34 +261,34 @@ def composite_with_background_natural(image, background_color="#F0F0F0"):
         # Get alpha channel
         alpha = image.split()[3]
         
-        # Create multiple shadow layers for natural effect
-        shadow_layers = []
-        
-        # Layer 1: Soft contact shadow
+        # Create very soft shadows
         shadow_array = np.array(alpha, dtype=np.float32) / 255.0
-        shadow1 = cv2.GaussianBlur(shadow_array, (9, 9), 2)
-        shadow1 = (shadow1 * 0.15 * 255).astype(np.uint8)  # 15% opacity
         
-        # Layer 2: Medium shadow
-        shadow2 = cv2.GaussianBlur(shadow_array, (21, 21), 5)
-        shadow2 = (shadow2 * 0.08 * 255).astype(np.uint8)  # 8% opacity
+        # Multiple shadow layers for ultra-natural effect
+        # Layer 1: Very soft contact shadow
+        shadow1 = cv2.GaussianBlur(shadow_array, (11, 11), 3)
+        shadow1 = (shadow1 * 0.08 * 255).astype(np.uint8)  # Very subtle 8%
         
-        # Layer 3: Ambient shadow
-        shadow3 = cv2.GaussianBlur(shadow_array, (35, 35), 10)
-        shadow3 = (shadow3 * 0.05 * 255).astype(np.uint8)  # 5% opacity
+        # Layer 2: Diffuse shadow
+        shadow2 = cv2.GaussianBlur(shadow_array, (25, 25), 6)
+        shadow2 = (shadow2 * 0.05 * 255).astype(np.uint8)  # 5% opacity
+        
+        # Layer 3: Ambient occlusion
+        shadow3 = cv2.GaussianBlur(shadow_array, (45, 45), 12)
+        shadow3 = (shadow3 * 0.03 * 255).astype(np.uint8)  # Very subtle 3%
         
         # Composite shadows
         final_shadow = np.maximum(shadow1, np.maximum(shadow2, shadow3))
         
-        # Create shadow image with offset
+        # Create shadow image with minimal offset
         shadow_img = Image.fromarray(final_shadow, mode='L')
         shadow_offset = Image.new('L', image.size, 0)
         
-        # Very subtle offset (1-2 pixels)
+        # Almost no offset (0.5-1 pixel)
         shadow_offset.paste(shadow_img, (1, 1))
         
-        # Apply shadow to background
-        shadow_layer = Image.new('RGB', image.size, (180, 180, 180))  # Lighter shadow
+        # Apply shadow to background - warm shadow color
+        shadow_layer = Image.new('RGB', image.size, (220, 215, 210))  # Warm gray shadow
         background.paste(shadow_layer, mask=shadow_offset)
         
         # Final composite with proper alpha blending
@@ -544,7 +544,7 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
         return resized
 
 def process_enhancement(job):
-    """Main enhancement processing - NATURAL EDGE VERSION"""
+    """Main enhancement processing - NATURAL WARM BACKGROUND VERSION"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -553,8 +553,8 @@ def process_enhancement(job):
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
         
-        # Get background color if specified
-        background_color = job.get('background_color', '#F0F0F0')  # Slightly gray
+        # Get background color if specified - NEW DEFAULT COLOR
+        background_color = job.get('background_color', '#F5F2ED')  # Warm gray beige
         if isinstance(job.get('input'), dict):
             background_color = job.get('input', {}).get('background_color', background_color)
         
@@ -648,7 +648,7 @@ def process_enhancement(job):
         
         # STEP 3: BACKGROUND COMPOSITE (if transparent)
         if has_transparency and 'original_transparent' in locals():
-            logger.info("🖼️ STEP 3: Natural background compositing")
+            logger.info("🖼️ STEP 3: Natural warm background compositing")
             # Apply all enhancements to transparent version
             enhanced_transparent = original_transparent.copy()
             
@@ -683,7 +683,7 @@ def process_enhancement(job):
                 r2, g2, b2 = rgb_image.split()
                 enhanced_transparent = Image.merge('RGBA', (r2, g2, b2, a))
             
-            # Natural composite with soft shadows
+            # Natural composite with warm background
             image = composite_with_background_natural(enhanced_transparent, background_color)
             
             # Final touch after compositing
@@ -750,11 +750,13 @@ def process_enhancement(job):
                 "background_composite": has_transparency,
                 "background_removal": needs_background_removal,
                 "background_color": background_color,
-                "edge_processing": "Natural feathering",
-                "shadow_style": "Multi-layer soft shadow",
+                "background_style": "Warm gray beige gradient",
+                "edge_processing": "Strong natural feathering",
+                "shadow_style": "Ultra-soft multi-layer (8%/5%/3%)",
+                "shadow_color": "Warm gray (220,215,210)",
                 "composite_method": "Premultiplied alpha blending",
                 "rembg_settings": "Aggressive (270/10/10)",
-                "processing_order": "1.Background Removal → 2.Enhancement → 3.Natural Composite",
+                "processing_order": "1.Background Removal → 2.Enhancement → 3.Natural Warm Composite",
                 "quality": "95",
                 "expected_input": "2000x2600",
                 "output_size": "1200x1560"
