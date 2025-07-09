@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V10.0-Safe-Holes  
+# VERSION: V10.1-Consistent-Holes  
 ################################
 
-VERSION = "V10.0-Safe-Holes"
+VERSION = "V10.1-Consistent-Holes"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -150,7 +150,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def create_background(size, color="#D8D8D8", style="gradient"):
-    """Create natural gray background for jewelry - V10 BALANCED GRAY"""
+    """Create natural gray background for jewelry - V10.1 BALANCED GRAY"""
     width, height = size
     
     if style == "gradient":
@@ -176,13 +176,13 @@ def create_background(size, color="#D8D8D8", style="gradient"):
         return Image.new('RGB', size, color)
 
 def remove_background_with_replicate(image: Image.Image) -> Image.Image:
-    """Remove background using Replicate API - V10 CONSERVATIVE"""
+    """Remove background using Replicate API - V10.1 CONSERVATIVE"""
     if not USE_REPLICATE or not REPLICATE_CLIENT:
         logger.warning("Replicate not available for background removal")
         return image
     
     try:
-        logger.info("🔷 Removing background with Replicate (V10 conservative)")
+        logger.info("🔷 Removing background with Replicate (V10.1 conservative)")
         
         # Convert to base64
         buffered = BytesIO()
@@ -226,74 +226,62 @@ def remove_background_with_replicate(image: Image.Image) -> Image.Image:
         return image
 
 def ensure_ring_holes_transparent_safe(image: Image.Image) -> Image.Image:
-    """VERY SAFE ring hole detection - V10 MINIMAL PROCESSING"""
+    """IMPROVED ring hole detection - V10.1 CONSISTENT"""
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🔍 Safe hole detection started")
+    logger.info("🔍 Improved hole detection started")
     
     # Get alpha channel
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
-    original_alpha = alpha_array.copy()
     
     h, w = alpha_array.shape
     
-    # Only process if there's a clear hole already
-    # Count fully transparent pixels
-    transparent_pixels = np.sum(alpha_array < 10)
-    total_pixels = h * w
-    transparent_ratio = transparent_pixels / total_pixels
+    # Find semi-transparent areas that might be holes
+    # Use higher threshold to catch partial transparency
+    semi_transparent = (alpha_array < 100)  # Increased from 10
     
-    # If less than 0.5% transparent, probably no hole - skip processing
-    if transparent_ratio < 0.005:
-        logger.info("No significant holes detected, skipping processing")
-        return image
+    # Find connected components
+    num_labels, labels = cv2.connectedComponents(semi_transparent.astype(np.uint8))
     
-    # If more than 15% transparent, something's wrong - skip processing
-    if transparent_ratio > 0.15:
-        logger.warning("Too much transparency, skipping hole processing")
-        return image
+    # Process each potential hole
+    for label in range(1, num_labels):
+        hole_mask = (labels == label)
+        hole_size = np.sum(hole_mask)
+        
+        # Check if it's a reasonable hole size (not too big)
+        if hole_size < (h * w * 0.1):  # Less than 10% of image
+            # Get hole position
+            coords = np.where(hole_mask)
+            if len(coords[0]) > 0:
+                center_y = int(np.mean(coords[0]))
+                center_x = int(np.mean(coords[1]))
+                
+                # Check if hole is roughly in center area (typical ring hole position)
+                if (0.3 * h < center_y < 0.7 * h) and (0.3 * w < center_x < 0.7 * w):
+                    # Make this hole fully transparent
+                    alpha_array[hole_mask] = 0
+                    logger.info(f"Made hole at ({center_x}, {center_y}) fully transparent")
     
-    # Very minimal processing - just clean up edges of existing holes
-    # Find existing holes (very transparent areas)
-    existing_holes = (alpha_array < 10)
+    # No edge processing - keep sharp edges
     
-    # Apply minimal median blur to clean edges only
-    alpha_array = cv2.medianBlur(alpha_array, 3)
-    
-    # Restore non-hole areas to ensure ring is preserved
-    alpha_array[~existing_holes] = original_alpha[~existing_holes]
-    
-    logger.info(f"✅ Safe hole detection complete - {transparent_ratio*100:.2f}% transparent")
+    logger.info("✅ Improved hole detection complete")
     
     # Create new image with corrected alpha
     a_new = Image.fromarray(alpha_array)
     return Image.merge('RGBA', (r, g, b, a_new))
 
 def add_natural_edge_feathering(image: Image.Image) -> Image.Image:
-    """Add MINIMAL natural feathering to edges - V10 MINIMAL"""
-    if image.mode != 'RGBA':
-        return image
-    
-    # Get alpha channel
-    r, g, b, a = image.split()
-    
-    # Apply minimal Gaussian blur to alpha channel for natural edges
-    a_array = np.array(a, dtype=np.float32)
-    
-    # Very subtle blur - just enough for natural edges
-    alpha_blurred = cv2.GaussianBlur(a_array, (3, 3), 0.5)  # Reduced sigma
-    
-    # Create new image with slightly blurred alpha
-    a_new = Image.fromarray(alpha_blurred.astype(np.uint8))
-    return Image.merge('RGBA', (r, g, b, a_new))
+    """NO EDGE PROCESSING - V10.1 REMOVED"""
+    # Just return the image without any edge processing
+    return image
 
 def composite_with_light_gray_background(image, background_color="#D8D8D8"):
-    """Natural composite WITHOUT shadow - V10 BALANCED GRAY"""
+    """Natural composite WITHOUT shadow - V10.1 NO EDGE PROCESSING"""
     if image.mode == 'RGBA':
-        # Apply minimal edge feathering first
-        image = add_natural_edge_feathering(image)
+        # NO edge feathering - keep sharp edges
+        # image = add_natural_edge_feathering(image)  # REMOVED in V10.1
         
         # Create background
         background = create_background(image.size, background_color, style="gradient")
@@ -370,7 +358,7 @@ def apply_swinir_enhancement_after_resize(image: Image.Image) -> Image.Image:
         return image
 
 def enhance_cubic_details_simple(image: Image.Image) -> Image.Image:
-    """Enhanced cubic details with gentle sharpening - V10 GENTLE"""
+    """Enhanced cubic details with gentle sharpening - V10.1 GENTLE"""
     # Gentle contrast for better cubic visibility
     contrast = ImageEnhance.Contrast(image)
     image = contrast.enhance(1.08)  # Reduced from 1.10
@@ -414,7 +402,7 @@ def auto_white_balance_fast(image: Image.Image) -> Image.Image:
     return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
 
 def apply_center_spotlight(image: Image.Image, intensity: float = 0.025) -> Image.Image:
-    """Apply center spotlight - V10 REDUCED"""
+    """Apply center spotlight - V10.1 REDUCED"""
     width, height = image.size
     
     # Create spotlight mask more efficiently
@@ -431,7 +419,7 @@ def apply_center_spotlight(image: Image.Image, intensity: float = 0.025) -> Imag
     return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
 
 def apply_wedding_ring_enhancement_fast(image: Image.Image) -> Image.Image:
-    """Enhanced wedding ring processing with gentle cubic detail - V10 GENTLE"""
+    """Enhanced wedding ring processing with gentle cubic detail - V10.1 GENTLE"""
     # Gentle spotlight
     image = apply_center_spotlight(image, 0.020)  # Reduced from 0.025
     
@@ -449,7 +437,7 @@ def apply_wedding_ring_enhancement_fast(image: Image.Image) -> Image.Image:
     return image
 
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Optimized enhancement - 12% white overlay for ac_ (1차) - V10 REDUCED"""
+    """Optimized enhancement - 12% white overlay for ac_ (1차) - V10.1 REDUCED"""
     
     # Apply white overlay ONLY to ac_pattern
     if pattern_type == "ac_pattern":
@@ -543,7 +531,7 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
         return resized
 
 def process_enhancement(job):
-    """Main enhancement processing - V10 SAFE VERSION"""
+    """Main enhancement processing - V10.1 CONSISTENT VERSION"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -552,7 +540,7 @@ def process_enhancement(job):
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
         
-        # Fixed gray background - BALANCED V10
+        # Fixed gray background - BALANCED V10.1
         background_color = '#D8D8D8'  # Balanced gray
         
         if not image_data:
@@ -574,7 +562,7 @@ def process_enhancement(job):
         needs_background_removal = False
         
         if filename and filename.lower().endswith('.png'):
-            logger.info("📸 STEP 1: PNG detected - removing background with V10 conservative settings")
+            logger.info("📸 STEP 1: PNG detected - removing background with V10.1 conservative settings")
             image = remove_background_with_replicate(image)
             has_transparency = image.mode == 'RGBA'
             needs_background_removal = True
@@ -614,7 +602,7 @@ def process_enhancement(job):
         # Enhanced cubic details (gentle)
         image = enhance_cubic_details_simple(image)
         
-        # Gentle basic enhancement - V10
+        # Gentle basic enhancement - V10.1
         brightness = ImageEnhance.Brightness(image)
         image = brightness.enhance(1.08)  # Reduced from 1.12
         
@@ -638,7 +626,7 @@ def process_enhancement(job):
             except Exception as e:
                 logger.warning(f"SwinIR failed: {str(e)}")
         
-        # Gentle final sharpening - V10
+        # Gentle final sharpening - V10.1
         sharpness = ImageEnhance.Sharpness(image)
         image = sharpness.enhance(1.6)  # Reduced from 1.8
         
@@ -671,7 +659,7 @@ def process_enhancement(job):
                 
                 # Pattern-specific enhancement
                 if pattern_type == "ac_pattern":
-                    # 12% white overlay - V10
+                    # 12% white overlay - V10.1
                     white_overlay = 0.12  # Reduced
                     img_array = np.array(rgb_image, dtype=np.float32)
                     img_array = img_array * (1 - white_overlay) + 255 * white_overlay
@@ -708,7 +696,7 @@ def process_enhancement(job):
         if pattern_type == "ac_pattern":
             metrics = calculate_quality_metrics_fast(image)
             if metrics["brightness"] < 235:  # Lowered threshold
-                # Apply 15% white overlay as correction - V10
+                # Apply 15% white overlay as correction - V10.1
                 white_overlay = 0.15  # Reduced from 0.18
                 img_array = np.array(image, dtype=np.float32)
                 img_array = img_array * (1 - white_overlay) + 255 * white_overlay
@@ -751,11 +739,11 @@ def process_enhancement(job):
                 "background_style": "Balanced gray gradient (#D8D8D8)",
                 "gradient_edge_darkening": "6%",
                 "shadow": "REMOVED - No shadow",
-                "edge_processing": "Minimal feathering (3x3, sigma 0.5)",
+                "edge_processing": "REMOVED - Sharp edges only",
                 "composite_method": "Simple alpha blending",
                 "rembg_settings": "Conservative (240/50/8)",
-                "ring_hole_detection": "Minimal safe processing",
-                "hole_detection_details": "Only clean existing holes, skip if <0.5% or >15% transparent",
+                "ring_hole_detection": "Improved consistent detection",
+                "hole_detection_details": "Detect semi-transparent areas (<100), center area focus",
                 "processing_order": "1.Background Removal → 2.Gentle Enhancement → 3.Natural Composite",
                 "quality": "95",
                 "expected_input": "2000x2600",
