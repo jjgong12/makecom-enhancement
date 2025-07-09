@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V10.7-Delicate-Ring-Preservation  
+# VERSION: V11.0-Natural-Edge-Processing
 ################################
 
-VERSION = "V10.7-Delicate-Ring-Preservation"
+VERSION = "V11.0-Natural-Edge-Processing"
 
 # ===== REPLICATE INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -150,7 +150,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def create_background(size, color="#C8C8C8", style="gradient"):
-    """Create natural gray background for jewelry - V10.4 BALANCED"""
+    """Create natural gray background for jewelry"""
     width, height = size
     
     if style == "gradient":
@@ -175,274 +175,318 @@ def create_background(size, color="#C8C8C8", style="gradient"):
         # Simple solid color
         return Image.new('RGB', size, color)
 
-def remove_background_with_delicate_settings(image: Image.Image) -> Image.Image:
-    """Remove background with DELICATE settings for wedding rings - V10.7"""
+def multi_threshold_background_removal(image: Image.Image) -> Image.Image:
+    """Remove background with MULTI-THRESHOLD approach - V11.0"""
     try:
-        # Try local rembg FIRST with DELICATE settings
         from rembg import remove, new_session
         
-        logger.info("🔷 Removing background with BiRefNet - DELICATE settings for wedding rings")
+        logger.info("🔷 Multi-threshold background removal V11.0")
         
-        # Session caching for speed
-        if not hasattr(remove_background_with_delicate_settings, 'session'):
-            logger.info("Initializing BiRefNet-general session for delicate processing...")
-            # Use general model instead of lite for better quality
-            remove_background_with_delicate_settings.session = new_session('birefnet-general')
+        # Initialize session
+        if not hasattr(multi_threshold_background_removal, 'session'):
+            logger.info("Initializing BiRefNet-general session...")
+            multi_threshold_background_removal.session = new_session('birefnet-general')
         
         # Convert PIL Image to bytes
         buffered = BytesIO()
         image.save(buffered, format="PNG")
         buffered.seek(0)
+        img_data = buffered.getvalue()
         
-        # Remove background with DELICATE settings for rings
-        output = remove(
-            buffered.getvalue(), 
-            session=remove_background_with_delicate_settings.session,
-            alpha_matting=True,
-            alpha_matting_foreground_threshold=200,  # LOWERED from 240 - more inclusive
-            alpha_matting_background_threshold=80,   # RAISED from 50 - less aggressive
-            alpha_matting_erode_size=2              # REDUCED from 8 - minimal erosion
-        )
+        # Multi-threshold approach - try different thresholds
+        best_result = None
+        best_score = -1
         
-        # Convert result to PIL Image
-        result_image = Image.open(BytesIO(output))
+        threshold_configs = [
+            {"fg": 240, "bg": 50, "erode": 0},   # Very conservative
+            {"fg": 230, "bg": 60, "erode": 1},   # Conservative
+            {"fg": 220, "bg": 70, "erode": 1},   # Balanced
+            {"fg": 210, "bg": 80, "erode": 2},   # Standard
+            {"fg": 200, "bg": 90, "erode": 2},   # Aggressive
+        ]
         
-        # Apply ring protection
-        if result_image.mode == 'RGBA':
-            result_image = protect_wedding_ring_edges(result_image)
-            result_image = ensure_ring_holes_transparent_delicate(result_image)
-        
-        logger.info("✅ Background removal successful with delicate settings")
-        return result_image
-        
-    except Exception as e:
-        logger.error(f"BiRefNet failed, trying alternative methods: {e}")
-        
-        # Try alternative local model
-        try:
-            from rembg import remove, new_session
-            
-            logger.info("🔷 Trying u2netp model for better ring preservation")
-            
-            if not hasattr(remove_background_with_delicate_settings, 'u2netp_session'):
-                remove_background_with_delicate_settings.u2netp_session = new_session('u2netp')
-            
-            output = remove(
-                buffered.getvalue(),
-                session=remove_background_with_delicate_settings.u2netp_session,
-                alpha_matting=True,
-                alpha_matting_foreground_threshold=180,  # Even more inclusive
-                alpha_matting_background_threshold=100,  # Very conservative
-                alpha_matting_erode_size=1              # Minimal erosion
-            )
-            
-            result_image = Image.open(BytesIO(output))
-            
-            if result_image.mode == 'RGBA':
-                result_image = protect_wedding_ring_edges(result_image)
-                result_image = ensure_ring_holes_transparent_delicate(result_image)
-            
-            return result_image
-            
-        except Exception as e2:
-            logger.error(f"u2netp also failed: {e2}")
-        
-        # Fallback: Replicate method with DELICATE settings
-        if USE_REPLICATE and REPLICATE_CLIENT:
+        for config in threshold_configs:
             try:
-                logger.info("🔷 Fallback to Replicate rembg with delicate settings")
-                
-                # Convert to base64
-                buffered = BytesIO()
-                image.save(buffered, format="PNG")
-                buffered.seek(0)
-                img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-                img_data_url = f"data:image/png;base64,{img_base64}"
-                
-                # Use rembg model with DELICATE settings
-                output = REPLICATE_CLIENT.run(
-                    "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003",
-                    input={
-                        "image": img_data_url,
-                        "model": "u2netp",  # Better for detailed objects
-                        "alpha_matting": True,
-                        "alpha_matting_foreground_threshold": 180,  # More inclusive
-                        "alpha_matting_background_threshold": 100,   # Conservative
-                        "alpha_matting_erode_size": 2,              # Minimal
-                        "return_mask": False
-                    }
+                output = remove(
+                    img_data,
+                    session=multi_threshold_background_removal.session,
+                    alpha_matting=True,
+                    alpha_matting_foreground_threshold=config["fg"],
+                    alpha_matting_background_threshold=config["bg"],
+                    alpha_matting_erode_size=config["erode"]
                 )
                 
-                if output:
-                    if isinstance(output, str):
-                        response = requests.get(output)
-                        result_image = Image.open(BytesIO(response.content))
-                    else:
-                        result_image = Image.open(BytesIO(base64.b64decode(output)))
+                result_image = Image.open(BytesIO(output))
+                
+                # Evaluate result quality
+                if result_image.mode == 'RGBA':
+                    alpha = np.array(result_image.split()[3])
                     
-                    if result_image.mode == 'RGBA':
-                        result_image = protect_wedding_ring_edges(result_image)
-                        result_image = ensure_ring_holes_transparent_delicate(result_image)
+                    # Calculate score based on edge quality
+                    edge_quality = calculate_edge_quality(alpha)
+                    object_preservation = np.sum(alpha > 200) / alpha.size
                     
-                    return result_image
-            except Exception as e3:
-                logger.error(f"Replicate also failed: {e3}")
+                    score = edge_quality * 0.7 + object_preservation * 0.3
+                    
+                    logger.info(f"Config {config}: score={score:.3f}")
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_result = result_image
+                        
+            except Exception as e:
+                logger.warning(f"Threshold {config} failed: {e}")
+                continue
         
-        # Final fallback: return original
-        logger.warning("All background removal methods failed, returning original")
+        if best_result:
+            # Apply natural edge processing
+            best_result = apply_natural_edge_processing(best_result)
+            return best_result
+        else:
+            logger.warning("All thresholds failed, returning original")
+            return image
+            
+    except Exception as e:
+        logger.error(f"Multi-threshold removal failed: {e}")
         return image
 
-def protect_wedding_ring_edges(image: Image.Image) -> Image.Image:
-    """Protect wedding ring edges from erosion - NEW in V10.7"""
+def calculate_edge_quality(alpha_channel):
+    """Calculate edge quality score"""
+    # Detect edges using Sobel
+    edges = cv2.Sobel(alpha_channel, cv2.CV_64F, 1, 1, ksize=3)
+    edge_magnitude = np.abs(edges)
+    
+    # Good edges should be smooth and continuous
+    edge_smoothness = 1.0 - (np.std(edge_magnitude[edge_magnitude > 10]) / 255.0)
+    
+    return np.clip(edge_smoothness, 0, 1)
+
+def apply_natural_edge_processing(image: Image.Image) -> Image.Image:
+    """Apply natural edge processing to remove black outlines - V11.0"""
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🛡️ Protecting wedding ring edges")
+    logger.info("🎨 Applying natural edge processing")
     
-    # Get alpha channel
     r, g, b, a = image.split()
-    alpha_array = np.array(a, dtype=np.uint8)
+    alpha_array = np.array(a, dtype=np.float32)
     
-    # Detect ring edges (high gradient areas)
-    grad_x = cv2.Sobel(alpha_array, cv2.CV_64F, 1, 0, ksize=3)
-    grad_y = cv2.Sobel(alpha_array, cv2.CV_64F, 0, 1, ksize=3)
-    gradient_mag = np.sqrt(grad_x**2 + grad_y**2)
+    # 1. Edge detection
+    edges = cv2.Canny(alpha_array.astype(np.uint8), 50, 150)
+    edge_mask = edges > 0
     
-    # Find strong edges (likely ring boundaries)
-    strong_edges = gradient_mag > 50
+    # 2. Create feathered edge mask
+    kernel_sizes = [3, 5, 7, 9]
+    feathered_alpha = alpha_array.copy()
     
-    # Dilate edge areas to create protection zone
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    protection_zone = cv2.dilate(strong_edges.astype(np.uint8), kernel, iterations=2)
+    for size in kernel_sizes:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+        dilated_edge = cv2.dilate(edge_mask.astype(np.uint8), kernel, iterations=1)
+        
+        # Progressive feathering
+        blur_size = size * 2 - 1
+        edge_alpha = cv2.GaussianBlur(alpha_array, (blur_size, blur_size), size/2)
+        
+        # Blend based on distance from edge
+        weight = 1.0 - (size - 3) / 6.0
+        feathered_alpha[dilated_edge > 0] = (
+            feathered_alpha[dilated_edge > 0] * weight + 
+            edge_alpha[dilated_edge > 0] * (1 - weight)
+        )
     
-    # Ensure these areas remain opaque
-    alpha_array[protection_zone > 0] = np.maximum(alpha_array[protection_zone > 0], 200)
+    # 3. Remove dark pixels at edges
+    rgb_array = np.array(image.convert('RGB'))
+    brightness = np.mean(rgb_array, axis=2)
     
-    # Smooth the alpha channel slightly
-    alpha_array = cv2.GaussianBlur(alpha_array, (3, 3), 1.0)
+    # Find dark edge pixels
+    dark_edges = (edge_mask) & (brightness < 50) & (alpha_array > 100)
     
-    # Create new image with protected alpha
-    a_new = Image.fromarray(alpha_array)
+    # Fade out dark edges
+    if np.any(dark_edges):
+        feathered_alpha[dark_edges] *= 0.3
+    
+    # 4. Final smoothing
+    feathered_alpha = cv2.bilateralFilter(
+        feathered_alpha.astype(np.uint8), 9, 75, 75
+    ).astype(np.float32)
+    
+    # 5. Anti-aliasing
+    # Create sub-pixel accurate alpha
+    feathered_alpha = cv2.GaussianBlur(feathered_alpha, (3, 3), 0.5)
+    
+    # Create new image with processed alpha
+    a_new = Image.fromarray(feathered_alpha.astype(np.uint8))
     return Image.merge('RGBA', (r, g, b, a_new))
 
-def ensure_ring_holes_transparent_delicate(image: Image.Image) -> Image.Image:
-    """DELICATE ring hole detection - V10.7 for wedding rings"""
+def composite_with_natural_blend(image, background_color="#C8C8C8"):
+    """Natural composite with perfect edge blending - V11.0"""
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🔍 Delicate hole detection V10.7 started")
+    logger.info("🖼️ Natural blending V11.0")
     
-    # Get alpha channel
+    # Create background
+    background = create_background(image.size, background_color, style="gradient")
+    
+    # Get channels
+    r, g, b, a = image.split()
+    
+    # Convert to arrays
+    fg_array = np.array(image.convert('RGB'), dtype=np.float32)
+    bg_array = np.array(background, dtype=np.float32)
+    alpha_array = np.array(a, dtype=np.float32) / 255.0
+    
+    # Multi-stage edge softening
+    # Stage 1: Edge detection and expansion
+    edges = cv2.Canny((alpha_array * 255).astype(np.uint8), 50, 150)
+    edge_region = cv2.dilate(edges, np.ones((15, 15)), iterations=1) > 0
+    
+    # Stage 2: Progressive blur for edges
+    alpha_soft1 = cv2.GaussianBlur(alpha_array, (5, 5), 1.5)
+    alpha_soft2 = cv2.GaussianBlur(alpha_array, (9, 9), 3.0)
+    alpha_soft3 = cv2.GaussianBlur(alpha_array, (15, 15), 5.0)
+    
+    # Stage 3: Blend different softness levels
+    alpha_final = alpha_array.copy()
+    
+    # Apply progressive softening only to edge regions
+    edge_dist = cv2.distanceTransform(
+        (1 - edge_region).astype(np.uint8), 
+        cv2.DIST_L2, 5
+    )
+    edge_dist = np.clip(edge_dist / 10.0, 0, 1)  # Normalize to 0-1
+    
+    # Blend based on distance from edge
+    alpha_final = (
+        alpha_array * edge_dist +
+        alpha_soft1 * (1 - edge_dist) * 0.5 +
+        alpha_soft2 * (1 - edge_dist) * 0.3 +
+        alpha_soft3 * (1 - edge_dist) * 0.2
+    )
+    
+    # Stage 4: Color spill removal
+    # Remove any dark halos
+    for i in range(3):
+        # Detect dark regions near edges
+        dark_mask = (fg_array[:,:,i] < 30) & (edge_region)
+        if np.any(dark_mask):
+            # Replace dark pixels with nearby bright pixels
+            fg_array[dark_mask, i] = cv2.inpaint(
+                fg_array[:,:,i].astype(np.uint8),
+                dark_mask.astype(np.uint8),
+                3, cv2.INPAINT_NS
+            )[dark_mask]
+    
+    # Stage 5: Final composite with color correction
+    result = np.zeros_like(bg_array)
+    for i in range(3):
+        # Premultiplied alpha blending
+        result[:,:,i] = (
+            fg_array[:,:,i] * alpha_final + 
+            bg_array[:,:,i] * (1 - alpha_final)
+        )
+    
+    # Stage 6: Edge color correction
+    # Ensure edges match background better
+    edge_mask_soft = cv2.GaussianBlur(edges.astype(np.float32), (7, 7), 2.0) / 255.0
+    for i in range(3):
+        result[:,:,i] = (
+            result[:,:,i] * (1 - edge_mask_soft * 0.3) +
+            bg_array[:,:,i] * (edge_mask_soft * 0.3)
+        )
+    
+    return Image.fromarray(np.clip(result, 0, 255).astype(np.uint8))
+
+def ensure_ring_holes_transparent_multi_threshold(image: Image.Image) -> Image.Image:
+    """Multi-threshold hole detection for accuracy - V11.0"""
+    if image.mode != 'RGBA':
+        return image
+    
+    logger.info("🔍 Multi-threshold hole detection V11.0")
+    
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
     
     h, w = alpha_array.shape
     
-    # Create a copy for modifications
+    # Multi-threshold detection
+    hole_mask_combined = np.zeros_like(alpha_array, dtype=bool)
+    
+    # Try multiple thresholds
+    thresholds = range(10, 100, 10)  # 10, 20, 30, ..., 90
+    
+    for threshold in thresholds:
+        # Find potential holes at this threshold
+        potential_holes = alpha_array < threshold
+        
+        # Clean up noise
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        potential_holes = cv2.morphologyEx(
+            potential_holes.astype(np.uint8), 
+            cv2.MORPH_OPEN, kernel
+        )
+        
+        # Find connected components
+        num_labels, labels = cv2.connectedComponents(potential_holes)
+        
+        for label in range(1, num_labels):
+            component = (labels == label)
+            component_size = np.sum(component)
+            
+            # Size check
+            if component_size < 30 or component_size > (h * w * 0.1):
+                continue
+            
+            # Location check - must be internal
+            coords = np.where(component)
+            if len(coords[0]) == 0:
+                continue
+                
+            min_y, max_y = coords[0].min(), coords[0].max()
+            min_x, max_x = coords[1].min(), coords[1].max()
+            center_y = (min_y + max_y) // 2
+            center_x = (min_x + max_x) // 2
+            
+            # Check if it's inside (not at edges)
+            margin = 0.1
+            if not (margin * h < center_y < (1-margin) * h and 
+                    margin * w < center_x < (1-margin) * w):
+                continue
+            
+            # Shape check - should be roughly circular
+            width = max_x - min_x
+            height = max_y - min_y
+            aspect_ratio = width / height if height > 0 else 0
+            
+            if 0.5 < aspect_ratio < 2.0:  # Roughly circular
+                # Confidence check
+                avg_alpha = np.mean(alpha_array[component])
+                if avg_alpha < threshold * 0.8:  # High confidence
+                    hole_mask_combined |= component
+                    logger.info(f"Found hole at threshold {threshold}, center ({center_x}, {center_y})")
+    
+    # Apply detected holes
     alpha_modified = alpha_array.copy()
-    
-    # STAGE 1: Very careful hole detection
-    # Only look for very clear holes (very low alpha values)
-    hole_mask = np.zeros_like(alpha_array, dtype=bool)
-    
-    # Only very transparent areas
-    for threshold in [30, 50, 70]:
-        potential_holes = (alpha_array < threshold)
-        hole_mask = hole_mask | potential_holes
-    
-    # STAGE 2: Minimal morphological operations
-    kernel_tiny = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    
-    # Very gentle closing
-    hole_mask = cv2.morphologyEx(hole_mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel_tiny, iterations=1)
-    
-    # STAGE 3: Find connected components with strict criteria
-    num_labels, labels = cv2.connectedComponents(hole_mask)
-    
-    # STAGE 4: Only process very clear holes
-    holes_found = 0
-    for label in range(1, num_labels):
-        hole_candidate = (labels == label)
-        hole_size = np.sum(hole_candidate)
+    if np.any(hole_mask_combined):
+        # Make holes fully transparent with smooth edges
+        hole_mask_float = hole_mask_combined.astype(np.float32)
+        hole_mask_smooth = cv2.GaussianBlur(hole_mask_float, (5, 5), 1.0)
         
-        # Skip very small noise
-        if hole_size < 50:
-            continue
-            
-        # Get component properties
-        coords = np.where(hole_candidate)
-        if len(coords[0]) == 0:
-            continue
-            
-        min_y, max_y = coords[0].min(), coords[0].max()
-        min_x, max_x = coords[1].min(), coords[1].max()
-        center_y = (min_y + max_y) // 2
-        center_x = (min_x + max_x) // 2
-        
-        # Check if it's truly inside the ring (not at edges)
-        margin = 0.15  # 15% margin from edges
-        if not (margin * h < center_y < (1-margin) * h and margin * w < center_x < (1-margin) * w):
-            continue
-        
-        # Check average alpha value in the region
-        avg_alpha = np.mean(alpha_array[hole_candidate])
-        
-        # Only process if it's really transparent
-        if avg_alpha < 50:  # Very transparent
-            # Make it fully transparent but don't expand
-            alpha_modified[hole_candidate] = 0
-            holes_found += 1
-            logger.info(f"Found clear hole {holes_found} at ({center_x}, {center_y}), avg_alpha: {avg_alpha:.1f}")
+        alpha_modified = alpha_array * (1 - hole_mask_smooth)
     
-    logger.info(f"✅ Delicate hole detection complete - found {holes_found} holes")
-    
-    # Create new image with corrected alpha
-    a_new = Image.fromarray(alpha_modified)
+    # Create new image
+    a_new = Image.fromarray(alpha_modified.astype(np.uint8))
     return Image.merge('RGBA', (r, g, b, a_new))
 
-def composite_with_natural_edge(image, background_color="#C8C8C8"):
-    """Natural composite with soft edges - V10.4 BALANCED"""
-    if image.mode == 'RGBA':
-        # Create background
-        background = create_background(image.size, background_color, style="gradient")
-        
-        # Get channels
-        r, g, b, a = image.split()
-        
-        # Convert to arrays
-        fg_array = np.array(image.convert('RGB'), dtype=np.float32)
-        bg_array = np.array(background, dtype=np.float32)
-        alpha_array = np.array(a, dtype=np.float32) / 255.0
-        
-        # More aggressive edge softening for natural blend
-        alpha_soft = cv2.GaussianBlur(alpha_array, (7, 7), 2.0)  # Increased blur
-        
-        # Use more soft edge for smoother transition
-        alpha_final = alpha_array * 0.6 + alpha_soft * 0.4  # More soft blend
-        
-        # Apply additional feathering at edges
-        alpha_final = cv2.GaussianBlur(alpha_final, (3, 3), 1.0)
-        
-        # Simple alpha blending
-        for i in range(3):
-            bg_array[:,:,i] = fg_array[:,:,i] * alpha_final + bg_array[:,:,i] * (1 - alpha_final)
-        
-        # Convert back
-        result = Image.fromarray(bg_array.astype(np.uint8))
-        return result
-    else:
-        # Already has background
-        return image
-
 def apply_swinir_enhancement_after_resize(image: Image.Image) -> Image.Image:
-    """Apply SwinIR AFTER resize - NEW APPROACH"""
+    """Apply SwinIR AFTER resize"""
     if not USE_REPLICATE or not REPLICATE_CLIENT:
         return image
     
     try:
         width, height = image.size
         
-        # Only apply if image is already resized (smaller than original)
+        # Only apply if image is already resized
         if width > 1500 or height > 2000:
             logger.info(f"Skipping SwinIR - image too large: {width}x{height}")
             return image
@@ -456,15 +500,12 @@ def apply_swinir_enhancement_after_resize(image: Image.Image) -> Image.Image:
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         img_data_url = f"data:image/png;base64,{img_base64}"
         
-        logger.info("🔷 Applying SwinIR (post-resize)")
-        
-        # Use SwinIR with optimized settings
         output = REPLICATE_CLIENT.run(
             "jingyunliang/swinir:660d922d33153019e8c263a3bba265de882e7f4f70396546b6c9c8f9d47a021a",
             input={
                 "image": img_data_url,
                 "task_type": "Real-World Image Super-Resolution",
-                "scale": 1,  # Keep size, enhance quality only
+                "scale": 1,
                 "noise_level": 10,
                 "jpeg_quality": 50
             }
@@ -487,21 +528,21 @@ def apply_swinir_enhancement_after_resize(image: Image.Image) -> Image.Image:
         return image
 
 def enhance_cubic_details_simple(image: Image.Image) -> Image.Image:
-    """Enhanced cubic details with gentle sharpening - V10.4 GENTLE"""
+    """Enhanced cubic details with gentle sharpening"""
     # Gentle contrast for better cubic visibility
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.08)  # Reduced from 1.10
+    image = contrast.enhance(1.08)
     
     # Gentle detail enhancement
-    image = image.filter(ImageFilter.UnsharpMask(radius=0.5, percent=120, threshold=3))  # Reduced
+    image = image.filter(ImageFilter.UnsharpMask(radius=0.5, percent=120, threshold=3))
     
     # Subtle micro-contrast
     contrast2 = ImageEnhance.Contrast(image)
-    image = contrast2.enhance(1.03)  # Reduced from 1.04
+    image = contrast2.enhance(1.03)
     
     # Gentle sharpness pass
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.20)  # Reduced from 1.25
+    image = sharpness.enhance(1.20)
     
     return image
 
@@ -510,7 +551,7 @@ def auto_white_balance_fast(image: Image.Image) -> Image.Image:
     img_array = np.array(image, dtype=np.float32)
     
     # Simplified gray detection
-    gray_pixels = img_array[::10, ::10]  # Sample every 10th pixel for speed
+    gray_pixels = img_array[::10, ::10]  # Sample every 10th pixel
     gray_mask = (
         (np.abs(gray_pixels[:,:,0] - gray_pixels[:,:,1]) < 15) & 
         (np.abs(gray_pixels[:,:,1] - gray_pixels[:,:,2]) < 15) &
@@ -531,10 +572,9 @@ def auto_white_balance_fast(image: Image.Image) -> Image.Image:
     return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
 
 def apply_center_spotlight(image: Image.Image, intensity: float = 0.025) -> Image.Image:
-    """Apply center spotlight - V10.4 REDUCED"""
+    """Apply center spotlight"""
     width, height = image.size
     
-    # Create spotlight mask more efficiently
     y, x = np.ogrid[:height, :width]
     center_x, center_y = width / 2, height / 2
     distance = np.sqrt((x - center_x)**2 + (y - center_y)**2) / max(width, height)
@@ -548,30 +588,30 @@ def apply_center_spotlight(image: Image.Image, intensity: float = 0.025) -> Imag
     return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
 
 def apply_wedding_ring_enhancement_fast(image: Image.Image) -> Image.Image:
-    """Enhanced wedding ring processing with gentle cubic detail - V10.4 GENTLE"""
+    """Enhanced wedding ring processing"""
     # Gentle spotlight
-    image = apply_center_spotlight(image, 0.020)  # Reduced from 0.025
+    image = apply_center_spotlight(image, 0.020)
     
     # Gentle sharpness for cubic details
     sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.5)  # Reduced from 1.7
+    image = sharpness.enhance(1.5)
     
     # Gentle contrast
     contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.04)  # Reduced from 1.05
+    image = contrast.enhance(1.04)
     
     # Gentle multi-scale unsharp mask
-    image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=110, threshold=4))  # Reduced
+    image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=110, threshold=4))
     
     return image
 
 def apply_enhancement_optimized(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Optimized enhancement - 12% white overlay for ac_ (1차) - V10.4 REDUCED"""
+    """Optimized enhancement - 12% white overlay for ac_"""
     
     # Apply white overlay ONLY to ac_pattern
     if pattern_type == "ac_pattern":
-        # Unplated white - 12% white overlay - REDUCED
-        white_overlay = 0.12  # Reduced from 0.15
+        # Unplated white - 12% white overlay
+        white_overlay = 0.12
         img_array = np.array(image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
@@ -579,25 +619,25 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str) -> Image.
         
         # Minimal brightness for ac_
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.005)  # Very subtle
+        image = brightness.enhance(1.005)
         
         color = ImageEnhance.Color(image)
-        image = color.enhance(0.98)  # Slightly desaturated
+        image = color.enhance(0.98)
         
     else:
-        # All other patterns - gentle enhancement for gold colors
+        # All other patterns - gentle enhancement
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)  # Reduced from 1.12
+        image = brightness.enhance(1.08)
         
         color = ImageEnhance.Color(image)
         image = color.enhance(0.99)
         
         # Gentle sharpness
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.4)  # Reduced from 1.6
+        image = sharpness.enhance(1.4)
     
     # Gentle center spotlight
-    image = apply_center_spotlight(image, 0.025)  # Reduced from 0.035
+    image = apply_center_spotlight(image, 0.025)
     
     # Wedding ring enhancement
     image = apply_wedding_ring_enhancement_fast(image)
@@ -605,8 +645,7 @@ def apply_enhancement_optimized(image: Image.Image, pattern_type: str) -> Image.
     return image
 
 def calculate_quality_metrics_fast(image: Image.Image) -> dict:
-    """Fast quality metrics - Sample-based"""
-    # Sample every 20th pixel for speed
+    """Fast quality metrics"""
     img_array = np.array(image)[::20, ::20]
     
     r_avg = np.mean(img_array[:,:,0])
@@ -631,13 +670,13 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     img_ratio = width / height
     target_ratio = target_width / target_height
     
-    # Expected input is around 2000x2600 (ratio ~0.769)
+    # Expected input is around 2000x2600
     expected_ratio = 2000 / 2600
     
     logger.info(f"Input size: {width}x{height}, ratio: {img_ratio:.3f}")
     
     # If close to expected ratio, direct resize
-    if abs(img_ratio - expected_ratio) < 0.05:  # 5% tolerance
+    if abs(img_ratio - expected_ratio) < 0.05:
         logger.info("Direct resize - ratio matches expected")
         return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
     
@@ -667,7 +706,7 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     return resized
 
 def process_enhancement(job):
-    """Main enhancement processing - V10.7 with delicate ring preservation"""
+    """Main enhancement processing - V11.0 with natural edge processing"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     
     try:
@@ -676,8 +715,8 @@ def process_enhancement(job):
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
         
-        # Light gray background - BALANCED V10.4
-        background_color = '#C8C8C8'  # Darker gray for better contrast
+        # Light gray background
+        background_color = '#C8C8C8'
         
         if not image_data:
             return {
@@ -698,8 +737,8 @@ def process_enhancement(job):
         needs_background_removal = False
         
         if filename and filename.lower().endswith('.png'):
-            logger.info("📸 STEP 1: PNG detected - removing background with V10.7 delicate settings")
-            image = remove_background_with_delicate_settings(image)
+            logger.info("📸 STEP 1: PNG detected - multi-threshold background removal")
+            image = multi_threshold_background_removal(image)
             has_transparency = image.mode == 'RGBA'
             needs_background_removal = True
         
@@ -720,8 +759,8 @@ def process_enhancement(job):
         original_size = image.size
         logger.info(f"Original size: {original_size}")
         
-        # STEP 2: ENHANCEMENT (GENTLE)
-        logger.info("🎨 STEP 2: Applying gentle enhancements")
+        # STEP 2: ENHANCEMENT
+        logger.info("🎨 STEP 2: Applying enhancements")
         
         # Fast white balance
         image = auto_white_balance_fast(image)
@@ -735,15 +774,15 @@ def process_enhancement(job):
         
         logger.info(f"Pattern: {pattern_type}")
         
-        # Enhanced cubic details (gentle)
+        # Enhanced cubic details
         image = enhance_cubic_details_simple(image)
         
-        # Gentle basic enhancement - V10.4
+        # Basic enhancement
         brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)  # Reduced from 1.12
+        image = brightness.enhance(1.08)
         
         contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.05)  # Reduced from 1.06
+        image = contrast.enhance(1.05)
         
         # Apply pattern-specific enhancement
         image = apply_enhancement_optimized(image, pattern_type)
@@ -762,42 +801,43 @@ def process_enhancement(job):
             except Exception as e:
                 logger.warning(f"SwinIR failed: {str(e)}")
         
-        # Gentle final sharpening - V10.4
+        # Final sharpening
         sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.6)  # Reduced from 1.8
+        image = sharpness.enhance(1.6)
         
         # STEP 3: BACKGROUND COMPOSITE (if transparent)
         if has_transparency and 'original_transparent' in locals():
             logger.info(f"🖼️ STEP 3: Natural background compositing: {background_color}")
+            
             # Apply all enhancements to transparent version
             enhanced_transparent = original_transparent.copy()
             
-            # Resize transparent version with proper aspect ratio
+            # Resize transparent version
             enhanced_transparent = resize_to_target_dimensions(enhanced_transparent, 1200, 1560)
             
             # Apply enhancements to RGBA
             if enhanced_transparent.mode == 'RGBA':
-                # Delicate hole detection - V10.7
-                enhanced_transparent = ensure_ring_holes_transparent_delicate(enhanced_transparent)
+                # Multi-threshold hole detection
+                enhanced_transparent = ensure_ring_holes_transparent_multi_threshold(enhanced_transparent)
                 
                 # Split channels
                 r, g, b, a = enhanced_transparent.split()
                 rgb_image = Image.merge('RGB', (r, g, b))
                 
-                # Apply same gentle enhancements
+                # Apply same enhancements
                 rgb_image = auto_white_balance_fast(rgb_image)
                 rgb_image = enhance_cubic_details_simple(rgb_image)
                 brightness = ImageEnhance.Brightness(rgb_image)
-                rgb_image = brightness.enhance(1.08)  # Reduced
+                rgb_image = brightness.enhance(1.08)
                 contrast = ImageEnhance.Contrast(rgb_image)
-                rgb_image = contrast.enhance(1.05)  # Reduced
+                rgb_image = contrast.enhance(1.05)
                 sharpness = ImageEnhance.Sharpness(rgb_image)
-                rgb_image = sharpness.enhance(1.6)  # Reduced from 1.8
+                rgb_image = sharpness.enhance(1.6)
                 
                 # Pattern-specific enhancement
                 if pattern_type == "ac_pattern":
-                    # 12% white overlay - V10.4
-                    white_overlay = 0.12  # Reduced
+                    # 12% white overlay
+                    white_overlay = 0.12
                     img_array = np.array(rgb_image, dtype=np.float32)
                     img_array = img_array * (1 - white_overlay) + 255 * white_overlay
                     rgb_image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
@@ -806,12 +846,12 @@ def process_enhancement(job):
                 r2, g2, b2 = rgb_image.split()
                 enhanced_transparent = Image.merge('RGBA', (r2, g2, b2, a))
             
-            # Natural composite with soft edges
-            image = composite_with_natural_edge(enhanced_transparent, background_color)
+            # Natural composite with perfect edge blending
+            image = composite_with_natural_blend(enhanced_transparent, background_color)
             
             # Final touch after compositing
             sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.10)  # Very subtle
+            image = sharpness.enhance(1.10)
         
         # Save to base64
         buffered = BytesIO()
@@ -832,9 +872,9 @@ def process_enhancement(job):
         # Quality check for ac_pattern (2차 처리)
         if pattern_type == "ac_pattern":
             metrics = calculate_quality_metrics_fast(image)
-            if metrics["brightness"] < 235:  # Lowered threshold
-                # Apply 15% white overlay as correction - V10.4
-                white_overlay = 0.15  # Reduced from 0.18
+            if metrics["brightness"] < 235:
+                # Apply 15% white overlay as correction
+                white_overlay = 0.15
                 img_array = np.array(image, dtype=np.float32)
                 img_array = img_array * (1 - white_overlay) + 255 * white_overlay
                 img_array = np.clip(img_array, 0, 255)
@@ -875,28 +915,27 @@ def process_enhancement(job):
                 "background_color": background_color,
                 "background_style": "Natural gray (#C8C8C8)",
                 "gradient_edge_darkening": "5%",
-                "edge_processing": "Natural soft edge (60/40 blend + double feather)",
-                "composite_method": "Simple alpha blending",
-                "rembg_settings": "DELICATE settings for wedding rings",
-                "background_removal_models": [
-                    "birefnet-general (primary)",
-                    "u2netp (secondary)",
-                    "replicate u2netp (fallback)"
+                "edge_processing": "Natural multi-stage edge blending V11.0",
+                "composite_method": "Advanced natural blending with edge color correction",
+                "background_removal_method": "Multi-threshold approach",
+                "threshold_configs": "5 levels from 240/50 to 200/90",
+                "edge_quality_scoring": "Automatic best result selection",
+                "natural_edge_features": [
+                    "Multi-kernel feathering (3,5,7,9)",
+                    "Dark edge pixel removal",
+                    "Progressive alpha blending",
+                    "Edge color spill correction",
+                    "Anti-aliasing with sub-pixel accuracy",
+                    "Bilateral filtering for smoothness"
                 ],
-                "delicate_settings": {
-                    "foreground_threshold": "180-200 (lowered)",
-                    "background_threshold": "80-100 (raised)",
-                    "erode_size": "1-2 (minimal)"
-                },
-                "ring_protection": "Edge protection + gradient detection",
-                "hole_detection": "V10.7 Delicate - only very clear holes",
-                "hole_threshold": "avg_alpha < 50",
+                "hole_detection": "Multi-threshold (10-90 step 10)",
+                "hole_shape_check": "Aspect ratio 0.5-2.0",
                 "resize_method": "Aspect ratio aware with center crop",
-                "processing_order": "1.Delicate Background Removal → 2.Gentle Enhancement → 3.Natural Composite",
+                "processing_order": "1.Multi-threshold BG Removal → 2.Enhancement → 3.Natural Composite",
                 "quality": "95",
                 "expected_input": "2000x2600 (±30px tolerance)",
                 "output_size": "1200x1560",
-                "safety_features": "Wedding ring preservation priority"
+                "safety_features": "Wedding ring preservation with natural edges"
             }
         }
         
