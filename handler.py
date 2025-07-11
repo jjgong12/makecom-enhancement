@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V16.0-Optimized-Fast
+# VERSION: V16.1-With-Image-Order
 ################################
 
-VERSION = "V16.0-Optimized-Fast"
+VERSION = "V16.1-With-Image-Order"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -68,6 +68,57 @@ def extract_file_number(filename: str) -> str:
         return match.group(1).zfill(3)
     
     return None
+
+def extract_image_order(job, filename: str, file_number: str) -> int:
+    """Extract image order from various sources"""
+    image_order = None
+    
+    # Method 1: Direct from job data
+    if isinstance(job, dict):
+        image_order = job.get('image_order') or job.get('imageOrder') or job.get('order')
+        if image_order:
+            logger.info(f"📌 Image order from job data: {image_order}")
+    
+    # Method 2: From file number
+    if not image_order and file_number:
+        try:
+            num = int(file_number)
+            if 1 <= num <= 8:
+                image_order = num
+            elif num > 100:  # Handle 001, 002 format
+                # Extract last digit for 001-008
+                last_digit = num % 10
+                if 1 <= last_digit <= 8:
+                    image_order = last_digit
+                elif num == 100:  # Special case for 100
+                    image_order = 1
+        except:
+            pass
+    
+    # Method 3: From filename pattern
+    if not image_order and filename:
+        # Pattern 1: image_1.png, ring1.png, etc.
+        match = re.search(r'[_\-\s](\d)(?:\.|_|$)', filename)
+        if match:
+            num = int(match.group(1))
+            if 1 <= num <= 8:
+                image_order = num
+        
+        # Pattern 2: 001.png, 002.png at start of filename
+        if not image_order:
+            match = re.match(r'^(\d{3})', filename)
+            if match:
+                num = int(match.group(1))
+                if 1 <= num <= 8:
+                    image_order = num
+    
+    # Default to 1 if not found
+    if not image_order:
+        image_order = 1
+        logger.warning(f"⚠️ Could not determine image order, defaulting to 1")
+    
+    logger.info(f"📌 Final image order: {image_order} (from filename: {filename})")
+    return image_order
 
 def find_input_data_fast(data):
     """Find input data - OPTIMIZED"""
@@ -520,7 +571,7 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     return resized
 
 def process_enhancement(job):
-    """Main enhancement processing - V16.0 Optimized Fast"""
+    """Main enhancement processing - V16.1 with Image Order"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     start_time = time.time()
     
@@ -528,6 +579,9 @@ def process_enhancement(job):
         filename = find_filename_fast(job)
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
+        
+        # ===== Extract image order =====
+        image_order = extract_image_order(job, filename, file_number)
         
         background_color = '#E0DADC'
         
@@ -686,6 +740,7 @@ def process_enhancement(job):
             "output": {
                 "enhanced_image": enhanced_base64_no_padding,
                 "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",
+                "image_order": image_order,  # ← Added image order
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
                 "is_wedding_ring": True,
@@ -702,7 +757,8 @@ def process_enhancement(job):
                     "✅ Vectorized edge refinement",
                     "✅ Fast morphological operations",
                     "✅ White overlay verification with logging",
-                    "✅ Performance timing for each step"
+                    "✅ Performance timing for each step",
+                    "✅ Image order extraction for Figma automation"
                 ],
                 "background_removal_method": "U2Net with morphological refinement",
                 "processing_order": "1.U2Net → 2.Enhancement → 3.SwinIR → 4.Composite",
