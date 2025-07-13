@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V21-With-Special-Modes
+# VERSION: V22-Both-Text-Sections
 ################################
 
-VERSION = "V21-With-Special-Modes"
+VERSION = "V22-Both-Text-Sections"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -309,6 +309,32 @@ def create_design_point_section(text_content=None, width=1200):
     logger.info(f"DESIGN POINT section created: {width}x{total_height}")
     return section_img
 
+def create_both_text_sections(md_talk_content=None, design_point_content=None, width=1200):
+    """Create both MD TALK and DESIGN POINT sections in one image"""
+    logger.info("Creating both text sections in one image")
+    
+    # 각 섹션 생성
+    md_talk_img = create_md_talk_section(md_talk_content, width)
+    design_point_img = create_design_point_section(design_point_content, width)
+    
+    # 섹션 사이 간격
+    section_gap = 100
+    
+    # 전체 높이 계산
+    total_height = md_talk_img.height + section_gap + design_point_img.height
+    
+    # 결합된 이미지 생성
+    combined_img = Image.new('RGB', (width, total_height), '#FFFFFF')
+    
+    # MD TALK 붙이기
+    combined_img.paste(md_talk_img, (0, 0))
+    
+    # DESIGN POINT 붙이기
+    combined_img.paste(design_point_img, (0, md_talk_img.height + section_gap))
+    
+    logger.info(f"Both sections created: {width}x{total_height}")
+    return combined_img
+
 def extract_file_number(filename: str) -> str:
     """Extract number from filename"""
     if not filename:
@@ -421,7 +447,7 @@ def u2net_optimized_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net Background Removal V21")
+        logger.info("🔷 U2Net Background Removal V22")
         
         # Save image to buffer
         buffered = BytesIO()
@@ -704,21 +730,64 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     return resized
 
 def process_special_mode(job):
-    """Process special modes (MD TALK, DESIGN POINT)"""
+    """Process special modes (MD TALK, DESIGN POINT, BOTH)"""
     special_mode = job.get('special_mode', '')
     logger.info(f"Processing special mode: {special_mode}")
     
-    if special_mode == 'md_talk':
-        # MD TALK 섹션 생성
-        text_content = job.get('text_content', '') or job.get('claude_text', '')
+    # 두 텍스트 섹션을 동시에 생성하는 모드
+    if special_mode == 'both_text_sections':
+        # 여러 가능한 키에서 텍스트 찾기
+        md_talk_content = (job.get('md_talk_content') or 
+                          job.get('text_content_1') or 
+                          job.get('md_talk') or '')
         
-        # Claude API로 텍스트 생성 (이미지 없이)
-        if not text_content and job.get('generate_text'):
+        design_point_content = (job.get('design_point_content') or 
+                               job.get('text_content_2') or 
+                               job.get('design_point') or '')
+        
+        logger.info(f"MD TALK content: {md_talk_content[:50]}...")
+        logger.info(f"DESIGN POINT content: {design_point_content[:50]}...")
+        
+        # 기본값 설정
+        if not md_talk_content:
+            md_talk_content = "이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."
+        if not design_point_content:
+            design_point_content = "남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."
+        
+        # 두 섹션을 하나의 이미지로 생성
+        section_image = create_both_text_sections(md_talk_content, design_point_content)
+        
+        # base64로 변환
+        buffered = BytesIO()
+        section_image.save(buffered, format="PNG", optimize=False)
+        buffered.seek(0)
+        section_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        section_base64_no_padding = section_base64.rstrip('=')
+        
+        return {
+            "output": {
+                "enhanced_image": section_base64_no_padding,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
+                "section_type": "both_text_sections",
+                "sections_included": ["md_talk", "design_point"],
+                "final_size": list(section_image.size),
+                "version": VERSION,
+                "status": "success",
+                "format": "PNG",
+                "special_mode": special_mode
+            }
+        }
+    
+    # 기존 개별 모드들
+    elif special_mode == 'md_talk':
+        # MD TALK 섹션 생성
+        text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('md_talk', '')
+        
+        if not text_content:
             text_content = "이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."
         
         section_image = create_md_talk_section(text_content)
         
-        # base64로 변환
         buffered = BytesIO()
         section_image.save(buffered, format="PNG", optimize=False)
         buffered.seek(0)
@@ -740,15 +809,13 @@ def process_special_mode(job):
     
     elif special_mode == 'design_point':
         # DESIGN POINT 섹션 생성
-        text_content = job.get('text_content', '') or job.get('claude_text', '')
+        text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('design_point', '')
         
-        # Claude API로 텍스트 생성 (이미지 없이)
-        if not text_content and job.get('generate_text'):
-            text_content = "남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일 화려하면서도 고급스러운 반영을 표현합니다"
+        if not text_content:
+            text_content = "남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."
         
         section_image = create_design_point_section(text_content)
         
-        # base64로 변환
         buffered = BytesIO()
         section_image.save(buffered, format="PNG", optimize=False)
         buffered.seek(0)
@@ -778,7 +845,7 @@ def process_special_mode(job):
         }
 
 def process_enhancement(job):
-    """Main enhancement processing - V21 with Special Modes"""
+    """Main enhancement processing - V22 with Both Text Sections"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     start_time = time.time()
     
@@ -904,13 +971,14 @@ def process_enhancement(job):
                 "has_transparency": True,
                 "background_applied": False,
                 "format": "PNG",
-                "special_modes_available": ["md_talk", "design_point"],
+                "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
                 "optimization_features": [
                     "✅ Transparent PNG only (no background)",
                     "✅ Pattern-specific enhancement preserved",
                     "✅ AC: 12% white overlay",
                     "✅ AB: 5% white overlay + cool tone",
                     "✅ MD TALK & DESIGN POINT support",
+                    "✅ Both text sections in one image",
                     "✅ Ready for Figma overlay"
                 ],
                 "processing_order": "1.U2Net → 2.Enhancement → 3.SwinIR",
