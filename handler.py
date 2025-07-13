@@ -662,12 +662,56 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     return resized
 
 def process_special_mode(job):
-    """Process special modes (MD TALK, DESIGN POINT)"""
+    """Process special modes (MD TALK, DESIGN POINT, BOTH)"""
     special_mode = job.get('special_mode', '')
     logger.info(f"Processing special mode: {special_mode}")
     
+    # BOTH TEXT SECTIONS - NEW!
+    if special_mode == 'both_text_sections':
+        md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or "기본 MD TALK 텍스트"
+        design_point_text = job.get('design_point_content', '') or job.get('design_point', '') or "기본 DESIGN POINT 텍스트"
+        
+        logger.info(f"Creating both sections - MD TALK: {md_talk_text[:50]}...")
+        logger.info(f"Creating both sections - DESIGN POINT: {design_point_text[:50]}...")
+        
+        # Create both sections
+        md_section = create_md_talk_section(md_talk_text)
+        design_section = create_design_point_section(design_point_text)
+        
+        # Combine vertically
+        total_width = 1200
+        total_height = md_section.height + design_section.height
+        
+        combined = Image.new('RGB', (total_width, total_height), '#FFFFFF')
+        combined.paste(md_section, (0, 0))
+        combined.paste(design_section, (0, md_section.height))
+        
+        # Convert to base64
+        buffered = BytesIO()
+        combined.save(buffered, format="PNG", optimize=False)
+        buffered.seek(0)
+        combined_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        combined_base64_no_padding = combined_base64.rstrip('=')
+        
+        return {
+            "output": {
+                "enhanced_image": combined_base64_no_padding,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{combined_base64_no_padding}",
+                "section_type": "both_text_sections",
+                "filename": "text_sections.png",
+                "final_size": list(combined.size),
+                "md_talk_height": md_section.height,
+                "design_point_height": design_section.height,
+                "version": VERSION,
+                "status": "success",
+                "format": "PNG",
+                "special_mode": special_mode,
+                "sections_included": ["MD_TALK", "DESIGN_POINT"]
+            }
+        }
+    
     # MD TALK section
-    if special_mode == 'md_talk':
+    elif special_mode == 'md_talk':
         text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('md_talk', '')
         
         if not text_content:
@@ -738,6 +782,7 @@ def process_special_mode(job):
 def process_enhancement(job):
     """Main enhancement processing - V24 with Fixed File Numbers"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
+    logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")  # Log first 500 chars
     start_time = time.time()
     
     try:
@@ -864,7 +909,7 @@ def process_enhancement(job):
                 "has_transparency": True,
                 "background_applied": False,
                 "format": "PNG",
-                "special_modes_available": ["md_talk", "design_point"],
+                "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
                 "file_number_info": {
                     "001-003": "Enhancement",
                     "004": "MD TALK",
@@ -880,6 +925,7 @@ def process_enhancement(job):
                     "✅ AC: 12% white overlay",
                     "✅ AB: 5% white overlay + cool tone",
                     "✅ MD TALK (004) & DESIGN POINT (008) support",
+                    "✅ BOTH TEXT SECTIONS support added",
                     "✅ Ready for Figma overlay"
                 ],
                 "processing_order": "1.U2Net → 2.Enhancement → 3.SwinIR",
@@ -909,7 +955,19 @@ def process_enhancement(job):
 
 def handler(event):
     """RunPod handler function"""
-    return process_enhancement(event)
+    logger.info(f"Handler received event type: {type(event)}")
+    logger.info(f"Handler received event: {json.dumps(event, indent=2)[:500]}...")
+    
+    # Handle different event structures
+    if isinstance(event, dict):
+        if 'input' in event:
+            job = event['input']
+        else:
+            job = event
+    else:
+        job = event
+    
+    return process_enhancement(job)
 
 # RunPod handler
 runpod.serverless.start({"handler": handler})
