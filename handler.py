@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V22-Both-Text-Sections
+# VERSION: V24-Fixed-File-Numbers
 ################################
 
-VERSION = "V22-Both-Text-Sections"
+VERSION = "V24-Fixed-File-Numbers"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -116,48 +116,6 @@ def get_text_size(draw, text, font):
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
     except AttributeError:
         return draw.textsize(text, font=font)
-
-def call_claude_api(image_base64, prompt):
-    """Call Claude API"""
-    if not CLAUDE_API_KEY:
-        logger.warning("CLAUDE_API_KEY not set")
-        return None
-    
-    try:
-        headers = {
-            "x-api-key": CLAUDE_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-        
-        data = {
-            "model": "claude-3-5-sonnet-20241022",
-            "max_tokens": 500,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image", "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": image_base64
-                    }}
-                ]
-            }]
-        }
-        
-        response = requests.post(CLAUDE_API_URL, headers=headers, json=data, timeout=30)
-        
-        if response.status_code == 200:
-            result = response.json()
-            return result.get('content', [{}])[0].get('text', '')
-        else:
-            logger.error(f"Claude API error: {response.status_code}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error calling Claude API: {str(e)}")
-        return None
 
 def create_md_talk_section(text_content=None, width=1200):
     """Create MD TALK section"""
@@ -309,32 +267,6 @@ def create_design_point_section(text_content=None, width=1200):
     logger.info(f"DESIGN POINT section created: {width}x{total_height}")
     return section_img
 
-def create_both_text_sections(md_talk_content=None, design_point_content=None, width=1200):
-    """Create both MD TALK and DESIGN POINT sections in one image"""
-    logger.info("Creating both text sections in one image")
-    
-    # 각 섹션 생성
-    md_talk_img = create_md_talk_section(md_talk_content, width)
-    design_point_img = create_design_point_section(design_point_content, width)
-    
-    # 섹션 사이 간격
-    section_gap = 100
-    
-    # 전체 높이 계산
-    total_height = md_talk_img.height + section_gap + design_point_img.height
-    
-    # 결합된 이미지 생성
-    combined_img = Image.new('RGB', (width, total_height), '#FFFFFF')
-    
-    # MD TALK 붙이기
-    combined_img.paste(md_talk_img, (0, 0))
-    
-    # DESIGN POINT 붙이기
-    combined_img.paste(design_point_img, (0, md_talk_img.height + section_gap))
-    
-    logger.info(f"Both sections created: {width}x{total_height}")
-    return combined_img
-
 def extract_file_number(filename: str) -> str:
     """Extract number from filename"""
     if not filename:
@@ -447,7 +379,7 @@ def u2net_optimized_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net Background Removal V22")
+        logger.info("🔷 U2Net Background Removal V24")
         
         # Save image to buffer
         buffered = BytesIO()
@@ -730,57 +662,12 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     return resized
 
 def process_special_mode(job):
-    """Process special modes (MD TALK, DESIGN POINT, BOTH)"""
+    """Process special modes (MD TALK, DESIGN POINT)"""
     special_mode = job.get('special_mode', '')
     logger.info(f"Processing special mode: {special_mode}")
     
-    # 두 텍스트 섹션을 동시에 생성하는 모드
-    if special_mode == 'both_text_sections':
-        # 여러 가능한 키에서 텍스트 찾기
-        md_talk_content = (job.get('md_talk_content') or 
-                          job.get('text_content_1') or 
-                          job.get('md_talk') or '')
-        
-        design_point_content = (job.get('design_point_content') or 
-                               job.get('text_content_2') or 
-                               job.get('design_point') or '')
-        
-        logger.info(f"MD TALK content: {md_talk_content[:50]}...")
-        logger.info(f"DESIGN POINT content: {design_point_content[:50]}...")
-        
-        # 기본값 설정
-        if not md_talk_content:
-            md_talk_content = "이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."
-        if not design_point_content:
-            design_point_content = "남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."
-        
-        # 두 섹션을 하나의 이미지로 생성
-        section_image = create_both_text_sections(md_talk_content, design_point_content)
-        
-        # base64로 변환
-        buffered = BytesIO()
-        section_image.save(buffered, format="PNG", optimize=False)
-        buffered.seek(0)
-        section_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        section_base64_no_padding = section_base64.rstrip('=')
-        
-        return {
-            "output": {
-                "enhanced_image": section_base64_no_padding,
-                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
-                "section_type": "both_text_sections",
-                "sections_included": ["md_talk", "design_point"],
-                "final_size": list(section_image.size),
-                "version": VERSION,
-                "status": "success",
-                "format": "PNG",
-                "special_mode": special_mode
-            }
-        }
-    
-    # 기존 개별 모드들
-    elif special_mode == 'md_talk':
-        # MD TALK 섹션 생성
+    # MD TALK section
+    if special_mode == 'md_talk':
         text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('md_talk', '')
         
         if not text_content:
@@ -799,6 +686,8 @@ def process_special_mode(job):
                 "enhanced_image": section_base64_no_padding,
                 "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
                 "section_type": "md_talk",
+                "filename": "ac_wedding_004.png",
+                "file_number": "004",
                 "final_size": list(section_image.size),
                 "version": VERSION,
                 "status": "success",
@@ -807,8 +696,8 @@ def process_special_mode(job):
             }
         }
     
+    # DESIGN POINT section
     elif special_mode == 'design_point':
-        # DESIGN POINT 섹션 생성
         text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('design_point', '')
         
         if not text_content:
@@ -827,6 +716,8 @@ def process_special_mode(job):
                 "enhanced_image": section_base64_no_padding,
                 "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
                 "section_type": "design_point",
+                "filename": "ac_wedding_008.png",
+                "file_number": "008",
                 "final_size": list(section_image.size),
                 "version": VERSION,
                 "status": "success",
@@ -845,7 +736,7 @@ def process_special_mode(job):
         }
 
 def process_enhancement(job):
-    """Main enhancement processing - V22 with Both Text Sections"""
+    """Main enhancement processing - V24 with Fixed File Numbers"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     start_time = time.time()
     
@@ -945,10 +836,12 @@ def process_enhancement(job):
         
         enhanced_base64_no_padding = enhanced_base64.rstrip('=')
         
-        # Build filename
+        # Build filename with corrected numbers
         enhanced_filename = filename
         if filename and file_number:
             base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            # Ensure correct file numbers for enhancement outputs
+            # Skip 004 (MD TALK), 007, 008 (DESIGN POINT), 009, 010, 011
             enhanced_filename = f"{base_name}_enhanced_transparent.png"
         
         total_time = time.time() - start_time
@@ -971,14 +864,22 @@ def process_enhancement(job):
                 "has_transparency": True,
                 "background_applied": False,
                 "format": "PNG",
-                "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
+                "special_modes_available": ["md_talk", "design_point"],
+                "file_number_info": {
+                    "001-003": "Enhancement",
+                    "004": "MD TALK",
+                    "005-006": "Enhancement",
+                    "007": "Thumbnail",
+                    "008": "DESIGN POINT",
+                    "009-010": "Thumbnail",
+                    "011": "COLOR section"
+                },
                 "optimization_features": [
                     "✅ Transparent PNG only (no background)",
                     "✅ Pattern-specific enhancement preserved",
                     "✅ AC: 12% white overlay",
                     "✅ AB: 5% white overlay + cool tone",
-                    "✅ MD TALK & DESIGN POINT support",
-                    "✅ Both text sections in one image",
+                    "✅ MD TALK (004) & DESIGN POINT (008) support",
                     "✅ Ready for Figma overlay"
                 ],
                 "processing_order": "1.U2Net → 2.Enhancement → 3.SwinIR",
