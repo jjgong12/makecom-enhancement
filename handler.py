@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V18.1-Fixed-BG-Removal
+# VERSION: V20-Transparent-Only
 ################################
 
-VERSION = "V18.1-Fixed-BG-Removal"
+VERSION = "V20-Transparent-Only"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -43,7 +43,6 @@ def init_rembg_session():
     if REMBG_SESSION is None:
         try:
             from rembg import new_session
-            # Use U2Net for faster processing
             REMBG_SESSION = new_session('u2net')
             logger.info("✅ U2Net session initialized for faster processing")
         except Exception as e:
@@ -155,27 +154,6 @@ def detect_pattern_type(filename: str) -> str:
     else:
         return "other"
 
-def create_background(size, color="#E0DADC", style="gradient"):
-    """Create natural gray background"""
-    width, height = size
-    
-    if style == "gradient":
-        background = Image.new('RGB', size, color)
-        bg_array = np.array(background, dtype=np.float32)
-        
-        y, x = np.ogrid[:height, :width]
-        center_x, center_y = width / 2, height / 2
-        distance = np.sqrt((x - center_x)**2 + (y - center_y)**2) / max(width, height)
-        
-        gradient = 1 - (distance * 0.05)
-        gradient = np.clip(gradient, 0.95, 1.0)
-        
-        bg_array *= gradient[:, :, np.newaxis]
-        
-        return Image.fromarray(bg_array.astype(np.uint8))
-    else:
-        return Image.new('RGB', size, color)
-
 def u2net_optimized_removal(image: Image.Image) -> Image.Image:
     """SIMPLIFIED U2Net background removal"""
     try:
@@ -187,7 +165,7 @@ def u2net_optimized_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net Background Removal V18.1 - Simplified")
+        logger.info("🔷 U2Net Background Removal V20 - Transparent Only")
         
         # Save image to buffer
         buffered = BytesIO()
@@ -231,7 +209,7 @@ def u2net_optimized_removal(image: Image.Image) -> Image.Image:
                 largest_label = np.argmax(sizes) + 1
                 alpha_array = np.where(labels == largest_label, alpha_array, 0)
         
-        logger.info("✅ Background removal complete")
+        logger.info("✅ Background removal complete - Keeping transparency")
         
         a_new = Image.fromarray(alpha_array)
         return Image.merge('RGBA', (r, g, b, a_new))
@@ -245,7 +223,7 @@ def ensure_ring_holes_transparent_fast(image: Image.Image) -> Image.Image:
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🔍 Fast Ring Hole Detection V18.1")
+    logger.info("🔍 Fast Ring Hole Detection V20")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -295,17 +273,26 @@ def ensure_ring_holes_transparent_fast(image: Image.Image) -> Image.Image:
     a_new = Image.fromarray(alpha_array.astype(np.uint8))
     return Image.merge('RGBA', (r, g, b, a_new))
 
-def apply_swinir_enhancement(image: Image.Image) -> Image.Image:
-    """Apply SwinIR enhancement - ALWAYS USED"""
+def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
+    """Apply SwinIR enhancement while preserving transparency"""
     if not REPLICATE_CLIENT:
         logger.warning("SwinIR skipped - no Replicate client")
         return image
     
     try:
-        logger.info("🎨 Applying SwinIR enhancement")
+        logger.info("🎨 Applying SwinIR enhancement with transparency")
+        
+        # 알파 채널 분리
+        if image.mode == 'RGBA':
+            r, g, b, a = image.split()
+            rgb_image = Image.merge('RGB', (r, g, b))
+            has_alpha = True
+        else:
+            rgb_image = image
+            has_alpha = False
         
         buffered = BytesIO()
-        image.save(buffered, format="PNG", optimize=False)
+        rgb_image.save(buffered, format="PNG", optimize=False)
         buffered.seek(0)
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         img_data_url = f"data:image/png;base64,{img_base64}"
@@ -328,7 +315,12 @@ def apply_swinir_enhancement(image: Image.Image) -> Image.Image:
             else:
                 enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
             
-            logger.info("✅ SwinIR enhancement successful")
+            # 알파 채널 재결합
+            if has_alpha:
+                r2, g2, b2 = enhanced_image.split()
+                enhanced_image = Image.merge('RGBA', (r2, g2, b2, a))
+            
+            logger.info("✅ SwinIR enhancement successful with transparency")
             return enhanced_image
         else:
             return image
@@ -337,204 +329,95 @@ def apply_swinir_enhancement(image: Image.Image) -> Image.Image:
         logger.warning(f"SwinIR error: {str(e)}")
         return image
 
-def composite_with_natural_blend(image, background_color="#E0DADC"):
-    """SIMPLIFIED natural composite with edge blending"""
+def enhance_with_alpha(image: Image.Image, enhancement_func):
+    """Apply enhancement to RGB while preserving alpha"""
+    if image.mode == 'RGBA':
+        r, g, b, a = image.split()
+        rgb_image = Image.merge('RGB', (r, g, b))
+        enhanced_rgb = enhancement_func(rgb_image)
+        r2, g2, b2 = enhanced_rgb.split()
+        return Image.merge('RGBA', (r2, g2, b2, a))
+    else:
+        return enhancement_func(image)
+
+def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
+    """Apply pattern enhancement while preserving transparency"""
     if image.mode != 'RGBA':
-        return image
+        image = image.convert('RGBA')
     
-    logger.info("🎨 Simplified background composite")
-    
-    # Create background
-    background = create_background(image.size, background_color, style="gradient")
-    
-    # Get alpha channel
     r, g, b, a = image.split()
-    alpha_array = np.array(a, dtype=np.float32) / 255.0
+    rgb_image = Image.merge('RGB', (r, g, b))
     
-    # Simple edge softening
-    alpha_soft = cv2.GaussianBlur(alpha_array, (3, 3), 1.0)
-    
-    # Find edges
-    edges = cv2.Canny((alpha_array * 255).astype(np.uint8), 50, 150)
-    edge_mask = cv2.dilate(edges, np.ones((5, 5)), iterations=1) > 0
-    
-    # Blend original and soft alpha at edges only
-    alpha_final = alpha_array.copy()
-    alpha_final[edge_mask] = alpha_soft[edge_mask]
-    
-    # Convert images to arrays
-    fg_array = np.array(image.convert('RGB'), dtype=np.float32)
-    bg_array = np.array(background, dtype=np.float32)
-    
-    # Simple composite
-    result = fg_array * alpha_final[:,:,np.newaxis] + bg_array * (1 - alpha_final[:,:,np.newaxis])
-    
-    return Image.fromarray(np.clip(result, 0, 255).astype(np.uint8))
-
-def enhance_cubic_details_simple(image: Image.Image) -> Image.Image:
-    """Enhanced cubic details"""
-    contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.08)
-    
-    image = image.filter(ImageFilter.UnsharpMask(radius=0.5, percent=120, threshold=3))
-    
-    contrast2 = ImageEnhance.Contrast(image)
-    image = contrast2.enhance(1.03)
-    
-    sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.20)
-    
-    return image
-
-def auto_white_balance_fast(image: Image.Image) -> Image.Image:
-    """Fast white balance"""
-    img_array = np.array(image, dtype=np.float32)
-    
-    gray_pixels = img_array[::15, ::15]
-    gray_mask = (
-        (np.abs(gray_pixels[:,:,0] - gray_pixels[:,:,1]) < 15) & 
-        (np.abs(gray_pixels[:,:,1] - gray_pixels[:,:,2]) < 15) &
-        (gray_pixels[:,:,0] > 180)
-    )
-    
-    if np.sum(gray_mask) > 10:
-        r_avg = np.mean(gray_pixels[gray_mask, 0])
-        g_avg = np.mean(gray_pixels[gray_mask, 1])
-        b_avg = np.mean(gray_pixels[gray_mask, 2])
-        
-        gray_avg = (r_avg + g_avg + b_avg) / 3
-        
-        img_array[:,:,0] *= (gray_avg / r_avg) if r_avg > 0 else 1
-        img_array[:,:,1] *= (gray_avg / g_avg) if g_avg > 0 else 1
-        img_array[:,:,2] *= (gray_avg / b_avg) if b_avg > 0 else 1
-    
-    return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-
-def apply_center_spotlight(image: Image.Image, intensity: float = 0.025) -> Image.Image:
-    """Apply center spotlight"""
-    width, height = image.size
-    
-    y, x = np.ogrid[:height, :width]
-    center_x, center_y = width / 2, height / 2
-    distance = np.sqrt((x - center_x)**2 + (y - center_y)**2) / max(width, height)
-    
-    spotlight_mask = 1 + intensity * np.exp(-distance**2 * 3)
-    spotlight_mask = np.clip(spotlight_mask, 1.0, 1.0 + intensity)
-    
-    img_array = np.array(image, dtype=np.float32)
-    img_array *= spotlight_mask[:, :, np.newaxis]
-    
-    return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-
-def apply_wedding_ring_enhancement_fast(image: Image.Image) -> Image.Image:
-    """Enhanced wedding ring processing"""
-    image = apply_center_spotlight(image, 0.020)
-    
-    sharpness = ImageEnhance.Sharpness(image)
-    image = sharpness.enhance(1.5)
-    
-    contrast = ImageEnhance.Contrast(image)
-    image = contrast.enhance(1.04)
-    
-    image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=110, threshold=4))
-    
-    return image
-
-def apply_enhancement_consistent(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Consistent enhancement with white overlay verification - Updated with AB pattern cool tone"""
-    
+    # Apply enhancements based on pattern type
     if pattern_type == "ac_pattern":
-        # Calculate brightness before overlay
-        metrics_before = calculate_quality_metrics_fast(image)
-        logger.info(f"🔍 AC Pattern - Brightness before overlay: {metrics_before['brightness']:.2f}")
-        
+        logger.info("🔍 AC Pattern - Applying 12% white overlay")
         # Apply 12% white overlay
         white_overlay = 0.12
-        img_array = np.array(image, dtype=np.float32)
+        img_array = np.array(rgb_image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
-        image = Image.fromarray(img_array.astype(np.uint8))
+        rgb_image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Verify overlay was applied
-        metrics_after = calculate_quality_metrics_fast(image)
-        logger.info(f"✅ AC Pattern - Brightness after 12% overlay: {metrics_after['brightness']:.2f} (increased by {metrics_after['brightness'] - metrics_before['brightness']:.2f})")
+        brightness = ImageEnhance.Brightness(rgb_image)
+        rgb_image = brightness.enhance(1.005)
         
-        brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.005)
+        color = ImageEnhance.Color(rgb_image)
+        rgb_image = color.enhance(0.98)
         
-        color = ImageEnhance.Color(image)
-        image = color.enhance(0.98)
+        logger.info("✅ AC Pattern enhancement applied")
     
     elif pattern_type == "ab_pattern":
-        # Calculate brightness before overlay
-        metrics_before = calculate_quality_metrics_fast(image)
-        logger.info(f"🔍 AB Pattern - Brightness before overlay: {metrics_before['brightness']:.2f}")
-        
-        # Apply 5% white overlay
+        logger.info("🔍 AB Pattern - Applying 5% white overlay and cool tone")
+        # Apply 5% white overlay and cool tone
         white_overlay = 0.05
-        img_array = np.array(image, dtype=np.float32)
+        img_array = np.array(rgb_image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
-        img_array = np.clip(img_array, 0, 255)
-        image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Verify overlay was applied
-        metrics_after = calculate_quality_metrics_fast(image)
-        logger.info(f"✅ AB Pattern - Brightness after 5% overlay: {metrics_after['brightness']:.2f} (increased by {metrics_after['brightness'] - metrics_before['brightness']:.2f})")
+        # Cool tone adjustment
+        img_array[:,:,0] *= 0.96  # Reduce red
+        img_array[:,:,1] *= 0.98  # Reduce green
+        img_array[:,:,2] *= 1.02  # Increase blue
         
-        # Cool tone adjustment for AB pattern
-        logger.info("❄️ AB Pattern - Applying cool tone adjustment")
-        img_array = np.array(image, dtype=np.float32)
-        
-        # Shift to cool tone by adjusting RGB channels
-        img_array[:,:,0] *= 0.96  # Reduce red slightly
-        img_array[:,:,1] *= 0.98  # Reduce green very slightly
-        img_array[:,:,2] *= 1.02  # Increase blue slightly
-        
-        # Apply subtle cool color grading
-        cool_overlay = np.array([240, 248, 255], dtype=np.float32)  # Alice blue tone
+        # Cool color grading
+        cool_overlay = np.array([240, 248, 255], dtype=np.float32)
         img_array = img_array * 0.95 + cool_overlay * 0.05
         
         img_array = np.clip(img_array, 0, 255)
-        image = Image.fromarray(img_array.astype(np.uint8))
+        rgb_image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Reduce saturation for cooler look
-        color = ImageEnhance.Color(image)
-        image = color.enhance(0.88)  # Reduce saturation by 12%
+        color = ImageEnhance.Color(rgb_image)
+        rgb_image = color.enhance(0.88)
         
-        brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.005)
+        brightness = ImageEnhance.Brightness(rgb_image)
+        rgb_image = brightness.enhance(1.005)
+        
+        logger.info("✅ AB Pattern enhancement applied")
         
     else:
-        brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)
+        logger.info("🔍 Other Pattern - Standard enhancement")
+        brightness = ImageEnhance.Brightness(rgb_image)
+        rgb_image = brightness.enhance(1.08)
         
-        color = ImageEnhance.Color(image)
-        image = color.enhance(0.99)
+        color = ImageEnhance.Color(rgb_image)
+        rgb_image = color.enhance(0.99)
         
-        sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.4)
+        sharpness = ImageEnhance.Sharpness(rgb_image)
+        rgb_image = sharpness.enhance(1.4)
     
-    image = apply_center_spotlight(image, 0.025)
-    image = apply_wedding_ring_enhancement_fast(image)
+    # Apply common enhancements
+    contrast = ImageEnhance.Contrast(rgb_image)
+    rgb_image = contrast.enhance(1.05)
     
-    return image
-
-def calculate_quality_metrics_fast(image: Image.Image) -> dict:
-    """Fast quality metrics"""
-    img_array = np.array(image)[::30, ::30]
+    # Apply sharpening
+    sharpness = ImageEnhance.Sharpness(rgb_image)
+    rgb_image = sharpness.enhance(1.6)
     
-    r_avg = np.mean(img_array[:,:,0])
-    g_avg = np.mean(img_array[:,:,1])
-    b_avg = np.mean(img_array[:,:,2])
-    
-    brightness = (r_avg + g_avg + b_avg) / 3
-    
-    return {
-        "brightness": brightness
-    }
+    # Recombine with alpha
+    r2, g2, b2 = rgb_image.split()
+    return Image.merge('RGBA', (r2, g2, b2, a))
 
 def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_height=1560) -> Image.Image:
-    """Resize image to target dimensions"""
+    """Resize image to target dimensions preserving transparency"""
     width, height = image.size
     
     img_ratio = width / height
@@ -565,7 +448,7 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     return resized
 
 def process_enhancement(job):
-    """Main enhancement processing - V18.1 Fixed"""
+    """Main enhancement processing - V20 Transparent Only"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     start_time = time.time()
     
@@ -573,8 +456,6 @@ def process_enhancement(job):
         filename = find_filename_fast(job)
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
-        
-        background_color = '#E0DADC'
         
         if not image_data:
             return {
@@ -588,167 +469,75 @@ def process_enhancement(job):
         image_bytes = decode_base64_fast(image_data)
         image = Image.open(BytesIO(image_bytes))
         
-        # STEP 1: OPTIMIZED BACKGROUND REMOVAL (PNG files)
-        original_mode = image.mode
-        has_transparency = image.mode == 'RGBA'
-        needs_background_removal = False
-        
+        # STEP 1: BACKGROUND REMOVAL (PNG files)
         if filename and filename.lower().endswith('.png'):
-            logger.info("📸 STEP 1: PNG detected - optimized background removal")
+            logger.info("📸 STEP 1: PNG detected - background removal")
             removal_start = time.time()
             image = u2net_optimized_removal(image)
             logger.info(f"⏱️ Background removal took: {time.time() - removal_start:.2f}s")
-            has_transparency = image.mode == 'RGBA'
-            needs_background_removal = True
         
-        if has_transparency:
-            original_transparent = image.copy()
+        # Ensure RGBA mode for transparency
+        if image.mode != 'RGBA':
+            image = image.convert('RGBA')
         
-        # Convert to RGB for processing
-        if image.mode != 'RGB':
-            if image.mode == 'RGBA':
-                temp_bg = Image.new('RGB', image.size, (255, 255, 255))
-                temp_bg.paste(image, mask=image.split()[3])
-                image = temp_bg
-            else:
-                image = image.convert('RGB')
-        
-        original_size = image.size
-        
-        # STEP 2: ENHANCEMENT
-        logger.info("🎨 STEP 2: Applying enhancements")
+        # STEP 2: ENHANCEMENT (preserving transparency)
+        logger.info("🎨 STEP 2: Applying enhancements with transparency")
         enhancement_start = time.time()
         
-        image = auto_white_balance_fast(image)
+        # Auto white balance with alpha preservation
+        def auto_white_balance(rgb_img):
+            img_array = np.array(rgb_img, dtype=np.float32)
+            
+            gray_pixels = img_array[::15, ::15]
+            gray_mask = (
+                (np.abs(gray_pixels[:,:,0] - gray_pixels[:,:,1]) < 15) & 
+                (np.abs(gray_pixels[:,:,1] - gray_pixels[:,:,2]) < 15) &
+                (gray_pixels[:,:,0] > 180)
+            )
+            
+            if np.sum(gray_mask) > 10:
+                r_avg = np.mean(gray_pixels[gray_mask, 0])
+                g_avg = np.mean(gray_pixels[gray_mask, 1])
+                b_avg = np.mean(gray_pixels[gray_mask, 2])
+                
+                gray_avg = (r_avg + g_avg + b_avg) / 3
+                
+                img_array[:,:,0] *= (gray_avg / r_avg) if r_avg > 0 else 1
+                img_array[:,:,1] *= (gray_avg / g_avg) if g_avg > 0 else 1
+                img_array[:,:,2] *= (gray_avg / b_avg) if b_avg > 0 else 1
+            
+            return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
         
+        image = enhance_with_alpha(image, auto_white_balance)
+        
+        # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_pattern": "무도금화이트(0.12/0.15)",
-            "ab_pattern": "무도금화이트(0.05/0.08)",
+            "ac_pattern": "무도금화이트(0.12)",
+            "ab_pattern": "무도금화이트-쿨톤(0.05)",
             "other": "기타색상(no_overlay)"
         }.get(pattern_type, "기타색상(no_overlay)")
         
-        image = enhance_cubic_details_simple(image)
+        # Apply pattern-specific enhancements
+        image = apply_pattern_enhancement_transparent(image, pattern_type)
         
-        brightness = ImageEnhance.Brightness(image)
-        image = brightness.enhance(1.08)
-        
-        contrast = ImageEnhance.Contrast(image)
-        image = contrast.enhance(1.05)
-        
-        image = apply_enhancement_consistent(image, pattern_type)
+        # Ring hole detection
+        image = ensure_ring_holes_transparent_fast(image)
         
         logger.info(f"⏱️ Enhancement took: {time.time() - enhancement_start:.2f}s")
         
         # RESIZE
         image = resize_to_target_dimensions(image, 1200, 1560)
         
-        # STEP 3: SWINIR ENHANCEMENT (ALWAYS APPLIED)
+        # STEP 3: SWINIR ENHANCEMENT (preserving transparency)
         logger.info("🚀 STEP 3: Applying SwinIR enhancement")
         swinir_start = time.time()
-        image = apply_swinir_enhancement(image)
+        image = apply_swinir_enhancement_transparent(image)
         logger.info(f"⏱️ SwinIR took: {time.time() - swinir_start:.2f}s")
         
-        # Final sharpening
-        sharpness = ImageEnhance.Sharpness(image)
-        image = sharpness.enhance(1.6)
-        
-        # STEP 4: BACKGROUND COMPOSITE (if transparent)
-        if has_transparency and 'original_transparent' in locals():
-            logger.info(f"🖼️ STEP 4: Natural background compositing: {background_color}")
-            composite_start = time.time()
-            
-            enhanced_transparent = original_transparent.copy()
-            enhanced_transparent = resize_to_target_dimensions(enhanced_transparent, 1200, 1560)
-            
-            if enhanced_transparent.mode == 'RGBA':
-                # Fast ring hole detection
-                enhanced_transparent = ensure_ring_holes_transparent_fast(enhanced_transparent)
-                
-                r, g, b, a = enhanced_transparent.split()
-                rgb_image = Image.merge('RGB', (r, g, b))
-                
-                rgb_image = auto_white_balance_fast(rgb_image)
-                rgb_image = enhance_cubic_details_simple(rgb_image)
-                brightness = ImageEnhance.Brightness(rgb_image)
-                rgb_image = brightness.enhance(1.08)
-                contrast = ImageEnhance.Contrast(rgb_image)
-                rgb_image = contrast.enhance(1.05)
-                sharpness = ImageEnhance.Sharpness(rgb_image)
-                rgb_image = sharpness.enhance(1.6)
-                
-                if pattern_type == "ac_pattern":
-                    logger.info("🔍 Applying 12% white overlay to transparent version")
-                    white_overlay = 0.12
-                    img_array = np.array(rgb_image, dtype=np.float32)
-                    img_array = img_array * (1 - white_overlay) + 255 * white_overlay
-                    rgb_image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-                elif pattern_type == "ab_pattern":
-                    logger.info("🔍 Applying 5% white overlay and cool tone to transparent version")
-                    white_overlay = 0.05
-                    img_array = np.array(rgb_image, dtype=np.float32)
-                    img_array = img_array * (1 - white_overlay) + 255 * white_overlay
-                    
-                    # Cool tone adjustment
-                    img_array[:,:,0] *= 0.96  # Reduce red
-                    img_array[:,:,1] *= 0.98  # Reduce green
-                    img_array[:,:,2] *= 1.02  # Increase blue
-                    
-                    # Cool color grading
-                    cool_overlay = np.array([240, 248, 255], dtype=np.float32)
-                    img_array = img_array * 0.95 + cool_overlay * 0.05
-                    
-                    rgb_image = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-                    
-                    # Reduce saturation
-                    color = ImageEnhance.Color(rgb_image)
-                    rgb_image = color.enhance(0.88)
-                
-                r2, g2, b2 = rgb_image.split()
-                enhanced_transparent = Image.merge('RGBA', (r2, g2, b2, a))
-            
-            image = composite_with_natural_blend(enhanced_transparent, background_color)
-            
-            sharpness = ImageEnhance.Sharpness(image)
-            image = sharpness.enhance(1.10)
-            
-            logger.info(f"⏱️ Composite took: {time.time() - composite_start:.2f}s")
-        
-        # Quality check for ac_pattern
-        if pattern_type == "ac_pattern":
-            metrics = calculate_quality_metrics_fast(image)
-            logger.info(f"🔍 AC Pattern - Final brightness check: {metrics['brightness']:.2f}")
-            
-            if metrics["brightness"] < 235:
-                logger.info("⚠️ AC Pattern - Brightness too low, applying 15% overlay")
-                white_overlay = 0.15
-                img_array = np.array(image, dtype=np.float32)
-                img_array = img_array * (1 - white_overlay) + 255 * white_overlay
-                img_array = np.clip(img_array, 0, 255)
-                image = Image.fromarray(img_array.astype(np.uint8))
-                
-                metrics_final = calculate_quality_metrics_fast(image)
-                logger.info(f"✅ AC Pattern - Final brightness after 15% overlay: {metrics_final['brightness']:.2f}")
-        
-        # Quality check for ab_pattern
-        elif pattern_type == "ab_pattern":
-            metrics = calculate_quality_metrics_fast(image)
-            logger.info(f"🔍 AB Pattern - Final brightness check: {metrics['brightness']:.2f}")
-            
-            if metrics["brightness"] < 235:
-                logger.info("⚠️ AB Pattern - Brightness too low, applying 8% overlay")
-                white_overlay = 0.08
-                img_array = np.array(image, dtype=np.float32)
-                img_array = img_array * (1 - white_overlay) + 255 * white_overlay
-                img_array = np.clip(img_array, 0, 255)
-                image = Image.fromarray(img_array.astype(np.uint8))
-                
-                metrics_final = calculate_quality_metrics_fast(image)
-                logger.info(f"✅ AB Pattern - Final brightness after 8% overlay: {metrics_final['brightness']:.2f}")
-        
-        # Save to base64
+        # Save to base64 as PNG (to preserve transparency)
         buffered = BytesIO()
-        image.save(buffered, format="PNG", optimize=False, quality=95)
+        image.save(buffered, format="PNG", optimize=False)
         buffered.seek(0)
         enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
@@ -758,8 +547,7 @@ def process_enhancement(job):
         enhanced_filename = filename
         if filename and file_number:
             base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
-            extension = filename.rsplit('.', 1)[1] if '.' in filename else 'jpg'
-            enhanced_filename = f"{base_name}_enhanced.{extension}"
+            enhanced_filename = f"{base_name}_enhanced_transparent.png"
         
         total_time = time.time() - start_time
         logger.info(f"✅ Enhancement completed in {total_time:.2f}s")
@@ -774,38 +562,30 @@ def process_enhancement(job):
                 "filename": filename,
                 "enhanced_filename": enhanced_filename,
                 "file_number": file_number,
-                "original_size": list(original_size),
                 "final_size": list(image.size),
                 "version": VERSION,
                 "status": "success",
                 "processing_time": f"{total_time:.2f}s",
+                "has_transparency": True,
+                "background_applied": False,
+                "format": "PNG",
                 "optimization_features": [
-                    "✅ Fixed background removal - Removed cv2.ximgproc dependency",
-                    "✅ Simplified edge blending (5x5 kernel instead of 15x15)",
-                    "✅ Cleaner alpha compositing logic",
-                    "✅ AB Pattern Support with cool tone",
-                    "✅ White overlay verification with logging"
+                    "✅ Transparent PNG only (no background)",
+                    "✅ Pattern-specific enhancement preserved",
+                    "✅ AC: 12% white overlay",
+                    "✅ AB: 5% white overlay + cool tone",
+                    "✅ Ready for Figma overlay"
                 ],
-                "background_removal_method": "U2Net with simplified refinement",
-                "processing_order": "1.U2Net → 2.Enhancement → 3.SwinIR → 4.Composite",
+                "processing_order": "1.U2Net → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
-                "swinir_timing": "AFTER resize and enhancement",
                 "png_support": True,
-                "has_transparency": has_transparency,
-                "background_composite": has_transparency,
-                "background_removal": needs_background_removal,
-                "background_color": background_color,
-                "white_overlay": "AC: 12% (1차), 15% (2차) | AB: 5% (1차), 8% (2차) - WITH VERIFICATION",
-                "brightness_increased": "8%",
-                "contrast_increased": "5%",
-                "sharpness_increased": "1.6",
-                "quality": "95",
+                "white_overlay": "AC: 12% | AB: 5% + Cool Tone | Other: None",
                 "expected_input": "2000x2600 PNG",
                 "output_size": "1200x1560"
             }
         }
         
-        logger.info("✅ Enhancement completed successfully")
+        logger.info("✅ Enhancement completed successfully - Transparent PNG ready for Figma")
         return output
         
     except Exception as e:
