@@ -5,7 +5,7 @@ import time
 import base64
 import numpy as np
 from io import BytesIO
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageDraw, ImageFont
 import cv2
 import logging
 import re
@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V20-Transparent-Only
+# VERSION: V21-With-Special-Modes
 ################################
 
-VERSION = "V20-Transparent-Only"
+VERSION = "V21-With-Special-Modes"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -33,6 +33,10 @@ if REPLICATE_API_TOKEN:
         logger.info("✅ Replicate client initialized")
     except Exception as e:
         logger.error(f"❌ Failed to initialize Replicate: {e}")
+
+# Claude API configuration
+CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', '')
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 # Global rembg session with U2Net
 REMBG_SESSION = None
@@ -52,6 +56,258 @@ def init_rembg_session():
 
 # Initialize on module load
 init_rembg_session()
+
+def download_korean_font():
+    """Download Korean font for text rendering"""
+    try:
+        font_path = '/tmp/NanumGothic.ttf'
+        
+        if os.path.exists(font_path):
+            try:
+                test_font = ImageFont.truetype(font_path, 20)
+                img_test = Image.new('RGB', (100, 100), 'white')
+                draw_test = ImageDraw.Draw(img_test)
+                draw_test.text((10, 10), "테스트", font=test_font, fill='black')
+                return font_path
+            except:
+                os.remove(font_path)
+        
+        font_urls = [
+            'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
+            'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf'
+        ]
+        
+        for url in font_urls:
+            try:
+                response = requests.get(url, timeout=30)
+                if response.status_code == 200 and len(response.content) > 100000:
+                    with open(font_path, 'wb') as f:
+                        f.write(response.content)
+                    return font_path
+            except:
+                continue
+        
+        return None
+    except:
+        return None
+
+def get_font(size, korean_font_path=None):
+    """Get font with fallback"""
+    if korean_font_path and os.path.exists(korean_font_path):
+        try:
+            return ImageFont.truetype(korean_font_path, size)
+        except:
+            pass
+    
+    return ImageFont.load_default()
+
+def safe_draw_text(draw, position, text, font, fill):
+    """Safely draw text"""
+    try:
+        if text:
+            draw.text(position, str(text), font=font, fill=fill)
+    except:
+        draw.text(position, "[Error]", font=font, fill=fill)
+
+def get_text_size(draw, text, font):
+    """Get text size compatible with different PIL versions"""
+    try:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+    except AttributeError:
+        return draw.textsize(text, font=font)
+
+def call_claude_api(image_base64, prompt):
+    """Call Claude API"""
+    if not CLAUDE_API_KEY:
+        logger.warning("CLAUDE_API_KEY not set")
+        return None
+    
+    try:
+        headers = {
+            "x-api-key": CLAUDE_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+        
+        data = {
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 500,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image", "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": image_base64
+                    }}
+                ]
+            }]
+        }
+        
+        response = requests.post(CLAUDE_API_URL, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result.get('content', [{}])[0].get('text', '')
+        else:
+            logger.error(f"Claude API error: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error calling Claude API: {str(e)}")
+        return None
+
+def create_md_talk_section(text_content=None, width=1200):
+    """Create MD TALK section"""
+    logger.info("Creating MD TALK section")
+    
+    korean_font_path = download_korean_font()
+    title_font = get_font(48, korean_font_path)
+    body_font = get_font(28, korean_font_path)
+    
+    # 임시 이미지로 텍스트 크기 계산
+    temp_img = Image.new('RGB', (width, 1000), '#FFFFFF')
+    draw = ImageDraw.Draw(temp_img)
+    
+    title = "MD TALK"
+    title_width, title_height = get_text_size(draw, title, title_font)
+    
+    # 텍스트 준비
+    if text_content and text_content.strip():
+        text = text_content.replace('MD TALK', '').replace('MD Talk', '').strip()
+        words = text.split()
+        lines = []
+        current_line = ""
+        max_line_width = width - 120
+        
+        for word in words:
+            test_line = current_line + " " + word if current_line else word
+            test_width, _ = get_text_size(draw, test_line, body_font)
+            
+            if test_width > max_line_width:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+            else:
+                current_line = test_line
+        
+        if current_line:
+            lines.append(current_line)
+    else:
+        lines = [
+            "이 제품은 일상에서도 부담없이",
+            "착용할 수 있는 편안한 디자인으로",
+            "매일의 스타일링에 포인트를 더해줍니다.",
+            "",
+            "특별한 날은 물론 평범한 일상까지",
+            "모든 순간을 빛나게 만들어주는",
+            "당신만의 특별한 주얼리입니다."
+        ]
+    
+    # 높이 계산
+    top_margin = 60
+    title_bottom_margin = 140
+    line_height = 50
+    bottom_margin = 80
+    
+    content_height = len(lines) * line_height
+    total_height = top_margin + title_height + title_bottom_margin + content_height + bottom_margin
+    
+    # 실제 이미지 생성
+    section_img = Image.new('RGB', (width, total_height), '#FFFFFF')
+    draw = ImageDraw.Draw(section_img)
+    
+    # 제목 그리기
+    safe_draw_text(draw, (width//2 - title_width//2, top_margin), title, title_font, (40, 40, 40))
+    
+    # 본문 그리기
+    y_pos = top_margin + title_height + title_bottom_margin
+    
+    for line in lines:
+        if line:
+            line_width, _ = get_text_size(draw, line, body_font)
+            safe_draw_text(draw, (width//2 - line_width//2, y_pos), line, body_font, (80, 80, 80))
+        y_pos += line_height
+    
+    logger.info(f"MD TALK section created: {width}x{total_height}")
+    return section_img
+
+def create_design_point_section(text_content=None, width=1200):
+    """Create DESIGN POINT section"""
+    logger.info("Creating DESIGN POINT section")
+    
+    korean_font_path = download_korean_font()
+    title_font = get_font(48, korean_font_path)
+    body_font = get_font(24, korean_font_path)
+    
+    # 임시 이미지로 텍스트 크기 계산
+    temp_img = Image.new('RGB', (width, 1000), '#FFFFFF')
+    draw = ImageDraw.Draw(temp_img)
+    
+    title = "DESIGN POINT"
+    title_width, title_height = get_text_size(draw, title, title_font)
+    
+    # 텍스트 준비
+    if text_content and text_content.strip():
+        text = text_content.replace('DESIGN POINT', '').replace('Design Point', '').strip()
+        words = text.split()
+        lines = []
+        current_line = ""
+        max_line_width = width - 100
+        
+        for word in words:
+            test_line = current_line + " " + word if current_line else word
+            test_width, _ = get_text_size(draw, test_line, body_font)
+            
+            if test_width > max_line_width:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+            else:
+                current_line = test_line
+        
+        if current_line:
+            lines.append(current_line)
+    else:
+        lines = [
+            "남성 단품은 무광 텍스처와 유광 라인의 조화가",
+            "견고한 감성을 전하고 여자 단품은",
+            "파베 세팅과 섬세한 밀그레인의 디테일",
+            "화려하면서도 고급스러운 반영을 표현합니다"
+        ]
+    
+    # 높이 계산
+    top_margin = 60
+    title_bottom_margin = 160
+    line_height = 55
+    bottom_margin = 100
+    
+    content_height = len(lines) * line_height
+    total_height = top_margin + title_height + title_bottom_margin + content_height + bottom_margin
+    
+    # 실제 이미지 생성
+    section_img = Image.new('RGB', (width, total_height), '#FFFFFF')
+    draw = ImageDraw.Draw(section_img)
+    
+    # 제목 그리기
+    safe_draw_text(draw, (width//2 - title_width//2, top_margin), title, title_font, (40, 40, 40))
+    
+    # 본문 그리기
+    y_pos = top_margin + title_height + title_bottom_margin
+    
+    for line in lines:
+        if line:
+            line_width, _ = get_text_size(draw, line, body_font)
+            safe_draw_text(draw, (width//2 - line_width//2, y_pos), line, body_font, (80, 80, 80))
+        y_pos += line_height
+    
+    # 하단 구분선
+    draw.rectangle([100, y_pos + 30, width - 100, y_pos + 32], fill=(220, 220, 220))
+    
+    logger.info(f"DESIGN POINT section created: {width}x{total_height}")
+    return section_img
 
 def extract_file_number(filename: str) -> str:
     """Extract number from filename"""
@@ -165,7 +421,7 @@ def u2net_optimized_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net Background Removal V20 - Transparent Only")
+        logger.info("🔷 U2Net Background Removal V21")
         
         # Save image to buffer
         buffered = BytesIO()
@@ -209,7 +465,7 @@ def u2net_optimized_removal(image: Image.Image) -> Image.Image:
                 largest_label = np.argmax(sizes) + 1
                 alpha_array = np.where(labels == largest_label, alpha_array, 0)
         
-        logger.info("✅ Background removal complete - Keeping transparency")
+        logger.info("✅ Background removal complete")
         
         a_new = Image.fromarray(alpha_array)
         return Image.merge('RGBA', (r, g, b, a_new))
@@ -223,7 +479,7 @@ def ensure_ring_holes_transparent_fast(image: Image.Image) -> Image.Image:
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🔍 Fast Ring Hole Detection V20")
+    logger.info("🔍 Fast Ring Hole Detection")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -447,12 +703,91 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     
     return resized
 
+def process_special_mode(job):
+    """Process special modes (MD TALK, DESIGN POINT)"""
+    special_mode = job.get('special_mode', '')
+    logger.info(f"Processing special mode: {special_mode}")
+    
+    if special_mode == 'md_talk':
+        # MD TALK 섹션 생성
+        text_content = job.get('text_content', '') or job.get('claude_text', '')
+        
+        # Claude API로 텍스트 생성 (이미지 없이)
+        if not text_content and job.get('generate_text'):
+            text_content = "이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."
+        
+        section_image = create_md_talk_section(text_content)
+        
+        # base64로 변환
+        buffered = BytesIO()
+        section_image.save(buffered, format="PNG", optimize=False)
+        buffered.seek(0)
+        section_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        section_base64_no_padding = section_base64.rstrip('=')
+        
+        return {
+            "output": {
+                "enhanced_image": section_base64_no_padding,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
+                "section_type": "md_talk",
+                "final_size": list(section_image.size),
+                "version": VERSION,
+                "status": "success",
+                "format": "PNG",
+                "special_mode": special_mode
+            }
+        }
+    
+    elif special_mode == 'design_point':
+        # DESIGN POINT 섹션 생성
+        text_content = job.get('text_content', '') or job.get('claude_text', '')
+        
+        # Claude API로 텍스트 생성 (이미지 없이)
+        if not text_content and job.get('generate_text'):
+            text_content = "남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일 화려하면서도 고급스러운 반영을 표현합니다"
+        
+        section_image = create_design_point_section(text_content)
+        
+        # base64로 변환
+        buffered = BytesIO()
+        section_image.save(buffered, format="PNG", optimize=False)
+        buffered.seek(0)
+        section_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        section_base64_no_padding = section_base64.rstrip('=')
+        
+        return {
+            "output": {
+                "enhanced_image": section_base64_no_padding,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
+                "section_type": "design_point",
+                "final_size": list(section_image.size),
+                "version": VERSION,
+                "status": "success",
+                "format": "PNG",
+                "special_mode": special_mode
+            }
+        }
+    
+    else:
+        return {
+            "output": {
+                "error": f"Unknown special mode: {special_mode}",
+                "status": "error",
+                "version": VERSION
+            }
+        }
+
 def process_enhancement(job):
-    """Main enhancement processing - V20 Transparent Only"""
+    """Main enhancement processing - V21 with Special Modes"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     start_time = time.time()
     
     try:
+        # Check for special mode first
+        if job.get('special_mode'):
+            return process_special_mode(job)
+        
+        # Normal enhancement processing continues here...
         filename = find_filename_fast(job)
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
@@ -569,11 +904,13 @@ def process_enhancement(job):
                 "has_transparency": True,
                 "background_applied": False,
                 "format": "PNG",
+                "special_modes_available": ["md_talk", "design_point"],
                 "optimization_features": [
                     "✅ Transparent PNG only (no background)",
                     "✅ Pattern-specific enhancement preserved",
                     "✅ AC: 12% white overlay",
                     "✅ AB: 5% white overlay + cool tone",
+                    "✅ MD TALK & DESIGN POINT support",
                     "✅ Ready for Figma overlay"
                 ],
                 "processing_order": "1.U2Net → 2.Enhancement → 3.SwinIR",
@@ -585,7 +922,7 @@ def process_enhancement(job):
             }
         }
         
-        logger.info("✅ Enhancement completed successfully - Transparent PNG ready for Figma")
+        logger.info("✅ Enhancement completed successfully")
         return output
         
     except Exception as e:
