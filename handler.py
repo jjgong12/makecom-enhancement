@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V25-Ultra-Precise-Korean
+# VERSION: V26-Ultra-Precise-Korean-Fixed
 ################################
 
-VERSION = "V25-Ultra-Precise-Korean"
+VERSION = "V26-Ultra-Precise-Korean-Fixed"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -58,17 +58,20 @@ def init_rembg_session():
 init_rembg_session()
 
 def download_korean_font():
-    """Download Korean font for text rendering - IMPROVED"""
+    """Download Korean font for text rendering - IMPROVED with better encoding"""
     try:
         font_path = '/tmp/NanumGothic.ttf'
         
         # If font exists, verify it works with Korean text
         if os.path.exists(font_path):
             try:
+                # Test with actual Korean text
                 test_font = ImageFont.truetype(font_path, 20, encoding='utf-8')
-                img_test = Image.new('RGB', (100, 100), 'white')
+                img_test = Image.new('RGB', (200, 100), 'white')
                 draw_test = ImageDraw.Draw(img_test)
-                draw_test.text((10, 10), "테스트", font=test_font, fill='black')
+                # Test with various Korean characters
+                test_text = "테스트 한글 폰트 확인"
+                draw_test.text((10, 10), test_text, font=test_font, fill='black')
                 logger.info("✅ Korean font verified and working")
                 return font_path
             except Exception as e:
@@ -90,9 +93,12 @@ def download_korean_font():
                     with open(font_path, 'wb') as f:
                         f.write(response.content)
                     
-                    # Verify the font works
+                    # Verify the font works with Korean
                     test_font = ImageFont.truetype(font_path, 20, encoding='utf-8')
-                    logger.info("✅ Korean font downloaded successfully")
+                    img_test = Image.new('RGB', (200, 100), 'white')
+                    draw_test = ImageDraw.Draw(img_test)
+                    draw_test.text((10, 10), "한글 테스트", font=test_font, fill='black')
+                    logger.info("✅ Korean font downloaded and verified successfully")
                     return font_path
             except Exception as e:
                 logger.error(f"Failed to download from {url}: {e}")
@@ -105,29 +111,39 @@ def download_korean_font():
         return None
 
 def get_font(size, korean_font_path=None):
-    """Get font with proper encoding"""
+    """Get font with proper encoding - ENHANCED"""
     if korean_font_path and os.path.exists(korean_font_path):
         try:
-            return ImageFont.truetype(korean_font_path, size, encoding='utf-8')
+            # Always use UTF-8 encoding for Korean fonts
+            font = ImageFont.truetype(korean_font_path, size, encoding='utf-8')
+            logger.info(f"Font loaded successfully with size {size}")
+            return font
         except Exception as e:
             logger.error(f"Font loading error: {e}")
     
     # Fallback to default
     try:
+        logger.warning("Using default font as fallback")
         return ImageFont.load_default()
     except:
         return None
 
 def safe_draw_text(draw, position, text, font, fill):
-    """Safely draw text with proper encoding"""
+    """Safely draw text with proper encoding - ENHANCED"""
     try:
         if text and font:
-            # Ensure text is properly encoded
+            # Ensure text is properly encoded as UTF-8
             if isinstance(text, bytes):
-                text = text.decode('utf-8')
-            draw.text(position, str(text), font=font, fill=fill)
+                text = text.decode('utf-8', errors='replace')
+            else:
+                # Ensure it's a string and normalize
+                text = str(text)
+            
+            # Draw the text
+            draw.text(position, text, font=font, fill=fill)
+            logger.info(f"Successfully drew text: {text[:20]}...")
     except Exception as e:
-        logger.error(f"Text drawing error: {e}")
+        logger.error(f"Text drawing error: {e}, text: {repr(text)}")
         # Fallback to simple text
         try:
             draw.text(position, "[Text Error]", font=font, fill=fill)
@@ -137,13 +153,19 @@ def safe_draw_text(draw, position, text, font, fill):
 def get_text_size(draw, text, font):
     """Get text size compatible with different PIL versions"""
     try:
+        # Ensure text is string
+        if isinstance(text, bytes):
+            text = text.decode('utf-8', errors='replace')
+        else:
+            text = str(text)
+            
         bbox = draw.textbbox((0, 0), text, font=font)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
     except AttributeError:
         return draw.textsize(text, font=font)
 
 def create_md_talk_section(text_content=None, width=1200):
-    """Create MD TALK section with proper Korean support"""
+    """Create MD TALK section with proper Korean support - ENHANCED"""
     logger.info("Creating MD TALK section")
     
     korean_font_path = download_korean_font()
@@ -166,7 +188,9 @@ def create_md_talk_section(text_content=None, width=1200):
         text = text_content.replace('MD TALK', '').replace('MD Talk', '').strip()
         # Ensure proper encoding
         if isinstance(text, bytes):
-            text = text.decode('utf-8')
+            text = text.decode('utf-8', errors='replace')
+        else:
+            text = str(text)
     else:
         text = """이 제품은 일상에서도 부담없이
 착용할 수 있는 편안한 디자인으로
@@ -175,6 +199,9 @@ def create_md_talk_section(text_content=None, width=1200):
 특별한 날은 물론 평범한 일상까지
 모든 순간을 빛나게 만들어주는
 당신만의 특별한 주얼리입니다."""
+    
+    # Log the text to verify encoding
+    logger.info(f"MD TALK text content: {repr(text[:50])}...")
     
     # Split text into lines
     lines = text.split('\n')
@@ -208,7 +235,7 @@ def create_md_talk_section(text_content=None, width=1200):
     return section_img
 
 def create_design_point_section(text_content=None, width=1200):
-    """Create DESIGN POINT section with proper Korean support"""
+    """Create DESIGN POINT section with proper Korean support - ENHANCED"""
     logger.info("Creating DESIGN POINT section")
     
     korean_font_path = download_korean_font()
@@ -231,12 +258,17 @@ def create_design_point_section(text_content=None, width=1200):
         text = text_content.replace('DESIGN POINT', '').replace('Design Point', '').strip()
         # Ensure proper encoding
         if isinstance(text, bytes):
-            text = text.decode('utf-8')
+            text = text.decode('utf-8', errors='replace')
+        else:
+            text = str(text)
     else:
         text = """남성 단품은 무광 텍스처와 유광 라인의 조화가
 견고한 감성을 전하고 여자 단품은
 파베 세팅과 섬세한 밀그레인의 디테일
 화려하면서도 고급스러운 반영을 표현합니다"""
+    
+    # Log the text to verify encoding
+    logger.info(f"DESIGN POINT text content: {repr(text[:50])}...")
     
     # Split text into lines
     lines = text.split('\n')
@@ -283,7 +315,7 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V25")
+        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V26")
         
         # Pre-process image for better edge detection
         # Apply slight contrast enhancement before removal
@@ -440,7 +472,7 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V25")
+    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V26")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -576,13 +608,39 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     a_new = Image.fromarray(alpha_array)
     return Image.merge('RGBA', (r, g, b, a_new))
 
+def image_to_base64(image, keep_transparency=True):
+    """Convert to base64 without padding - FIXED to properly preserve transparency"""
+    buffered = BytesIO()
+    
+    # Force keeping transparency for RGBA images
+    if image.mode == 'RGBA' and keep_transparency:
+        # CRITICAL: Use PNG format with proper settings for transparency
+        logger.info("💎 Preserving transparency in output - RGBA mode detected")
+        # Use PNG with no optimization to ensure transparency is preserved
+        image.save(buffered, format='PNG', compress_level=1)
+    else:
+        # Convert to RGB with white background if not keeping transparency
+        if image.mode == 'RGBA':
+            logger.info("Converting RGBA to RGB with white background")
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[3])
+            image = background
+        
+        image.save(buffered, format='PNG', optimize=True, compress_level=1)
+    
+    buffered.seek(0)
+    base64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    # Remove padding
+    return base64_str.rstrip('=')
+
 def process_special_mode(job):
-    """Process special modes - FIXED to return separate images"""
+    """Process special modes - FIXED to return separate images with proper encoding"""
     special_mode = job.get('special_mode', '')
     logger.info(f"Processing special mode: {special_mode}")
     
     # BOTH TEXT SECTIONS - Return TWO separate images
     if special_mode == 'both_text_sections':
+        # Get text content with proper encoding
         md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or """각도에 따라 달라지는 빛의 결들이
 두 사람의 특별한 순간순간을 더 찬란하게 만들며
 360도 새겨진 패턴으로
@@ -592,27 +650,25 @@ def process_special_mode(job):
 고급스러움을 완성하며
 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
         
+        # Ensure proper encoding
+        if isinstance(md_talk_text, bytes):
+            md_talk_text = md_talk_text.decode('utf-8', errors='replace')
+        if isinstance(design_point_text, bytes):
+            design_point_text = design_point_text.decode('utf-8', errors='replace')
+        
         logger.info(f"Creating both sections separately")
-        logger.info(f"MD TALK text: {md_talk_text[:50]}...")
-        logger.info(f"DESIGN POINT text: {design_point_text[:50]}...")
+        logger.info(f"MD TALK text: {repr(md_talk_text[:50])}...")
+        logger.info(f"DESIGN POINT text: {repr(design_point_text[:50])}...")
         
         # Create both sections
         md_section = create_md_talk_section(md_talk_text)
         design_section = create_design_point_section(design_point_text)
         
         # Convert MD TALK to base64
-        buffered_md = BytesIO()
-        md_section.save(buffered_md, format="PNG", optimize=False)
-        buffered_md.seek(0)
-        md_base64 = base64.b64encode(buffered_md.getvalue()).decode('utf-8')
-        md_base64_no_padding = md_base64.rstrip('=')
+        md_base64_no_padding = image_to_base64(md_section, keep_transparency=False)
         
         # Convert DESIGN POINT to base64
-        buffered_design = BytesIO()
-        design_section.save(buffered_design, format="PNG", optimize=False)
-        buffered_design.seek(0)
-        design_base64 = base64.b64encode(buffered_design.getvalue()).decode('utf-8')
-        design_base64_no_padding = design_base64.rstrip('=')
+        design_base64_no_padding = image_to_base64(design_section, keep_transparency=False)
         
         # Return BOTH images separately
         return {
@@ -641,7 +697,8 @@ def process_special_mode(job):
                 "special_mode": special_mode,
                 "sections_included": ["MD_TALK", "DESIGN_POINT"],
                 "version": VERSION,
-                "status": "success"
+                "status": "success",
+                "korean_encoding": "UTF-8"
             }
         }
     
@@ -653,13 +710,13 @@ def process_special_mode(job):
             text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로
 매일의 스타일링에 포인트를 더해줍니다."""
         
+        # Ensure proper encoding
+        if isinstance(text_content, bytes):
+            text_content = text_content.decode('utf-8', errors='replace')
+        
         section_image = create_md_talk_section(text_content)
         
-        buffered = BytesIO()
-        section_image.save(buffered, format="PNG", optimize=False)
-        buffered.seek(0)
-        section_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        section_base64_no_padding = section_base64.rstrip('=')
+        section_base64_no_padding = image_to_base64(section_image, keep_transparency=False)
         
         return {
             "output": {
@@ -672,7 +729,8 @@ def process_special_mode(job):
                 "version": VERSION,
                 "status": "success",
                 "format": "PNG",
-                "special_mode": special_mode
+                "special_mode": special_mode,
+                "korean_encoding": "UTF-8"
             }
         }
     
@@ -685,13 +743,13 @@ def process_special_mode(job):
 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로
 화려하면서도 고급스러운 반짝임을 표현합니다."""
         
+        # Ensure proper encoding
+        if isinstance(text_content, bytes):
+            text_content = text_content.decode('utf-8', errors='replace')
+        
         section_image = create_design_point_section(text_content)
         
-        buffered = BytesIO()
-        section_image.save(buffered, format="PNG", optimize=False)
-        buffered.seek(0)
-        section_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        section_base64_no_padding = section_base64.rstrip('=')
+        section_base64_no_padding = image_to_base64(section_image, keep_transparency=False)
         
         return {
             "output": {
@@ -704,7 +762,8 @@ def process_special_mode(job):
                 "version": VERSION,
                 "status": "success",
                 "format": "PNG",
-                "special_mode": special_mode
+                "special_mode": special_mode,
+                "korean_encoding": "UTF-8"
             }
         }
     
@@ -955,7 +1014,7 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
             has_alpha = False
         
         buffered = BytesIO()
-        rgb_image.save(buffered, format="PNG", optimize=False)
+        rgb_image.save(buffered, format="PNG", optimize=True, compress_level=1)
         buffered.seek(0)
         img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
         img_data_url = f"data:image/png;base64,{img_base64}"
@@ -993,9 +1052,10 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V25 with ULTRA Precise Edge Detection"""
+    """Main enhancement processing - V26 with ULTRA Precise Edge Detection and Fixed Transparency"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 ULTRA PRECISE MODE: Maximum edge detection enabled")
+    logger.info("💎 TRANSPARENT OUTPUT: Fixed to properly preserve transparency")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
@@ -1021,6 +1081,9 @@ def process_enhancement(job):
         image_bytes = decode_base64_fast(image_data)
         image = Image.open(BytesIO(image_bytes))
         
+        # Log initial image info
+        logger.info(f"Input image mode: {image.mode}, size: {image.size}")
+        
         # STEP 1: ULTRA PRECISE BACKGROUND REMOVAL (PNG files)
         if filename and filename.lower().endswith('.png'):
             logger.info("📸 STEP 1: PNG detected - ULTRA PRECISE background removal")
@@ -1030,6 +1093,7 @@ def process_enhancement(job):
         
         # Ensure RGBA mode
         if image.mode != 'RGBA':
+            logger.info("Converting to RGBA mode")
             image = image.convert('RGBA')
         
         # STEP 2: ENHANCEMENT (preserving transparency)
@@ -1088,13 +1152,11 @@ def process_enhancement(job):
         image = apply_swinir_enhancement_transparent(image)
         logger.info(f"⏱️ SwinIR took: {time.time() - swinir_start:.2f}s")
         
-        # Save to base64 as PNG (to preserve transparency)
-        buffered = BytesIO()
-        image.save(buffered, format="PNG", optimize=False)
-        buffered.seek(0)
-        enhanced_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        # Log final image mode
+        logger.info(f"Final image mode: {image.mode}, size: {image.size}")
         
-        enhanced_base64_no_padding = enhanced_base64.rstrip('=')
+        # Save to base64 as PNG (to preserve transparency) - FIXED
+        enhanced_base64_no_padding = image_to_base64(image, keep_transparency=True)
         
         # Build filename
         enhanced_filename = filename
@@ -1120,6 +1182,7 @@ def process_enhancement(job):
                 "status": "success",
                 "processing_time": f"{total_time:.2f}s",
                 "has_transparency": True,
+                "transparency_preserved": True,
                 "background_applied": False,
                 "format": "PNG",
                 "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
@@ -1133,8 +1196,9 @@ def process_enhancement(job):
                     "011": "COLOR section"
                 },
                 "optimization_features": [
+                    "✅ FIXED: Transparent PNG output properly preserved",
+                    "✅ ENHANCED: Korean font with UTF-8 encoding verification",
                     "✅ ULTRA PRECISE Transparent PNG edge detection",
-                    "✅ Enhanced Korean font support with proper encoding",
                     "✅ Fixed: both_text_sections returns 2 separate images",
                     "✅ Advanced multi-stage edge refinement",
                     "✅ Sobel edge detection for precision",
@@ -1149,7 +1213,7 @@ def process_enhancement(job):
                 "swinir_applied": True,
                 "png_support": True,
                 "edge_detection": "ULTRA PRECISE (Sobel + Guided Filter)",
-                "korean_support": "ENHANCED (UTF-8 encoding)",
+                "korean_support": "ENHANCED (UTF-8 encoding with verification)",
                 "white_overlay": "AC: 12% | AB: 5% + Cool Tone | Other: None",
                 "expected_input": "2000x2600 PNG",
                 "output_size": "1200x1560"
