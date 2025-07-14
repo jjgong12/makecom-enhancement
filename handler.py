@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V28-Fixed-Always-Transparent
+# VERSION: V29-Stable-Transparent
 ################################
 
-VERSION = "V28-Fixed-Always-Transparent"
+VERSION = "V29-Stable-Transparent"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -34,12 +34,12 @@ if REPLICATE_API_TOKEN:
     except Exception as e:
         logger.error(f"❌ Failed to initialize Replicate: {e}")
 
-# Claude API configuration
-CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', '')
-CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-
 # Global rembg session with U2Net
 REMBG_SESSION = None
+
+# Global font cache
+KOREAN_FONT = None
+FONT_VERIFIED = False
 
 def init_rembg_session():
     """Initialize rembg session with U2Net for faster processing"""
@@ -58,51 +58,63 @@ def init_rembg_session():
 init_rembg_session()
 
 def download_korean_font():
-    """Download Korean font for text rendering - IMPROVED with better encoding"""
+    """Download Korean font for text rendering - WITH CACHING"""
+    global KOREAN_FONT, FONT_VERIFIED
+    
+    # Return cached font if already verified
+    if KOREAN_FONT and FONT_VERIFIED:
+        return KOREAN_FONT
+    
     try:
         font_path = '/tmp/NanumGothic.ttf'
         
-        # If font exists, verify it works with Korean text
-        if os.path.exists(font_path):
+        # If font exists and not verified, verify it
+        if os.path.exists(font_path) and not FONT_VERIFIED:
             try:
                 # Test with actual Korean text
                 test_font = ImageFont.truetype(font_path, 20, encoding='utf-8')
-                img_test = Image.new('RGB', (200, 100), 'white')
+                img_test = Image.new('RGBA', (200, 100), (255, 255, 255, 0))
                 draw_test = ImageDraw.Draw(img_test)
                 # Test with various Korean characters
                 test_text = "테스트 한글 폰트 확인"
                 draw_test.text((10, 10), test_text, font=test_font, fill='black')
-                logger.info("✅ Korean font verified and working")
+                logger.info("✅ Korean font verified and cached")
+                KOREAN_FONT = font_path
+                FONT_VERIFIED = True
                 return font_path
             except Exception as e:
                 logger.error(f"Font verification failed: {e}")
                 os.remove(font_path)
+                FONT_VERIFIED = False
         
-        # Download URLs with backup options
-        font_urls = [
-            'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
-            'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
-            'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothicBold.ttf'
-        ]
-        
-        for url in font_urls:
-            try:
-                logger.info(f"Downloading font from: {url}")
-                response = requests.get(url, timeout=30)
-                if response.status_code == 200 and len(response.content) > 100000:
-                    with open(font_path, 'wb') as f:
-                        f.write(response.content)
-                    
-                    # Verify the font works with Korean
-                    test_font = ImageFont.truetype(font_path, 20, encoding='utf-8')
-                    img_test = Image.new('RGB', (200, 100), 'white')
-                    draw_test = ImageDraw.Draw(img_test)
-                    draw_test.text((10, 10), "한글 테스트", font=test_font, fill='black')
-                    logger.info("✅ Korean font downloaded and verified successfully")
-                    return font_path
-            except Exception as e:
-                logger.error(f"Failed to download from {url}: {e}")
-                continue
+        # Download if not exists or verification failed
+        if not os.path.exists(font_path):
+            font_urls = [
+                'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
+                'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
+                'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothicBold.ttf'
+            ]
+            
+            for url in font_urls:
+                try:
+                    logger.info(f"Downloading font from: {url}")
+                    response = requests.get(url, timeout=30)
+                    if response.status_code == 200 and len(response.content) > 100000:
+                        with open(font_path, 'wb') as f:
+                            f.write(response.content)
+                        
+                        # Verify the font works with Korean
+                        test_font = ImageFont.truetype(font_path, 20, encoding='utf-8')
+                        img_test = Image.new('RGBA', (200, 100), (255, 255, 255, 0))
+                        draw_test = ImageDraw.Draw(img_test)
+                        draw_test.text((10, 10), "한글 테스트", font=test_font, fill='black')
+                        logger.info("✅ Korean font downloaded and verified successfully")
+                        KOREAN_FONT = font_path
+                        FONT_VERIFIED = True
+                        return font_path
+                except Exception as e:
+                    logger.error(f"Failed to download from {url}: {e}")
+                    continue
         
         logger.error("❌ Failed to download Korean font from all sources")
         return None
@@ -116,7 +128,6 @@ def get_font(size, korean_font_path=None):
         try:
             # Always use UTF-8 encoding for Korean fonts
             font = ImageFont.truetype(korean_font_path, size, encoding='utf-8')
-            logger.info(f"Font loaded successfully with size {size}")
             return font
         except Exception as e:
             logger.error(f"Font loading error: {e}")
@@ -141,7 +152,6 @@ def safe_draw_text(draw, position, text, font, fill):
             
             # Draw the text
             draw.text(position, text, font=font, fill=fill)
-            logger.info(f"Successfully drew text: {text[:20]}...")
     except Exception as e:
         logger.error(f"Text drawing error: {e}, text: {repr(text)}")
         # Fallback to simple text
@@ -175,8 +185,8 @@ def create_md_talk_section(text_content=None, width=1200):
     title_font = get_font(48, korean_font_path)
     body_font = get_font(28, korean_font_path)
     
-    # Create temporary image for text measurement
-    temp_img = Image.new('RGB', (width, 1000), '#FFFFFF')
+    # Create temporary image for text measurement - RGBA for transparency
+    temp_img = Image.new('RGBA', (width, 1000), (255, 255, 255, 255))
     draw = ImageDraw.Draw(temp_img)
     
     title = "MD TALK"
@@ -200,9 +210,6 @@ def create_md_talk_section(text_content=None, width=1200):
 모든 순간을 빛나게 만들어주는
 당신만의 특별한 주얼리입니다."""
     
-    # Log the text to verify encoding
-    logger.info(f"MD TALK text content: {repr(text[:50])}...")
-    
     # Split text into lines
     lines = text.split('\n')
     
@@ -215,7 +222,7 @@ def create_md_talk_section(text_content=None, width=1200):
     content_height = len(lines) * line_height
     total_height = top_margin + title_height + title_bottom_margin + content_height + bottom_margin
     
-    # Create actual image
+    # Create actual image - RGB for text sections
     section_img = Image.new('RGB', (width, total_height), '#FFFFFF')
     draw = ImageDraw.Draw(section_img)
     
@@ -245,8 +252,8 @@ def create_design_point_section(text_content=None, width=1200):
     title_font = get_font(48, korean_font_path)
     body_font = get_font(24, korean_font_path)
     
-    # Create temporary image for text measurement
-    temp_img = Image.new('RGB', (width, 1000), '#FFFFFF')
+    # Create temporary image for text measurement - RGBA for transparency
+    temp_img = Image.new('RGBA', (width, 1000), (255, 255, 255, 255))
     draw = ImageDraw.Draw(temp_img)
     
     title = "DESIGN POINT"
@@ -267,9 +274,6 @@ def create_design_point_section(text_content=None, width=1200):
 파베 세팅과 섬세한 밀그레인의 디테일
 화려하면서도 고급스러운 반영을 표현합니다"""
     
-    # Log the text to verify encoding
-    logger.info(f"DESIGN POINT text content: {repr(text[:50])}...")
-    
     # Split text into lines
     lines = text.split('\n')
     
@@ -282,7 +286,7 @@ def create_design_point_section(text_content=None, width=1200):
     content_height = len(lines) * line_height
     total_height = top_margin + title_height + title_bottom_margin + content_height + bottom_margin
     
-    # Create actual image
+    # Create actual image - RGB for text sections
     section_img = Image.new('RGB', (width, total_height), '#FFFFFF')
     draw = ImageDraw.Draw(section_img)
     
@@ -315,16 +319,22 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V28")
+        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V29")
+        
+        # CRITICAL: Ensure RGBA mode before processing
+        if image.mode != 'RGBA':
+            if image.mode == 'RGB':
+                image = image.convert('RGBA')
+            else:
+                image = image.convert('RGBA')
         
         # Pre-process image for better edge detection
-        # Apply slight contrast enhancement before removal
         contrast = ImageEnhance.Contrast(image)
         image_enhanced = contrast.enhance(1.1)
         
         # Save image to buffer
         buffered = BytesIO()
-        image_enhanced.save(buffered, format="PNG")
+        image_enhanced.save(buffered, format="PNG", compress_level=0)
         buffered.seek(0)
         img_data = buffered.getvalue()
         
@@ -342,13 +352,13 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
         
         result_image = Image.open(BytesIO(output))
         
+        # CRITICAL: Ensure RGBA mode
         if result_image.mode != 'RGBA':
             result_image = result_image.convert('RGBA')
         
         # ULTRA PRECISE edge refinement
         r, g, b, a = result_image.split()
         alpha_array = np.array(a, dtype=np.uint8)
-        original_alpha = alpha_array.copy()
         
         # Convert to float for processing
         alpha_float = alpha_array.astype(np.float32) / 255.0
@@ -397,26 +407,20 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
             alpha_float = alpha_bilateral.astype(np.float32) / 255.0
         
         # Stage 4: Ultra-precise threshold with smooth gradients
-        # Create smooth transition using sigmoid function
         k = 50  # Steepness of transition
         threshold = 0.5
         alpha_sigmoid = 1 / (1 + np.exp(-k * (alpha_float - threshold)))
         
         # Stage 5: Edge-aware smoothing
-        # Only smooth non-edge areas
         alpha_smooth = alpha_sigmoid.copy()
         non_edge_mask = ~edge_dilated.astype(bool)
         if np.any(non_edge_mask):
-            # Apply gentle smoothing to non-edge areas
             alpha_smooth_temp = cv2.GaussianBlur(alpha_sigmoid, (5, 5), 1.0)
             alpha_smooth[non_edge_mask] = alpha_smooth_temp[non_edge_mask]
         
         # Stage 6: Hair and fine detail preservation
-        # Detect fine details using high-pass filter
         alpha_highpass = alpha_float - cv2.GaussianBlur(alpha_float, (7, 7), 2.0)
         fine_details = np.abs(alpha_highpass) > 0.05
-        
-        # Preserve fine details
         alpha_smooth[fine_details] = alpha_float[fine_details]
         
         # Stage 7: Remove small artifacts while preserving tiny details
@@ -426,20 +430,16 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
         if num_labels > 2:
             sizes = [np.sum(labels == i) for i in range(1, num_labels)]
             if sizes:
-                # More aggressive artifact removal
                 min_size = int(alpha_array.size * 0.0002)  # 0.02% of image
                 valid_labels = [i+1 for i, size in enumerate(sizes) if size > min_size]
                 
-                # Create valid mask
                 valid_mask = np.zeros_like(alpha_binary, dtype=bool)
                 for label in valid_labels:
                     valid_mask |= (labels == label)
                 
-                # Apply mask but preserve edges
                 alpha_smooth[~valid_mask & ~edge_dilated.astype(bool)] = 0
         
         # Stage 8: Final polish with edge enhancement
-        # Enhance edges slightly
         edge_enhancement = 1.2
         alpha_smooth[edge_dilated.astype(bool)] *= edge_enhancement
         
@@ -447,32 +447,41 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
         alpha_array = np.clip(alpha_smooth * 255, 0, 255).astype(np.uint8)
         
         # Stage 9: Feather edges for natural look
-        # Create feathered edge
         kernel_feather = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         alpha_eroded = cv2.erode(alpha_array, kernel_feather, iterations=1)
         alpha_dilated = cv2.dilate(alpha_array, kernel_feather, iterations=1)
         
-        # Blend for feathering
         feather_mask = (alpha_dilated > 0) & (alpha_eroded < 255)
         if np.any(feather_mask):
             alpha_array[feather_mask] = ((alpha_array[feather_mask].astype(np.float32) + 
                                          alpha_eroded[feather_mask].astype(np.float32)) / 2).astype(np.uint8)
         
-        logger.info("✅ ULTRA PRECISE background removal complete")
+        logger.info("✅ ULTRA PRECISE background removal complete - RGBA preserved")
         
         a_new = Image.fromarray(alpha_array)
-        return Image.merge('RGBA', (r, g, b, a_new))
+        result = Image.merge('RGBA', (r, g, b, a_new))
+        
+        # Verify RGBA mode
+        if result.mode != 'RGBA':
+            logger.error("❌ WARNING: Result is not RGBA!")
+            result = result.convert('RGBA')
+        
+        return result
         
     except Exception as e:
         logger.error(f"U2Net removal failed: {e}")
+        # Ensure RGBA mode even on failure
+        if image.mode != 'RGBA':
+            return image.convert('RGBA')
         return image
 
 def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     """ULTRA PRECISE ring hole detection with maximum accuracy"""
+    # CRITICAL: Preserve RGBA mode
     if image.mode != 'RGBA':
-        return image
+        image = image.convert('RGBA')
     
-    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V28")
+    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V29 - Preserving RGBA")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -485,16 +494,9 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     h_channel, s_channel, v_channel = cv2.split(hsv)
     
     # Multi-criteria hole detection
-    # 1. Very bright areas (potential holes)
     very_bright = v_channel > 240
-    
-    # 2. Low saturation (grayish/white areas)
     low_saturation = s_channel < 30
-    
-    # 3. Current alpha holes
     alpha_holes = alpha_array < 50
-    
-    # 4. Combine all criteria
     potential_holes = (very_bright & low_saturation) | alpha_holes
     
     # Clean up noise
@@ -514,7 +516,6 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
         
         # Size filtering - adjust for ring holes
         if h * w * 0.0001 < component_size < h * w * 0.2:
-            # Get component properties
             coords = np.where(component)
             if len(coords[0]) == 0:
                 continue
@@ -528,28 +529,21 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
             if comp_height == 0:
                 continue
             
-            # Multiple validation criteria
             aspect_ratio = comp_width / comp_height
-            
-            # 1. Shape validation (ring holes can be various shapes)
             shape_valid = 0.2 < aspect_ratio < 5.0
             
-            # 2. Position validation (usually in center area)
             center_y, center_x = (min_y + max_y) / 2, (min_x + max_x) / 2
             center_distance = np.sqrt((center_x - w/2)**2 + (center_y - h/2)**2)
             position_valid = center_distance < max(w, h) * 0.45
             
-            # 3. Color consistency check
             component_pixels = rgb_array[component]
             if len(component_pixels) > 0:
-                # Check brightness
                 brightness = np.mean(component_pixels)
                 brightness_std = np.std(component_pixels)
                 
                 brightness_valid = brightness > 230
                 consistency_valid = brightness_std < 25
                 
-                # 4. Circularity check
                 component_uint8 = component.astype(np.uint8) * 255
                 contours, _ = cv2.findContours(component_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 
@@ -562,12 +556,10 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
                         circularity = 4 * np.pi * area / (perimeter * perimeter)
                         circularity_valid = circularity > 0.3
                 
-                # 5. Edge smoothness check
                 edges = cv2.Canny(component_uint8, 50, 150)
                 edge_ratio = np.sum(edges > 0) / max(1, perimeter)
                 smoothness_valid = edge_ratio < 2.0
                 
-                # Calculate confidence score
                 confidence = 0.0
                 if brightness_valid: confidence += 0.35
                 if consistency_valid: confidence += 0.25
@@ -575,50 +567,53 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
                 if circularity_valid: confidence += 0.15
                 if smoothness_valid: confidence += 0.10
                 
-                # Apply hole mask if confident
                 if confidence > 0.45 and shape_valid:
                     holes_mask[component] = 255
                     logger.info(f"Hole detected with confidence: {confidence:.2f}")
     
     # Apply holes if any detected
     if np.any(holes_mask > 0):
-        # Smooth hole edges
         holes_mask_smooth = cv2.GaussianBlur(holes_mask, (5, 5), 1.0)
         
-        # Create transition zone
         kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         holes_dilated = cv2.dilate(holes_mask, kernel_dilate, iterations=1)
         transition_zone = (holes_dilated > 0) & (holes_mask < 255)
         
-        # Apply graduated transparency
         alpha_float = alpha_array.astype(np.float32)
-        
-        # Full transparency in hole centers
         alpha_float[holes_mask_smooth > 200] = 0
         
-        # Graduated transparency in transition
         if np.any(transition_zone):
             transition_alpha = 1 - (holes_mask_smooth[transition_zone] / 255)
             alpha_float[transition_zone] *= transition_alpha
         
         alpha_array = np.clip(alpha_float, 0, 255).astype(np.uint8)
         
-        logger.info("✅ Ring holes made transparent")
+        logger.info("✅ Ring holes made transparent - RGBA preserved")
     
     a_new = Image.fromarray(alpha_array)
-    return Image.merge('RGBA', (r, g, b, a_new))
+    result = Image.merge('RGBA', (r, g, b, a_new))
+    
+    # Verify RGBA mode
+    if result.mode != 'RGBA':
+        logger.error("❌ WARNING: Result is not RGBA!")
+        result = result.convert('RGBA')
+    
+    return result
 
 def image_to_base64(image, keep_transparency=True):
     """Convert to base64 without padding - TRULY preserving transparency"""
     buffered = BytesIO()
     
-    # CRITICAL FIX: Always save as PNG with transparency for RGBA images
+    # CRITICAL FIX: Force RGBA and save as PNG
+    if image.mode != 'RGBA' and keep_transparency:
+        logger.warning(f"⚠️ Converting {image.mode} to RGBA for transparency")
+        image = image.convert('RGBA')
+    
     if image.mode == 'RGBA':
-        logger.info("💎 Preserving transparency in output - RGBA mode")
-        # Save as PNG with full transparency support
+        logger.info("💎 Saving RGBA image as PNG with full transparency")
+        # Save as PNG with NO compression for maximum transparency preservation
         image.save(buffered, format='PNG', compress_level=0, optimize=False)
     else:
-        # For non-RGBA images, just save as PNG
         logger.info(f"Saving {image.mode} mode image as PNG")
         image.save(buffered, format='PNG', optimize=True, compress_level=1)
     
@@ -651,8 +646,6 @@ def process_special_mode(job):
             design_point_text = design_point_text.decode('utf-8', errors='replace')
         
         logger.info(f"Creating both sections separately")
-        logger.info(f"MD TALK text: {repr(md_talk_text[:50])}...")
-        logger.info(f"DESIGN POINT text: {repr(design_point_text[:50])}...")
         
         # Create both sections
         md_section = create_md_talk_section(md_talk_text)
@@ -873,7 +866,9 @@ def detect_pattern_type(filename: str) -> str:
 
 def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
     """Apply pattern enhancement while TRULY preserving transparency"""
+    # CRITICAL: Ensure RGBA mode
     if image.mode != 'RGBA':
+        logger.warning(f"⚠️ Converting {image.mode} to RGBA in pattern enhancement")
         image = image.convert('RGBA')
     
     # CRITICAL: Process RGB channels separately to preserve alpha
@@ -943,7 +938,7 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
     contrast = ImageEnhance.Contrast(rgb_image)
     rgb_image = contrast.enhance(1.05)
     
-    # Apply sharpening
+    # Apply sharpening - SINGLE APPLICATION with highest value
     sharpness = ImageEnhance.Sharpness(rgb_image)
     rgb_image = sharpness.enhance(1.6)
     
@@ -953,10 +948,20 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
     
     logger.info(f"✅ Enhancement applied while preserving transparency. Mode: {enhanced_image.mode}")
     
+    # Verify RGBA mode
+    if enhanced_image.mode != 'RGBA':
+        logger.error("❌ WARNING: Enhanced image is not RGBA!")
+        enhanced_image = enhanced_image.convert('RGBA')
+    
     return enhanced_image
 
 def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_height=1560) -> Image.Image:
     """Resize image to target dimensions preserving transparency"""
+    # CRITICAL: Ensure RGBA mode
+    if image.mode != 'RGBA':
+        logger.warning(f"⚠️ Converting {image.mode} to RGBA in resize")
+        image = image.convert('RGBA')
+    
     width, height = image.size
     
     img_ratio = width / height
@@ -965,24 +970,29 @@ def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_he
     expected_ratio = 2000 / 2600
     
     if abs(img_ratio - expected_ratio) < 0.05:
-        return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
-    
-    if img_ratio > target_ratio:
-        new_height = target_height
-        new_width = int(target_height * img_ratio)
+        resized = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
     else:
-        new_width = target_width
-        new_height = int(target_width / img_ratio)
-    
-    resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    
-    if new_width != target_width or new_height != target_height:
-        left = (new_width - target_width) // 2
-        top = (new_height - target_height) // 2
-        right = left + target_width
-        bottom = top + target_height
+        if img_ratio > target_ratio:
+            new_height = target_height
+            new_width = int(target_height * img_ratio)
+        else:
+            new_width = target_width
+            new_height = int(target_width / img_ratio)
         
-        resized = resized.crop((left, top, right, bottom))
+        resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        if new_width != target_width or new_height != target_height:
+            left = (new_width - target_width) // 2
+            top = (new_height - target_height) // 2
+            right = left + target_width
+            bottom = top + target_height
+            
+            resized = resized.crop((left, top, right, bottom))
+    
+    # Verify RGBA mode
+    if resized.mode != 'RGBA':
+        logger.error("❌ WARNING: Resized image is not RGBA!")
+        resized = resized.convert('RGBA')
     
     return resized
 
@@ -995,14 +1005,14 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
     try:
         logger.info("🎨 Applying SwinIR enhancement with transparency")
         
-        # Separate alpha channel if present
-        if image.mode == 'RGBA':
-            r, g, b, a = image.split()
-            rgb_image = Image.merge('RGB', (r, g, b))
-            has_alpha = True
-        else:
-            rgb_image = image
-            has_alpha = False
+        # CRITICAL: Ensure RGBA mode
+        if image.mode != 'RGBA':
+            logger.warning(f"⚠️ Converting {image.mode} to RGBA for SwinIR")
+            image = image.convert('RGBA')
+        
+        # Separate alpha channel
+        r, g, b, a = image.split()
+        rgb_image = Image.merge('RGB', (r, g, b))
         
         buffered = BytesIO()
         rgb_image.save(buffered, format="PNG", optimize=True, compress_level=1)
@@ -1029,12 +1039,17 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
                 enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
             
             # Recombine with original alpha channel
-            if has_alpha:
-                r2, g2, b2 = enhanced_image.split()
-                enhanced_image = Image.merge('RGBA', (r2, g2, b2, a))
+            r2, g2, b2 = enhanced_image.split()
+            result = Image.merge('RGBA', (r2, g2, b2, a))
             
             logger.info("✅ SwinIR enhancement successful with transparency preserved")
-            return enhanced_image
+            
+            # Verify RGBA mode
+            if result.mode != 'RGBA':
+                logger.error("❌ WARNING: SwinIR result is not RGBA!")
+                result = result.convert('RGBA')
+            
+            return result
         else:
             return image
             
@@ -1043,9 +1058,9 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V28 FIXED Always Transparent"""
+    """Main enhancement processing - V29 STABLE TRANSPARENT"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 FIXED: Always apply background removal for transparency")
+    logger.info("🎯 STABLE: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
@@ -1075,26 +1090,21 @@ def process_enhancement(job):
         # Log initial image info
         logger.info(f"Input image mode: {image.mode}, size: {image.size}")
         
-        # CRITICAL FIX: Check if we should force background removal
-        force_removal = job.get('force_background_removal', True)  # Default to True
+        # CRITICAL: Convert to RGBA immediately
+        if image.mode != 'RGBA':
+            logger.info(f"Converting {image.mode} to RGBA immediately")
+            image = image.convert('RGBA')
         
         # STEP 1: ULTRA PRECISE BACKGROUND REMOVAL - ALWAYS APPLY
         logger.info("📸 STEP 1: ALWAYS applying ULTRA PRECISE background removal")
-        logger.info("🔥 FIXED: Removing filename check - applying to ALL images")
         removal_start = time.time()
         image = u2net_ultra_precise_removal(image)
         logger.info(f"⏱️ Ultra precise background removal took: {time.time() - removal_start:.2f}s")
         
-        # Ensure RGBA mode for transparency
+        # Verify RGBA after removal
         if image.mode != 'RGBA':
-            logger.info("Converting to RGBA mode for transparency")
-            if image.mode == 'RGB':
-                # Add full alpha channel
-                r, g, b = image.split()
-                a = Image.new('L', image.size, 255)
-                image = Image.merge('RGBA', (r, g, b, a))
-            else:
-                image = image.convert('RGBA')
+            logger.error("❌ Image lost RGBA after background removal!")
+            image = image.convert('RGBA')
         
         # STEP 2: ENHANCEMENT (preserving transparency)
         logger.info("🎨 STEP 2: Applying enhancements with TRUE transparency preservation")
@@ -1102,6 +1112,9 @@ def process_enhancement(job):
         
         # Auto white balance with alpha preservation
         def auto_white_balance_rgba(rgba_img):
+            if rgba_img.mode != 'RGBA':
+                rgba_img = rgba_img.convert('RGBA')
+            
             r, g, b, a = rgba_img.split()
             rgb_img = Image.merge('RGB', (r, g, b))
             
@@ -1157,8 +1170,12 @@ def process_enhancement(job):
         image = apply_swinir_enhancement_transparent(image)
         logger.info(f"⏱️ SwinIR took: {time.time() - swinir_start:.2f}s")
         
-        # Log final image mode
-        logger.info(f"Final image mode: {image.mode}, size: {image.size}")
+        # Final verification
+        if image.mode != 'RGBA':
+            logger.error("❌ CRITICAL: Final image is not RGBA! Converting...")
+            image = image.convert('RGBA')
+        
+        logger.info(f"✅ Final image mode: {image.mode}, size: {image.size}")
         
         # CRITICAL: NO BACKGROUND COMPOSITE - Keep transparency
         logger.info("💎 NO background composite - keeping pure transparency")
@@ -1206,18 +1223,14 @@ def process_enhancement(job):
                     "011": "COLOR section"
                 },
                 "optimization_features": [
-                    "✅ FIXED V28: Always apply background removal",
-                    "✅ TRUE TRANSPARENT PNG: No background composite",
-                    "✅ FIXED: Alpha channel preserved throughout",
-                    "✅ ENHANCED: Korean font with UTF-8 encoding verification",
-                    "✅ ULTRA PRECISE Transparent PNG edge detection",
-                    "✅ Fixed: both_text_sections returns 2 separate images",
-                    "✅ Advanced multi-stage edge refinement",
-                    "✅ Sobel edge detection for precision",
-                    "✅ Multiple guided filter passes",
-                    "✅ Hair and fine detail preservation",
-                    "✅ Feathered edges for natural look",
-                    "✅ Ultra precise ring hole detection",
+                    "✅ V29 STABLE: Always apply background removal",
+                    "✅ STABLE TRANSPARENT PNG: Verified at every step",
+                    "✅ ENHANCED: Font caching for performance",
+                    "✅ REMOVED: Unused Claude API code",
+                    "✅ OPTIMIZED: Single sharpening pass (1.6)",
+                    "✅ CRITICAL: RGBA mode enforced throughout",
+                    "✅ ULTRA PRECISE edge detection maintained",
+                    "✅ Ring hole detection with transparency",
                     "✅ Pattern-specific enhancement preserved",
                     "✅ Ready for Figma transparent overlay",
                     "✅ Pure PNG with full alpha channel",
@@ -1227,7 +1240,7 @@ def process_enhancement(job):
                 "swinir_applied": True,
                 "png_support": True,
                 "edge_detection": "ULTRA PRECISE (Sobel + Guided Filter)",
-                "korean_support": "ENHANCED (UTF-8 encoding with verification)",
+                "korean_support": "ENHANCED with font caching",
                 "white_overlay": "AC: 12% | AB: 5% + Cool Tone | Other: None",
                 "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
@@ -1236,7 +1249,7 @@ def process_enhancement(job):
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with TRUE transparency")
+        logger.info("✅ Enhancement completed successfully with STABLE transparency")
         return output
         
     except Exception as e:
