@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V26-Ultra-Precise-Korean-Fixed
+# VERSION: V27-True-Transparent-PNG
 ################################
 
-VERSION = "V26-Ultra-Precise-Korean-Fixed"
+VERSION = "V27-True-Transparent-PNG"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -315,7 +315,7 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V26")
+        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V27")
         
         # Pre-process image for better edge detection
         # Apply slight contrast enhancement before removal
@@ -343,7 +343,7 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
         result_image = Image.open(BytesIO(output))
         
         if result_image.mode != 'RGBA':
-            return result_image
+            result_image = result_image.convert('RGBA')
         
         # ULTRA PRECISE edge refinement
         r, g, b, a = result_image.split()
@@ -472,7 +472,7 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V26")
+    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V27")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -609,23 +609,17 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     return Image.merge('RGBA', (r, g, b, a_new))
 
 def image_to_base64(image, keep_transparency=True):
-    """Convert to base64 without padding - FIXED to properly preserve transparency"""
+    """Convert to base64 without padding - TRULY preserving transparency"""
     buffered = BytesIO()
     
-    # Force keeping transparency for RGBA images
-    if image.mode == 'RGBA' and keep_transparency:
-        # CRITICAL: Use PNG format with proper settings for transparency
-        logger.info("💎 Preserving transparency in output - RGBA mode detected")
-        # Use PNG with no optimization to ensure transparency is preserved
-        image.save(buffered, format='PNG', compress_level=1)
+    # CRITICAL FIX: Always save as PNG with transparency for RGBA images
+    if image.mode == 'RGBA':
+        logger.info("💎 Preserving transparency in output - RGBA mode")
+        # Save as PNG with full transparency support
+        image.save(buffered, format='PNG', compress_level=0, optimize=False)
     else:
-        # Convert to RGB with white background if not keeping transparency
-        if image.mode == 'RGBA':
-            logger.info("Converting RGBA to RGB with white background")
-            background = Image.new('RGB', image.size, (255, 255, 255))
-            background.paste(image, mask=image.split()[3])
-            image = background
-        
+        # For non-RGBA images, just save as PNG
+        logger.info(f"Saving {image.mode} mode image as PNG")
         image.save(buffered, format='PNG', optimize=True, compress_level=1)
     
     buffered.seek(0)
@@ -877,33 +871,27 @@ def detect_pattern_type(filename: str) -> str:
     else:
         return "other"
 
-def enhance_with_alpha(image: Image.Image, enhancement_func):
-    """Apply enhancement to RGB while preserving alpha"""
-    if image.mode == 'RGBA':
-        r, g, b, a = image.split()
-        rgb_image = Image.merge('RGB', (r, g, b))
-        enhanced_rgb = enhancement_func(rgb_image)
-        r2, g2, b2 = enhanced_rgb.split()
-        return Image.merge('RGBA', (r2, g2, b2, a))
-    else:
-        return enhancement_func(image)
-
 def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Apply pattern enhancement while preserving transparency"""
+    """Apply pattern enhancement while TRULY preserving transparency"""
     if image.mode != 'RGBA':
         image = image.convert('RGBA')
     
+    # CRITICAL: Process RGB channels separately to preserve alpha
     r, g, b, a = image.split()
     rgb_image = Image.merge('RGB', (r, g, b))
+    
+    # Convert to array for processing
+    img_array = np.array(rgb_image, dtype=np.float32)
     
     # Apply enhancements based on pattern type
     if pattern_type == "ac_pattern":
         logger.info("🔍 AC Pattern - Applying 12% white overlay")
         # Apply 12% white overlay
         white_overlay = 0.12
-        img_array = np.array(rgb_image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
+        
+        # Convert back to image
         rgb_image = Image.fromarray(img_array.astype(np.uint8))
         
         brightness = ImageEnhance.Brightness(rgb_image)
@@ -916,9 +904,8 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
     
     elif pattern_type == "ab_pattern":
         logger.info("🔍 AB Pattern - Applying 5% white overlay and cool tone")
-        # Apply 5% white overlay and cool tone
+        # Apply 5% white overlay
         white_overlay = 0.05
-        img_array = np.array(rgb_image, dtype=np.float32)
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         
         # Cool tone adjustment
@@ -960,9 +947,13 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
     sharpness = ImageEnhance.Sharpness(rgb_image)
     rgb_image = sharpness.enhance(1.6)
     
-    # Recombine with alpha
+    # CRITICAL: Recombine with ORIGINAL alpha channel
     r2, g2, b2 = rgb_image.split()
-    return Image.merge('RGBA', (r2, g2, b2, a))
+    enhanced_image = Image.merge('RGBA', (r2, g2, b2, a))
+    
+    logger.info(f"✅ Enhancement applied while preserving transparency. Mode: {enhanced_image.mode}")
+    
+    return enhanced_image
 
 def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_height=1560) -> Image.Image:
     """Resize image to target dimensions preserving transparency"""
@@ -1004,7 +995,7 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
     try:
         logger.info("🎨 Applying SwinIR enhancement with transparency")
         
-        # Separate alpha channel
+        # Separate alpha channel if present
         if image.mode == 'RGBA':
             r, g, b, a = image.split()
             rgb_image = Image.merge('RGB', (r, g, b))
@@ -1037,12 +1028,12 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
             else:
                 enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
             
-            # Recombine alpha channel
+            # Recombine with original alpha channel
             if has_alpha:
                 r2, g2, b2 = enhanced_image.split()
                 enhanced_image = Image.merge('RGBA', (r2, g2, b2, a))
             
-            logger.info("✅ SwinIR enhancement successful with transparency")
+            logger.info("✅ SwinIR enhancement successful with transparency preserved")
             return enhanced_image
         else:
             return image
@@ -1052,10 +1043,10 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V26 with ULTRA Precise Edge Detection and Fixed Transparency"""
+    """Main enhancement processing - V27 TRUE Transparent PNG"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 ULTRA PRECISE MODE: Maximum edge detection enabled")
-    logger.info("💎 TRANSPARENT OUTPUT: Fixed to properly preserve transparency")
+    logger.info("🎯 TRUE TRANSPARENT PNG: No background composite")
+    logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
@@ -1091,17 +1082,26 @@ def process_enhancement(job):
             image = u2net_ultra_precise_removal(image)
             logger.info(f"⏱️ Ultra precise background removal took: {time.time() - removal_start:.2f}s")
         
-        # Ensure RGBA mode
+        # Ensure RGBA mode for transparency
         if image.mode != 'RGBA':
-            logger.info("Converting to RGBA mode")
-            image = image.convert('RGBA')
+            logger.info("Converting to RGBA mode for transparency")
+            if image.mode == 'RGB':
+                # Add full alpha channel
+                r, g, b = image.split()
+                a = Image.new('L', image.size, 255)
+                image = Image.merge('RGBA', (r, g, b, a))
+            else:
+                image = image.convert('RGBA')
         
         # STEP 2: ENHANCEMENT (preserving transparency)
-        logger.info("🎨 STEP 2: Applying enhancements with transparency")
+        logger.info("🎨 STEP 2: Applying enhancements with TRUE transparency preservation")
         enhancement_start = time.time()
         
         # Auto white balance with alpha preservation
-        def auto_white_balance(rgb_img):
+        def auto_white_balance_rgba(rgba_img):
+            r, g, b, a = rgba_img.split()
+            rgb_img = Image.merge('RGB', (r, g, b))
+            
             img_array = np.array(rgb_img, dtype=np.float32)
             
             gray_pixels = img_array[::15, ::15]
@@ -1122,9 +1122,11 @@ def process_enhancement(job):
                 img_array[:,:,1] *= (gray_avg / g_avg) if g_avg > 0 else 1
                 img_array[:,:,2] *= (gray_avg / b_avg) if b_avg > 0 else 1
             
-            return Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
+            rgb_balanced = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
+            r2, g2, b2 = rgb_balanced.split()
+            return Image.merge('RGBA', (r2, g2, b2, a))
         
-        image = enhance_with_alpha(image, auto_white_balance)
+        image = auto_white_balance_rgba(image)
         
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
@@ -1134,7 +1136,7 @@ def process_enhancement(job):
             "other": "기타색상(no_overlay)"
         }.get(pattern_type, "기타색상(no_overlay)")
         
-        # Apply pattern-specific enhancements
+        # Apply pattern-specific enhancements (preserving transparency)
         image = apply_pattern_enhancement_transparent(image, pattern_type)
         
         # ULTRA PRECISE ring hole detection
@@ -1143,7 +1145,7 @@ def process_enhancement(job):
         
         logger.info(f"⏱️ Enhancement took: {time.time() - enhancement_start:.2f}s")
         
-        # RESIZE
+        # RESIZE (preserving transparency)
         image = resize_to_target_dimensions(image, 1200, 1560)
         
         # STEP 3: SWINIR ENHANCEMENT (preserving transparency)
@@ -1155,7 +1157,10 @@ def process_enhancement(job):
         # Log final image mode
         logger.info(f"Final image mode: {image.mode}, size: {image.size}")
         
-        # Save to base64 as PNG (to preserve transparency) - FIXED
+        # CRITICAL: NO BACKGROUND COMPOSITE - Keep transparency
+        logger.info("💎 NO background composite - keeping pure transparency")
+        
+        # Save to base64 as PNG with transparency
         enhanced_base64_no_padding = image_to_base64(image, keep_transparency=True)
         
         # Build filename
@@ -1185,6 +1190,7 @@ def process_enhancement(job):
                 "transparency_preserved": True,
                 "background_applied": False,
                 "format": "PNG",
+                "output_mode": "RGBA",
                 "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
                 "file_number_info": {
                     "001-003": "Enhancement",
@@ -1196,7 +1202,8 @@ def process_enhancement(job):
                     "011": "COLOR section"
                 },
                 "optimization_features": [
-                    "✅ FIXED: Transparent PNG output properly preserved",
+                    "✅ TRUE TRANSPARENT PNG: No background composite",
+                    "✅ FIXED: Alpha channel preserved throughout",
                     "✅ ENHANCED: Korean font with UTF-8 encoding verification",
                     "✅ ULTRA PRECISE Transparent PNG edge detection",
                     "✅ Fixed: both_text_sections returns 2 separate images",
@@ -1207,7 +1214,8 @@ def process_enhancement(job):
                     "✅ Feathered edges for natural look",
                     "✅ Ultra precise ring hole detection",
                     "✅ Pattern-specific enhancement preserved",
-                    "✅ Ready for Figma overlay"
+                    "✅ Ready for Figma transparent overlay",
+                    "✅ Pure PNG with full alpha channel"
                 ],
                 "processing_order": "1.U2Net-Ultra → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
@@ -1216,11 +1224,12 @@ def process_enhancement(job):
                 "korean_support": "ENHANCED (UTF-8 encoding with verification)",
                 "white_overlay": "AC: 12% | AB: 5% + Cool Tone | Other: None",
                 "expected_input": "2000x2600 PNG",
-                "output_size": "1200x1560"
+                "output_size": "1200x1560",
+                "transparency_info": "Full RGBA transparency preserved - NO background"
             }
         }
         
-        logger.info("✅ Enhancement completed successfully")
+        logger.info("✅ Enhancement completed successfully with TRUE transparency")
         return output
         
     except Exception as e:
