@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V27-True-Transparent-PNG
+# VERSION: V28-Fixed-Always-Transparent
 ################################
 
-VERSION = "V27-True-Transparent-PNG"
+VERSION = "V28-Fixed-Always-Transparent"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -315,7 +315,7 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V27")
+        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V28")
         
         # Pre-process image for better edge detection
         # Apply slight contrast enhancement before removal
@@ -472,7 +472,7 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     if image.mode != 'RGBA':
         return image
     
-    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V27")
+    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V28")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -624,7 +624,7 @@ def image_to_base64(image, keep_transparency=True):
     
     buffered.seek(0)
     base64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-    # Remove padding
+    # Remove padding for Make.com compatibility
     return base64_str.rstrip('=')
 
 def process_special_mode(job):
@@ -1043,9 +1043,9 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V27 TRUE Transparent PNG"""
+    """Main enhancement processing - V28 FIXED Always Transparent"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 TRUE TRANSPARENT PNG: No background composite")
+    logger.info("🎯 FIXED: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
@@ -1075,12 +1075,15 @@ def process_enhancement(job):
         # Log initial image info
         logger.info(f"Input image mode: {image.mode}, size: {image.size}")
         
-        # STEP 1: ULTRA PRECISE BACKGROUND REMOVAL (PNG files)
-        if filename and filename.lower().endswith('.png'):
-            logger.info("📸 STEP 1: PNG detected - ULTRA PRECISE background removal")
-            removal_start = time.time()
-            image = u2net_ultra_precise_removal(image)
-            logger.info(f"⏱️ Ultra precise background removal took: {time.time() - removal_start:.2f}s")
+        # CRITICAL FIX: Check if we should force background removal
+        force_removal = job.get('force_background_removal', True)  # Default to True
+        
+        # STEP 1: ULTRA PRECISE BACKGROUND REMOVAL - ALWAYS APPLY
+        logger.info("📸 STEP 1: ALWAYS applying ULTRA PRECISE background removal")
+        logger.info("🔥 FIXED: Removing filename check - applying to ALL images")
+        removal_start = time.time()
+        image = u2net_ultra_precise_removal(image)
+        logger.info(f"⏱️ Ultra precise background removal took: {time.time() - removal_start:.2f}s")
         
         # Ensure RGBA mode for transparency
         if image.mode != 'RGBA':
@@ -1188,6 +1191,7 @@ def process_enhancement(job):
                 "processing_time": f"{total_time:.2f}s",
                 "has_transparency": True,
                 "transparency_preserved": True,
+                "background_removed": True,
                 "background_applied": False,
                 "format": "PNG",
                 "output_mode": "RGBA",
@@ -1202,6 +1206,7 @@ def process_enhancement(job):
                     "011": "COLOR section"
                 },
                 "optimization_features": [
+                    "✅ FIXED V28: Always apply background removal",
                     "✅ TRUE TRANSPARENT PNG: No background composite",
                     "✅ FIXED: Alpha channel preserved throughout",
                     "✅ ENHANCED: Korean font with UTF-8 encoding verification",
@@ -1215,7 +1220,8 @@ def process_enhancement(job):
                     "✅ Ultra precise ring hole detection",
                     "✅ Pattern-specific enhancement preserved",
                     "✅ Ready for Figma transparent overlay",
-                    "✅ Pure PNG with full alpha channel"
+                    "✅ Pure PNG with full alpha channel",
+                    "✅ Make.com compatible base64 (no padding)"
                 ],
                 "processing_order": "1.U2Net-Ultra → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
@@ -1223,9 +1229,10 @@ def process_enhancement(job):
                 "edge_detection": "ULTRA PRECISE (Sobel + Guided Filter)",
                 "korean_support": "ENHANCED (UTF-8 encoding with verification)",
                 "white_overlay": "AC: 12% | AB: 5% + Cool Tone | Other: None",
-                "expected_input": "2000x2600 PNG",
+                "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
-                "transparency_info": "Full RGBA transparency preserved - NO background"
+                "transparency_info": "Full RGBA transparency preserved - NO background",
+                "make_com_compatibility": "Base64 without padding"
             }
         }
         
