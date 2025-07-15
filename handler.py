@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V30-Korean-Encoding-Fixed-AB12
+# VERSION: V30-Korean-Encoding-Fixed-AB16
 ################################
 
-VERSION = "V30-Korean-Encoding-Fixed-AB12"
+VERSION = "V30-Korean-Encoding-Fixed-AB16"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -1039,7 +1039,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Apply pattern enhancement while TRULY preserving transparency - AB FIXED to 12%"""
+    """Apply pattern enhancement while TRULY preserving transparency - AB 16%"""
     # CRITICAL: Ensure RGBA mode
     if image.mode != 'RGBA':
         logger.warning(f"⚠️ Converting {image.mode} to RGBA in pattern enhancement")
@@ -1072,9 +1072,9 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         logger.info("✅ AC Pattern enhancement applied")
     
     elif pattern_type == "ab_pattern":
-        logger.info("🔍 AB Pattern - Applying 12% white overlay and cool tone (FIXED)")
-        # FIXED: Apply 12% white overlay (same as AC pattern)
-        white_overlay = 0.12  # Changed from 0.05 to 0.12
+        logger.info("🔍 AB Pattern - Applying 16% white overlay and cool tone")
+        # Apply 16% white overlay
+        white_overlay = 0.16  # Changed to 16%
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         
         # Cool tone adjustment
@@ -1095,7 +1095,7 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         brightness = ImageEnhance.Brightness(rgb_image)
         rgb_image = brightness.enhance(1.005)
         
-        logger.info("✅ AB Pattern enhancement applied with 12% white overlay")
+        logger.info("✅ AB Pattern enhancement applied with 16% white overlay")
         
     else:
         logger.info("🔍 Other Pattern - Standard enhancement")
@@ -1232,12 +1232,12 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V30 KOREAN ENCODING FIXED - AB PATTERN 12%"""
+    """Main enhancement processing - V30 KOREAN ENCODING FIXED - AB PATTERN 16%"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 STABLE: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info("🔤 KOREAN ENCODING FIXED: Perfect UTF-8 handling without encoding parameter")
-    logger.info("🔧 AB PATTERN FIXED: Now using 12% white overlay (same as AC)")
+    logger.info("🔧 AB PATTERN: Now using 16% white overlay")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
@@ -1324,7 +1324,7 @@ def process_enhancement(job):
         pattern_type = detect_pattern_type(filename)
         detected_type = {
             "ac_pattern": "무도금화이트(0.12)",
-            "ab_pattern": "무도금화이트-쿨톤(0.12)",  # FIXED: Changed from 0.05 to 0.12
+            "ab_pattern": "무도금화이트-쿨톤(0.16)",  # Changed to 16%
             "other": "기타색상(no_overlay)"
         }.get(pattern_type, "기타색상(no_overlay)")
         
@@ -1412,7 +1412,7 @@ def process_enhancement(job):
                 ],
                 "optimization_features": [
                     "✅ V30 KOREAN FIXED: Perfect UTF-8 Korean text rendering",
-                    "✅ AB PATTERN FIXED: Now using 12% white overlay (same as AC)",
+                    "✅ AB PATTERN: Now using 16% white overlay",
                     "✅ STABLE TRANSPARENT PNG: Verified at every step",
                     "✅ WORKING FONT URLS: Google Fonts GitHub raw URLs",
                     "✅ SIMPLIFIED ENCODING: No complex encoding conversions",
@@ -1431,7 +1431,7 @@ def process_enhancement(job):
                 "png_support": True,
                 "edge_detection": "ULTRA PRECISE (Sobel + Guided Filter)",
                 "korean_support": "COMPLETELY FIXED - No encoding parameter needed",
-                "white_overlay": "AC: 12% | AB: 12% (FIXED) | Other: None",
+                "white_overlay": "AC: 12% | AB: 16% | Other: None",
                 "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
                 "transparency_info": "Full RGBA transparency preserved - NO background",
@@ -1439,7 +1439,7 @@ def process_enhancement(job):
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with KOREAN ENCODING FIXED and AB PATTERN 12%")
+        logger.info("✅ Enhancement completed successfully with KOREAN ENCODING FIXED and AB PATTERN 16%")
         return output
         
     except Exception as e:
