@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V30-Korean-Encoding-Fixed-AB16
+# VERSION: V31-Fixed-Text-Sections
 ################################
 
-VERSION = "V30-Korean-Encoding-Fixed-AB16"
+VERSION = "V31-Fixed-Text-Sections"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -308,9 +308,46 @@ def get_text_size(draw, text, font):
         logger.error(f"❌ Text size calculation error: {e}")
         return (100, 20)  # Fallback size
 
+def wrap_text(text, font, max_width, draw):
+    """Wrap text to fit within max_width"""
+    words = text.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        width = bbox[2] - bbox[0]
+        
+        if width <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(' '.join(current_line))
+                current_line = [word]
+            else:
+                # Word is too long, add it anyway
+                lines.append(word)
+                current_line = []
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    return lines
+
 def create_md_talk_section(text_content=None, width=1200):
-    """Create MD TALK section - KOREAN ENCODING FIXED"""
-    logger.info("🔤 Creating MD TALK section with FIXED Korean encoding")
+    """Create MD TALK section - FIXED SIZE 1200x600"""
+    logger.info("🔤 Creating MD TALK section with FIXED size 1200x600")
+    
+    # Fixed dimensions
+    fixed_width = 1200
+    fixed_height = 600
+    
+    # Margins
+    left_margin = 100
+    right_margin = 100
+    top_margin = 80
+    content_width = fixed_width - left_margin - right_margin
     
     # Ensure Korean font is ready
     download_korean_font()
@@ -322,7 +359,7 @@ def create_md_talk_section(text_content=None, width=1200):
     if not title_font or not body_font:
         logger.error("❌ Failed to load fonts for MD TALK")
         # Create error image
-        error_img = Image.new('RGB', (width, 400), '#FFFFFF')
+        error_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
         error_draw = ImageDraw.Draw(error_img)
         try:
             error_draw.text((50, 50), "Font Error - MD TALK", fill='red')
@@ -330,67 +367,69 @@ def create_md_talk_section(text_content=None, width=1200):
             pass
         return error_img
     
-    # Create temp image for measurement
-    temp_img = Image.new('RGB', (width, 1000), '#FFFFFF')
-    draw = ImageDraw.Draw(temp_img)
+    # Create final image with fixed size
+    section_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
+    draw = ImageDraw.Draw(section_img)
     
     # Title
     title = "MD TALK"
     title_width, title_height = get_text_size(draw, title, title_font)
     
-    # Prepare Korean text content - FIXED encoding
+    # Draw title centered
+    title_x = (fixed_width - title_width) // 2
+    safe_draw_text(draw, (title_x, top_margin), title, title_font, (40, 40, 40))
+    
+    # Prepare Korean text content
     if text_content and text_content.strip():
         text = text_content.replace('MD TALK', '').replace('MD Talk', '').strip()
     else:
-        text = """이 제품은 일상에서도 부담없이
-착용할 수 있는 편안한 디자인으로
-매일의 스타일링에 포인트를 더해줍니다.
-
-특별한 날은 물론 평범한 일상까지
-모든 순간을 빛나게 만들어주는
-당신만의 특별한 주얼리입니다."""
+        text = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다. 특별한 날은 물론 평범한 일상까지 모든 순간을 빛나게 만들어주는 당신만의 특별한 주얼리입니다."""
     
     # Ensure UTF-8 string
     if isinstance(text, bytes):
         text = text.decode('utf-8', errors='replace')
     text = str(text).strip()
     
-    # Split into lines
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    # Wrap text to fit within margins
+    wrapped_lines = wrap_text(text, body_font, content_width, draw)
     
-    # Calculate dimensions
-    top_margin = 60
-    title_bottom_margin = 140
+    # Calculate vertical position for centering content
     line_height = 50
-    bottom_margin = 80
+    content_height = len(wrapped_lines) * line_height
+    title_bottom_margin = 80
     
-    content_height = len(lines) * line_height
-    total_height = top_margin + title_height + title_bottom_margin + content_height + bottom_margin
-    
-    # Create final image
-    section_img = Image.new('RGB', (width, total_height), '#FFFFFF')
-    draw = ImageDraw.Draw(section_img)
-    
-    # Draw title centered
-    title_x = (width - title_width) // 2
-    safe_draw_text(draw, (title_x, top_margin), title, title_font, (40, 40, 40))
-    
-    # Draw body text
+    # Start position for body text
     y_pos = top_margin + title_height + title_bottom_margin
     
-    for line in lines:
+    # Center text vertically if space allows
+    total_content_height = title_height + title_bottom_margin + content_height
+    if total_content_height < fixed_height - top_margin - 80:
+        y_pos = (fixed_height - content_height) // 2 + 20
+    
+    # Draw body text with center alignment
+    for line in wrapped_lines:
         if line:
             line_width, _ = get_text_size(draw, line, body_font)
-            line_x = (width - line_width) // 2
+            line_x = (fixed_width - line_width) // 2
             safe_draw_text(draw, (line_x, y_pos), line, body_font, (80, 80, 80))
         y_pos += line_height
     
-    logger.info(f"✅ MD TALK section created: {width}x{total_height}")
+    logger.info(f"✅ MD TALK section created: {fixed_width}x{fixed_height}")
     return section_img
 
 def create_design_point_section(text_content=None, width=1200):
-    """Create DESIGN POINT section - KOREAN ENCODING FIXED"""
-    logger.info("🔤 Creating DESIGN POINT section with FIXED Korean encoding")
+    """Create DESIGN POINT section - FIXED SIZE 1200x600"""
+    logger.info("🔤 Creating DESIGN POINT section with FIXED size 1200x600")
+    
+    # Fixed dimensions
+    fixed_width = 1200
+    fixed_height = 600
+    
+    # Margins
+    left_margin = 100
+    right_margin = 100
+    top_margin = 80
+    content_width = fixed_width - left_margin - right_margin
     
     # Ensure Korean font is ready
     download_korean_font()
@@ -402,7 +441,7 @@ def create_design_point_section(text_content=None, width=1200):
     if not title_font or not body_font:
         logger.error("❌ Failed to load fonts for DESIGN POINT")
         # Create error image
-        error_img = Image.new('RGB', (width, 400), '#FFFFFF')
+        error_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
         error_draw = ImageDraw.Draw(error_img)
         try:
             error_draw.text((50, 50), "Font Error - DESIGN POINT", fill='red')
@@ -410,63 +449,58 @@ def create_design_point_section(text_content=None, width=1200):
             pass
         return error_img
     
-    # Create temp image
-    temp_img = Image.new('RGB', (width, 1000), '#FFFFFF')
-    draw = ImageDraw.Draw(temp_img)
+    # Create final image with fixed size
+    section_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
+    draw = ImageDraw.Draw(section_img)
     
     # Title
     title = "DESIGN POINT"
     title_width, title_height = get_text_size(draw, title, title_font)
     
-    # Prepare text content - FIXED encoding
+    # Draw title centered
+    title_x = (fixed_width - title_width) // 2
+    safe_draw_text(draw, (title_x, top_margin), title, title_font, (40, 40, 40))
+    
+    # Prepare text content
     if text_content and text_content.strip():
         text = text_content.replace('DESIGN POINT', '').replace('Design Point', '').strip()
     else:
-        text = """남성 단품은 무광 텍스처와 유광 라인의 조화가
-견고한 감성을 전하고 여자 단품은
-파베 세팅과 섬세한 밀그레인의 디테일
-화려하면서도 고급스러운 반영을 표현합니다"""
+        text = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일 화려하면서도 고급스러운 반짝임을 표현합니다"""
     
     # Ensure UTF-8 string
     if isinstance(text, bytes):
         text = text.decode('utf-8', errors='replace')
     text = str(text).strip()
     
-    # Split into lines
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    # Wrap text to fit within margins
+    wrapped_lines = wrap_text(text, body_font, content_width, draw)
     
-    # Calculate dimensions
-    top_margin = 60
-    title_bottom_margin = 160
-    line_height = 55
-    bottom_margin = 100
+    # Calculate vertical position for centering content
+    line_height = 45
+    content_height = len(wrapped_lines) * line_height
+    title_bottom_margin = 100
     
-    content_height = len(lines) * line_height
-    total_height = top_margin + title_height + title_bottom_margin + content_height + bottom_margin
-    
-    # Create final image
-    section_img = Image.new('RGB', (width, total_height), '#FFFFFF')
-    draw = ImageDraw.Draw(section_img)
-    
-    # Draw title centered
-    title_x = (width - title_width) // 2
-    safe_draw_text(draw, (title_x, top_margin), title, title_font, (40, 40, 40))
-    
-    # Draw body text
+    # Start position for body text
     y_pos = top_margin + title_height + title_bottom_margin
     
-    for line in lines:
+    # Center text vertically if space allows
+    total_content_height = title_height + title_bottom_margin + content_height
+    if total_content_height < fixed_height - top_margin - 100:
+        y_pos = (fixed_height - content_height) // 2 + 40
+    
+    # Draw body text with center alignment
+    for line in wrapped_lines:
         if line:
             line_width, _ = get_text_size(draw, line, body_font)
-            line_x = (width - line_width) // 2
+            line_x = (fixed_width - line_width) // 2
             safe_draw_text(draw, (line_x, y_pos), line, body_font, (80, 80, 80))
         y_pos += line_height
     
     # Draw bottom line
-    line_y = y_pos + 30
-    draw.rectangle([100, line_y, width - 100, line_y + 2], fill=(220, 220, 220))
+    line_y = fixed_height - 80
+    draw.rectangle([100, line_y, fixed_width - 100, line_y + 2], fill=(220, 220, 220))
     
-    logger.info(f"✅ DESIGN POINT section created: {width}x{total_height}")
+    logger.info(f"✅ DESIGN POINT section created: {fixed_width}x{fixed_height}")
     return section_img
 
 def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
@@ -791,14 +825,9 @@ def process_special_mode(job):
     # BOTH TEXT SECTIONS - Return TWO separate images
     if special_mode == 'both_text_sections':
         # Get text content with proper Korean encoding
-        md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or """각도에 따라 달라지는 빛의 결들이
-두 사람의 특별한 순간순간을 더 찬란하게 만들며
-360도 새겨진 패턴으로
-매일 새로운 반짝임을 보여줍니다 :)"""
+        md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)"""
         
-        design_point_text = job.get('design_point_content', '') or job.get('design_point', '') or """입체적인 컷팅 위로 섬세하게 빛나는 패턴이
-고급스러움을 완성하며
-각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
+        design_point_text = job.get('design_point_content', '') or job.get('design_point', '') or """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
         
         # Handle encoding properly - FIXED
         if isinstance(md_talk_text, bytes):
@@ -860,8 +889,7 @@ def process_special_mode(job):
         text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('md_talk', '')
         
         if not text_content:
-            text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로
-매일의 스타일링에 포인트를 더해줍니다."""
+            text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."""
         
         # Handle encoding - FIXED
         if isinstance(text_content, bytes):
@@ -896,9 +924,7 @@ def process_special_mode(job):
         text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('design_point', '')
         
         if not text_content:
-            text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고
-여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로
-화려하면서도 고급스러운 반짝임을 표현합니다."""
+            text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
         
         # Handle encoding - FIXED
         if isinstance(text_content, bytes):
@@ -1232,11 +1258,11 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V30 KOREAN ENCODING FIXED - AB PATTERN 16%"""
+    """Main enhancement processing - V31 Fixed Text Sections"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 STABLE: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
-    logger.info("🔤 KOREAN ENCODING FIXED: Perfect UTF-8 handling without encoding parameter")
+    logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment and margins")
     logger.info("🔧 AB PATTERN: Now using 16% white overlay")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
@@ -1393,25 +1419,22 @@ def process_enhancement(job):
                 "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
                 "file_number_info": {
                     "001-003": "Enhancement",
-                    "004": "MD TALK",
+                    "004": "MD TALK (1200x600)",
                     "005-006": "Enhancement",
                     "007": "Thumbnail",
-                    "008": "DESIGN POINT",
+                    "008": "DESIGN POINT (1200x600)",
                     "009-010": "Thumbnail",
                     "011": "COLOR section"
                 },
-                "korean_encoding_fixes": [
-                    "✅ FIXED: Removed encoding='utf-8' parameter from ImageFont.truetype",
-                    "✅ FIXED: Updated to working Google Fonts GitHub URLs",
-                    "✅ FIXED: Simplified text encoding handling - direct UTF-8 strings",
-                    "✅ FIXED: Proper Korean font verification with real Korean text",
-                    "✅ FIXED: Font caching system prevents repeated downloads",
-                    "✅ FIXED: Error handling for all encoding scenarios",
-                    "✅ FIXED: System font fallback for different environments",
-                    "✅ FIXED: Clean UTF-8 string processing without complex conversions"
+                "text_section_updates": [
+                    "✅ Fixed size: 1200x600 for both MD TALK and DESIGN POINT",
+                    "✅ Center alignment with proper margins (100px on sides)",
+                    "✅ Text wrapping to fit within content width",
+                    "✅ Vertical centering when space allows",
+                    "✅ Maintained Korean font support"
                 ],
                 "optimization_features": [
-                    "✅ V30 KOREAN FIXED: Perfect UTF-8 Korean text rendering",
+                    "✅ V31 FIXED TEXT SECTIONS: 1200x600 with margins",
                     "✅ AB PATTERN: Now using 16% white overlay",
                     "✅ STABLE TRANSPARENT PNG: Verified at every step",
                     "✅ WORKING FONT URLS: Google Fonts GitHub raw URLs",
@@ -1424,7 +1447,7 @@ def process_enhancement(job):
                     "✅ Ready for Figma transparent overlay",
                     "✅ Pure PNG with full alpha channel",
                     "✅ Make.com compatible base64 (no padding)",
-                    "✅ Korean encoding completely fixed"
+                    "✅ Text sections with professional layout"
                 ],
                 "processing_order": "1.U2Net-Ultra → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
@@ -1439,7 +1462,7 @@ def process_enhancement(job):
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with KOREAN ENCODING FIXED and AB PATTERN 16%")
+        logger.info("✅ Enhancement completed successfully with FIXED TEXT SECTIONS")
         return output
         
     except Exception as e:
