@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V31-Fixed-Text-Sections
+# VERSION: V32-AC20-Brightness-Up
 ################################
 
-VERSION = "V31-Fixed-Text-Sections"
+VERSION = "V32-AC20-Brightness-Up"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -1065,7 +1065,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Apply pattern enhancement while TRULY preserving transparency - AB 16%"""
+    """Apply pattern enhancement while TRULY preserving transparency - AC 20%, AB 16%"""
     # CRITICAL: Ensure RGBA mode
     if image.mode != 'RGBA':
         logger.warning(f"⚠️ Converting {image.mode} to RGBA in pattern enhancement")
@@ -1080,27 +1080,28 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
     
     # Apply enhancements based on pattern type
     if pattern_type == "ac_pattern":
-        logger.info("🔍 AC Pattern - Applying 12% white overlay")
-        # Apply 12% white overlay
-        white_overlay = 0.12
+        logger.info("🔍 AC Pattern - Applying 20% white overlay (increased from 12%)")
+        # Apply 20% white overlay (increased from 12%)
+        white_overlay = 0.20
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
         
         # Convert back to image
         rgb_image = Image.fromarray(img_array.astype(np.uint8))
         
+        # Slightly increased brightness for AC pattern
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.005)
+        rgb_image = brightness.enhance(1.02)  # Increased from 1.005
         
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.98)
         
-        logger.info("✅ AC Pattern enhancement applied")
+        logger.info("✅ AC Pattern enhancement applied with 20% white overlay")
     
     elif pattern_type == "ab_pattern":
         logger.info("🔍 AB Pattern - Applying 16% white overlay and cool tone")
         # Apply 16% white overlay
-        white_overlay = 0.16  # Changed to 16%
+        white_overlay = 0.16
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         
         # Cool tone adjustment
@@ -1118,29 +1119,31 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.88)
         
+        # Slightly increased brightness for AB pattern
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.005)
+        rgb_image = brightness.enhance(1.02)  # Increased from 1.005
         
         logger.info("✅ AB Pattern enhancement applied with 16% white overlay")
         
     else:
-        logger.info("🔍 Other Pattern - Standard enhancement")
+        logger.info("🔍 Other Pattern - Standard enhancement with increased values")
+        # Increased brightness for other patterns
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.08)
+        rgb_image = brightness.enhance(1.12)  # Increased from 1.08
         
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.99)
         
         sharpness = ImageEnhance.Sharpness(rgb_image)
-        rgb_image = sharpness.enhance(1.4)
+        rgb_image = sharpness.enhance(1.5)  # Increased from 1.4
     
     # Apply common enhancements
     contrast = ImageEnhance.Contrast(rgb_image)
-    rgb_image = contrast.enhance(1.05)
+    rgb_image = contrast.enhance(1.08)  # Slightly increased from 1.05
     
-    # Apply sharpening - SINGLE APPLICATION with highest value
+    # Apply sharpening - Increased for all patterns
     sharpness = ImageEnhance.Sharpness(rgb_image)
-    rgb_image = sharpness.enhance(1.6)
+    rgb_image = sharpness.enhance(1.8)  # Increased from 1.6
     
     # CRITICAL: Recombine with ORIGINAL alpha channel
     r2, g2, b2 = rgb_image.split()
@@ -1258,12 +1261,14 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V31 Fixed Text Sections"""
+    """Main enhancement processing - V32 AC 20% White Overlay, Increased Brightness/Sharpness"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 STABLE: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment and margins")
-    logger.info("🔧 AB PATTERN: Now using 16% white overlay")
+    logger.info("🔧 AC PATTERN: Now using 20% white overlay (increased from 12%)")
+    logger.info("🔧 AB PATTERN: Using 16% white overlay")
+    logger.info("✨ ALL PATTERNS: Increased brightness and sharpness")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
@@ -1349,8 +1354,8 @@ def process_enhancement(job):
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_pattern": "무도금화이트(0.12)",
-            "ab_pattern": "무도금화이트-쿨톤(0.16)",  # Changed to 16%
+            "ac_pattern": "무도금화이트(0.20)",  # Changed to 20%
+            "ab_pattern": "무도금화이트-쿨톤(0.16)",
             "other": "기타색상(no_overlay)"
         }.get(pattern_type, "기타색상(no_overlay)")
         
@@ -1434,12 +1439,15 @@ def process_enhancement(job):
                     "✅ Maintained Korean font support"
                 ],
                 "optimization_features": [
-                    "✅ V31 FIXED TEXT SECTIONS: 1200x600 with margins",
-                    "✅ AB PATTERN: Now using 16% white overlay",
+                    "✅ V32 AC PATTERN: 20% white overlay (increased from 12%)",
+                    "✅ BRIGHTNESS: AC/AB 1.02 (up from 1.005), Other 1.12 (up from 1.08)",
+                    "✅ SHARPNESS: Other 1.5 (up from 1.4), Final 1.8 (up from 1.6)",
+                    "✅ CONTRAST: 1.08 (up from 1.05)",
+                    "✅ AB PATTERN: Maintained at 16% white overlay",
                     "✅ STABLE TRANSPARENT PNG: Verified at every step",
                     "✅ WORKING FONT URLS: Google Fonts GitHub raw URLs",
                     "✅ SIMPLIFIED ENCODING: No complex encoding conversions",
-                    "✅ OPTIMIZED: Single sharpening pass (1.6)",
+                    "✅ OPTIMIZED: Single sharpening pass (1.8)",
                     "✅ CRITICAL: RGBA mode enforced throughout",
                     "✅ ULTRA PRECISE edge detection maintained",
                     "✅ Ring hole detection with transparency",
@@ -1454,7 +1462,10 @@ def process_enhancement(job):
                 "png_support": True,
                 "edge_detection": "ULTRA PRECISE (Sobel + Guided Filter)",
                 "korean_support": "COMPLETELY FIXED - No encoding parameter needed",
-                "white_overlay": "AC: 12% | AB: 16% | Other: None",
+                "white_overlay": "AC: 20% | AB: 16% | Other: None",
+                "brightness_values": "AC/AB: 1.02 | Other: 1.12",
+                "sharpness_values": "Other: 1.5 → Final: 1.8",
+                "contrast_value": "1.08",
                 "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
                 "transparency_info": "Full RGBA transparency preserved - NO background",
@@ -1462,7 +1473,7 @@ def process_enhancement(job):
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with FIXED TEXT SECTIONS")
+        logger.info("✅ Enhancement completed successfully with increased values")
         return output
         
     except Exception as e:
