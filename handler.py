@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V32-AC20-GoogleScript-Fixed
+# VERSION: V32-AC20-GoogleScript-Fixed-MakeCom
 ################################
 
-VERSION = "V32-AC20-GoogleScript-Fixed"
+VERSION = "V32-AC20-GoogleScript-Fixed-MakeCom"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -719,11 +719,11 @@ def image_to_base64(image, keep_transparency=True, for_google_script=True):
         return base64_str.rstrip('=')
 
 def process_special_mode(job):
-    """Process special modes - KOREAN ENCODING FIXED"""
+    """Process special modes - FIXED FOR MAKE.COM"""
     special_mode = job.get('special_mode', '')
     logger.info(f"🔤 Processing special mode with FIXED Korean encoding: {special_mode}")
     
-    # BOTH TEXT SECTIONS - Return TWO separate images
+    # BOTH TEXT SECTIONS - Return SINGLE structure for Make.com
     if special_mode == 'both_text_sections':
         # Get text content with proper Korean encoding
         md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)"""
@@ -747,42 +747,38 @@ def process_special_mode(job):
         md_section = create_md_talk_section(md_talk_text)
         design_section = create_design_point_section(design_point_text)
         
-        # Convert to base64 WITH PADDING
-        md_base64 = image_to_base64(md_section, keep_transparency=False, for_google_script=True)
-        design_base64 = image_to_base64(design_section, keep_transparency=False, for_google_script=True)
+        # Create combined image for Make.com compatibility
+        combined_width = 1200
+        combined_height = 1200  # 600 + 600
+        combined_image = Image.new('RGB', (combined_width, combined_height), '#FFFFFF')
         
-        # Return BOTH images separately
+        # Paste MD TALK at top
+        combined_image.paste(md_section, (0, 0))
+        # Paste DESIGN POINT at bottom
+        combined_image.paste(design_section, (0, 600))
+        
+        # Convert to base64 WITH PADDING
+        combined_base64 = image_to_base64(combined_image, keep_transparency=False, for_google_script=True)
+        
+        # FIXED: Return single structure for Make.com
         return {
             "output": {
-                "images": [
-                    {
-                        "enhanced_image": md_base64,
-                        "enhanced_image_with_prefix": f"data:image/png;base64,{md_base64}",
-                        "section_type": "md_talk",
-                        "filename": "ac_wedding_004.png",
-                        "file_number": "004",
-                        "final_size": list(md_section.size),
-                        "format": "PNG"
-                    },
-                    {
-                        "enhanced_image": design_base64,
-                        "enhanced_image_with_prefix": f"data:image/png;base64,{design_base64}",
-                        "section_type": "design_point",
-                        "filename": "ac_wedding_008.png",
-                        "file_number": "008",
-                        "final_size": list(design_section.size),
-                        "format": "PNG"
-                    }
-                ],
-                "total_images": 2,
-                "special_mode": special_mode,
-                "sections_included": ["MD_TALK", "DESIGN_POINT"],
+                "enhanced_image": combined_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{combined_base64}",
+                "section_type": "both_text_sections",
+                "filename": "ac_wedding_text_sections.png",
+                "file_number": "004_008",
+                "final_size": list(combined_image.size),
+                "format": "PNG",
                 "version": VERSION,
                 "status": "success",
+                "special_mode": special_mode,
+                "sections_included": ["MD_TALK", "DESIGN_POINT"],
                 "korean_encoding": "UTF-8-FIXED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
-                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT"
+                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT",
+                "make_com_compatible": True
             }
         }
     
@@ -1148,7 +1144,7 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V32 AC 20% White Overlay, Increased Brightness/Sharpness"""
+    """Main enhancement processing - FIXED FOR MAKE.COM"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 STABLE: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
@@ -1157,6 +1153,7 @@ def process_enhancement(job):
     logger.info("🔧 AB PATTERN: Using 16% white overlay")
     logger.info("✨ ALL PATTERNS: Increased brightness and sharpness")
     logger.info("📌 GOOGLE SCRIPT: Base64 WITH padding")
+    logger.info("🔧 MAKE.COM: Fixed return structure for compatibility")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
@@ -1321,8 +1318,9 @@ def process_enhancement(job):
                 },
                 "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT",
                 "google_script_info": "Base64 includes padding for Google Script compatibility",
-                "make_com_info": "For Make.com, remove padding with .rstrip('=')",
+                "make_com_info": "Return structure fixed for Make.com compatibility",
                 "optimization_features": [
+                    "✅ MAKE.COM FIX: Single structure return for compatibility",
                     "✅ GOOGLE SCRIPT FIX: Base64 WITH padding",
                     "✅ V32 AC PATTERN: 20% white overlay (increased from 12%)",
                     "✅ BRIGHTNESS: AC/AB 1.02 (up from 1.005), Other 1.12 (up from 1.08)",
