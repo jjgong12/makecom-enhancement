@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V33-FIXED-MAKE-GOOGLE
+# VERSION: V32-AC20-GoogleScript-Fixed
 ################################
 
-VERSION = "V33-FIXED-MAKE-GOOGLE"
+VERSION = "V32-AC20-GoogleScript-Fixed"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -442,7 +442,7 @@ def u2net_ultra_precise_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V33")
+        logger.info("🔷 U2Net ULTRA PRECISE Background Removal V30")
         
         if image.mode != 'RGBA':
             if image.mode == 'RGB':
@@ -579,7 +579,7 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     if image.mode != 'RGBA':
         image = image.convert('RGBA')
     
-    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V33 - Preserving RGBA")
+    logger.info("🔍 ULTRA PRECISE Ring Hole Detection V30 - Preserving RGBA")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -690,44 +690,47 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     
     return result
 
-def image_to_base64(image, target_platform="make"):
-    """Convert to base64 - FIXED for Make.com vs Google Script"""
+def image_to_base64(image, keep_transparency=True, for_google_script=True):
+    """Convert to base64 - WITH PADDING for Google Script"""
     buffered = BytesIO()
     
-    # Ensure RGBA for transparency
-    if image.mode != 'RGBA':
+    # CRITICAL FIX: Force RGBA and save as PNG
+    if image.mode != 'RGBA' and keep_transparency:
         logger.warning(f"⚠️ Converting {image.mode} to RGBA for transparency")
         image = image.convert('RGBA')
     
-    # Save as PNG
-    logger.info("💎 Saving RGBA image as PNG with full transparency")
-    image.save(buffered, format='PNG', compress_level=0, optimize=False)
+    if image.mode == 'RGBA':
+        logger.info("💎 Saving RGBA image as PNG with full transparency")
+        # Save as PNG with NO compression for maximum transparency preservation
+        image.save(buffered, format='PNG', compress_level=0, optimize=False)
+    else:
+        logger.info(f"Saving {image.mode} mode image as PNG")
+        image.save(buffered, format='PNG', optimize=True, compress_level=1)
     
     buffered.seek(0)
     base64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
     
-    # CRITICAL: Platform-specific padding handling
-    if target_platform == "google":
-        logger.info("✅ Google Script mode: Keeping base64 padding")
+    # CRITICAL FIX: Keep padding for Google Script
+    if for_google_script:
+        logger.info("✅ Keeping base64 padding for Google Script compatibility")
         return base64_str
-    else:  # make.com or others
-        logger.info("✅ Make.com mode: Removing base64 padding")
+    else:
+        # Remove padding for Make.com compatibility
         return base64_str.rstrip('=')
 
 def process_special_mode(job):
-    """Process special modes - FIXED for Make.com"""
+    """Process special modes - KOREAN ENCODING FIXED"""
     special_mode = job.get('special_mode', '')
-    logger.info(f"🔤 Processing special mode: {special_mode}")
-    
-    # Determine target platform
-    target_platform = job.get('target_platform', 'make')  # Default to make.com
+    logger.info(f"🔤 Processing special mode with FIXED Korean encoding: {special_mode}")
     
     # BOTH TEXT SECTIONS - Return TWO separate images
     if special_mode == 'both_text_sections':
+        # Get text content with proper Korean encoding
         md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)"""
         
         design_point_text = job.get('design_point_content', '') or job.get('design_point', '') or """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
         
+        # Handle encoding properly - FIXED
         if isinstance(md_talk_text, bytes):
             md_talk_text = md_talk_text.decode('utf-8', errors='replace')
         if isinstance(design_point_text, bytes):
@@ -737,33 +740,49 @@ def process_special_mode(job):
         design_point_text = str(design_point_text).strip()
         
         logger.info(f"✅ Creating both Korean sections")
+        logger.info(f"MD TALK text: {md_talk_text[:50]}...")
+        logger.info(f"DESIGN POINT text: {design_point_text[:50]}...")
         
+        # Create both sections with Korean support
         md_section = create_md_talk_section(md_talk_text)
         design_section = create_design_point_section(design_point_text)
         
-        # Convert to base64 with platform-specific padding
-        md_base64 = image_to_base64(md_section, target_platform)
-        design_base64 = image_to_base64(design_section, target_platform)
+        # Convert to base64 WITH PADDING
+        md_base64 = image_to_base64(md_section, keep_transparency=False, for_google_script=True)
+        design_base64 = image_to_base64(design_section, keep_transparency=False, for_google_script=True)
         
-        # SIMPLIFIED RESPONSE STRUCTURE FOR MAKE.COM
+        # Return BOTH images separately
         return {
             "output": {
                 "images": [
                     {
                         "enhanced_image": md_base64,
+                        "enhanced_image_with_prefix": f"data:image/png;base64,{md_base64}",
                         "section_type": "md_talk",
                         "filename": "ac_wedding_004.png",
-                        "file_number": "004"
+                        "file_number": "004",
+                        "final_size": list(md_section.size),
+                        "format": "PNG"
                     },
                     {
                         "enhanced_image": design_base64,
+                        "enhanced_image_with_prefix": f"data:image/png;base64,{design_base64}",
                         "section_type": "design_point",
                         "filename": "ac_wedding_008.png",
-                        "file_number": "008"
+                        "file_number": "008",
+                        "final_size": list(design_section.size),
+                        "format": "PNG"
                     }
                 ],
+                "total_images": 2,
+                "special_mode": special_mode,
+                "sections_included": ["MD_TALK", "DESIGN_POINT"],
+                "version": VERSION,
                 "status": "success",
-                "version": VERSION
+                "korean_encoding": "UTF-8-FIXED",
+                "korean_font_verified": KOREAN_FONT_VERIFIED,
+                "korean_font_path": KOREAN_FONT_PATH,
+                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT"
             }
         }
     
@@ -774,23 +793,32 @@ def process_special_mode(job):
         if not text_content:
             text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."""
         
+        # Handle encoding - FIXED
         if isinstance(text_content, bytes):
             text_content = text_content.decode('utf-8', errors='replace')
         text_content = str(text_content).strip()
         
-        logger.info(f"✅ Creating MD TALK with Korean text")
+        logger.info(f"✅ Creating MD TALK with Korean text: {text_content[:50]}...")
         
         section_image = create_md_talk_section(text_content)
-        section_base64 = image_to_base64(section_image, target_platform)
+        section_base64 = image_to_base64(section_image, keep_transparency=False, for_google_script=True)
         
         return {
             "output": {
                 "enhanced_image": section_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64}",
                 "section_type": "md_talk",
                 "filename": "ac_wedding_004.png",
                 "file_number": "004",
+                "final_size": list(section_image.size),
+                "version": VERSION,
                 "status": "success",
-                "version": VERSION
+                "format": "PNG",
+                "special_mode": special_mode,
+                "korean_encoding": "UTF-8-FIXED",
+                "korean_font_verified": KOREAN_FONT_VERIFIED,
+                "korean_font_path": KOREAN_FONT_PATH,
+                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT"
             }
         }
     
@@ -801,23 +829,32 @@ def process_special_mode(job):
         if not text_content:
             text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
         
+        # Handle encoding - FIXED
         if isinstance(text_content, bytes):
             text_content = text_content.decode('utf-8', errors='replace')
         text_content = str(text_content).strip()
         
-        logger.info(f"✅ Creating DESIGN POINT with Korean text")
+        logger.info(f"✅ Creating DESIGN POINT with Korean text: {text_content[:50]}...")
         
         section_image = create_design_point_section(text_content)
-        section_base64 = image_to_base64(section_image, target_platform)
+        section_base64 = image_to_base64(section_image, keep_transparency=False, for_google_script=True)
         
         return {
             "output": {
                 "enhanced_image": section_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64}",
                 "section_type": "design_point",
                 "filename": "ac_wedding_008.png",
                 "file_number": "008",
+                "final_size": list(section_image.size),
+                "version": VERSION,
                 "status": "success",
-                "version": VERSION
+                "format": "PNG",
+                "special_mode": special_mode,
+                "korean_encoding": "UTF-8-FIXED",
+                "korean_font_verified": KOREAN_FONT_VERIFIED,
+                "korean_font_path": KOREAN_FONT_PATH,
+                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT"
             }
         }
     
@@ -1111,14 +1148,16 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V33 FIXED for Make.com"""
+    """Main enhancement processing - V32 AC 20% White Overlay, Increased Brightness/Sharpness"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 FIXED: Make.com base64 padding handling")
+    logger.info("🎯 STABLE: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
-    logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment")
-    logger.info("🔧 AC PATTERN: 20% white overlay")
-    logger.info("🔧 AB PATTERN: 16% white overlay")
+    logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment and margins")
+    logger.info("🔧 AC PATTERN: Now using 20% white overlay (increased from 12%)")
+    logger.info("🔧 AB PATTERN: Using 16% white overlay")
     logger.info("✨ ALL PATTERNS: Increased brightness and sharpness")
+    logger.info("📌 GOOGLE SCRIPT: Base64 WITH padding")
+    logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
     try:
@@ -1126,10 +1165,7 @@ def process_enhancement(job):
         if job.get('special_mode'):
             return process_special_mode(job)
         
-        # Determine target platform
-        target_platform = job.get('target_platform', 'make')  # Default to make.com
-        
-        # Normal enhancement processing
+        # Normal enhancement processing continues here...
         filename = find_filename_fast(job)
         file_number = extract_file_number(filename) if filename else None
         image_data = find_input_data_fast(job)
@@ -1146,23 +1182,26 @@ def process_enhancement(job):
         image_bytes = decode_base64_fast(image_data)
         image = Image.open(BytesIO(image_bytes))
         
+        # Log initial image info
         logger.info(f"Input image mode: {image.mode}, size: {image.size}")
         
+        # CRITICAL: Convert to RGBA immediately
         if image.mode != 'RGBA':
             logger.info(f"Converting {image.mode} to RGBA immediately")
             image = image.convert('RGBA')
         
-        # STEP 1: ULTRA PRECISE BACKGROUND REMOVAL
+        # STEP 1: ULTRA PRECISE BACKGROUND REMOVAL - ALWAYS APPLY
         logger.info("📸 STEP 1: ALWAYS applying ULTRA PRECISE background removal")
         removal_start = time.time()
         image = u2net_ultra_precise_removal(image)
         logger.info(f"⏱️ Ultra precise background removal took: {time.time() - removal_start:.2f}s")
         
+        # Verify RGBA after removal
         if image.mode != 'RGBA':
             logger.error("❌ Image lost RGBA after background removal!")
             image = image.convert('RGBA')
         
-        # STEP 2: ENHANCEMENT
+        # STEP 2: ENHANCEMENT (preserving transparency)
         logger.info("🎨 STEP 2: Applying enhancements with TRUE transparency preservation")
         enhancement_start = time.time()
         
@@ -1203,12 +1242,12 @@ def process_enhancement(job):
         # Detect pattern type
         pattern_type = detect_pattern_type(filename)
         detected_type = {
-            "ac_pattern": "무도금화이트(0.20)",
+            "ac_pattern": "무도금화이트(0.20)",  # Changed to 20%
             "ab_pattern": "무도금화이트-쿨톤(0.16)",
             "other": "기타색상(no_overlay)"
         }.get(pattern_type, "기타색상(no_overlay)")
         
-        # Apply pattern-specific enhancements
+        # Apply pattern-specific enhancements (preserving transparency)
         image = apply_pattern_enhancement_transparent(image, pattern_type)
         
         # ULTRA PRECISE ring hole detection
@@ -1217,24 +1256,27 @@ def process_enhancement(job):
         
         logger.info(f"⏱️ Enhancement took: {time.time() - enhancement_start:.2f}s")
         
-        # RESIZE
+        # RESIZE (preserving transparency)
         image = resize_to_target_dimensions(image, 1200, 1560)
         
-        # STEP 3: SWINIR ENHANCEMENT
+        # STEP 3: SWINIR ENHANCEMENT (preserving transparency)
         logger.info("🚀 STEP 3: Applying SwinIR enhancement")
         swinir_start = time.time()
         image = apply_swinir_enhancement_transparent(image)
         logger.info(f"⏱️ SwinIR took: {time.time() - swinir_start:.2f}s")
         
+        # Final verification
         if image.mode != 'RGBA':
             logger.error("❌ CRITICAL: Final image is not RGBA! Converting...")
             image = image.convert('RGBA')
         
         logger.info(f"✅ Final image mode: {image.mode}, size: {image.size}")
+        
+        # CRITICAL: NO BACKGROUND COMPOSITE - Keep transparency
         logger.info("💎 NO background composite - keeping pure transparency")
         
-        # Save to base64 with platform-specific padding
-        enhanced_base64 = image_to_base64(image, target_platform)
+        # Save to base64 as PNG with transparency - WITH PADDING for Google Script
+        enhanced_base64 = image_to_base64(image, keep_transparency=True, for_google_script=True)
         
         # Build filename
         enhanced_filename = filename
@@ -1245,10 +1287,10 @@ def process_enhancement(job):
         total_time = time.time() - start_time
         logger.info(f"✅ Enhancement completed in {total_time:.2f}s")
         
-        # SIMPLIFIED OUTPUT STRUCTURE FOR MAKE.COM
         output = {
             "output": {
                 "enhanced_image": enhanced_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64}",
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
                 "is_wedding_ring": True,
@@ -1260,13 +1302,62 @@ def process_enhancement(job):
                 "status": "success",
                 "processing_time": f"{total_time:.2f}s",
                 "has_transparency": True,
+                "transparency_preserved": True,
+                "background_removed": True,
+                "background_applied": False,
                 "format": "PNG",
                 "output_mode": "RGBA",
-                "base64_padding": "REMOVED" if target_platform == "make" else "INCLUDED"
+                "korean_font_verified": KOREAN_FONT_VERIFIED,
+                "korean_font_path": KOREAN_FONT_PATH,
+                "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
+                "file_number_info": {
+                    "001-003": "Enhancement",
+                    "004": "MD TALK (1200x600)",
+                    "005-006": "Enhancement",
+                    "007": "Thumbnail",
+                    "008": "DESIGN POINT (1200x600)",
+                    "009-010": "Thumbnail",
+                    "011": "COLOR section"
+                },
+                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT",
+                "google_script_info": "Base64 includes padding for Google Script compatibility",
+                "make_com_info": "For Make.com, remove padding with .rstrip('=')",
+                "optimization_features": [
+                    "✅ GOOGLE SCRIPT FIX: Base64 WITH padding",
+                    "✅ V32 AC PATTERN: 20% white overlay (increased from 12%)",
+                    "✅ BRIGHTNESS: AC/AB 1.02 (up from 1.005), Other 1.12 (up from 1.08)",
+                    "✅ SHARPNESS: Other 1.5 (up from 1.4), Final 1.8 (up from 1.6)",
+                    "✅ CONTRAST: 1.08 (up from 1.05)",
+                    "✅ AB PATTERN: Maintained at 16% white overlay",
+                    "✅ STABLE TRANSPARENT PNG: Verified at every step",
+                    "✅ WORKING FONT URLS: Google Fonts GitHub raw URLs",
+                    "✅ SIMPLIFIED ENCODING: No complex encoding conversions",
+                    "✅ OPTIMIZED: Single sharpening pass (1.8)",
+                    "✅ CRITICAL: RGBA mode enforced throughout",
+                    "✅ ULTRA PRECISE edge detection maintained",
+                    "✅ Ring hole detection with transparency",
+                    "✅ Pattern-specific enhancement preserved",
+                    "✅ Ready for Figma transparent overlay",
+                    "✅ Pure PNG with full alpha channel",
+                    "✅ Google Script compatible base64 (with padding)",
+                    "✅ Text sections with professional layout"
+                ],
+                "processing_order": "1.U2Net-Ultra → 2.Enhancement → 3.SwinIR",
+                "swinir_applied": True,
+                "png_support": True,
+                "edge_detection": "ULTRA PRECISE (Sobel + Guided Filter)",
+                "korean_support": "COMPLETELY FIXED - No encoding parameter needed",
+                "white_overlay": "AC: 20% | AB: 16% | Other: None",
+                "brightness_values": "AC/AB: 1.02 | Other: 1.12",
+                "sharpness_values": "Other: 1.5 → Final: 1.8",
+                "contrast_value": "1.08",
+                "expected_input": "2000x2600 (any format)",
+                "output_size": "1200x1560",
+                "transparency_info": "Full RGBA transparency preserved - NO background"
             }
         }
         
-        logger.info("✅ Enhancement completed successfully")
+        logger.info("✅ Enhancement completed successfully with increased values")
         return output
         
     except Exception as e:
