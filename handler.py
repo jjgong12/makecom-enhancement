@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: V32-AC20-GoogleScript-Fixed-MakeCom
+# VERSION: V33-PLATFORM-AWARE
 ################################
 
-VERSION = "V32-AC20-GoogleScript-Fixed-MakeCom"
+VERSION = "V33-PLATFORM-AWARE"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -690,8 +690,8 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     
     return result
 
-def image_to_base64(image, keep_transparency=True, for_google_script=True):
-    """Convert to base64 - WITH PADDING for Google Script"""
+def image_to_base64(image, keep_transparency=True, target_platform='make'):
+    """Convert to base64 - Platform aware (Make.com vs Google Script)"""
     buffered = BytesIO()
     
     # CRITICAL FIX: Force RGBA and save as PNG
@@ -710,18 +710,20 @@ def image_to_base64(image, keep_transparency=True, for_google_script=True):
     buffered.seek(0)
     base64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
     
-    # CRITICAL FIX: Keep padding for Google Script
-    if for_google_script:
-        logger.info("✅ Keeping base64 padding for Google Script compatibility")
+    # Platform-specific padding handling
+    if target_platform == 'google':
+        logger.info("✅ Google Script mode: Keeping base64 padding")
         return base64_str
     else:
-        # Remove padding for Make.com compatibility
+        logger.info("✅ Make.com mode: Removing base64 padding")
         return base64_str.rstrip('=')
 
 def process_special_mode(job):
-    """Process special modes - FIXED FOR MAKE.COM"""
+    """Process special modes - Platform aware"""
     special_mode = job.get('special_mode', '')
-    logger.info(f"🔤 Processing special mode with FIXED Korean encoding: {special_mode}")
+    target_platform = job.get('target_platform', 'make')  # Default to make.com
+    
+    logger.info(f"🔤 Processing special mode: {special_mode} for platform: {target_platform}")
     
     # BOTH TEXT SECTIONS - Return SINGLE structure for Make.com
     if special_mode == 'both_text_sections':
@@ -757,8 +759,8 @@ def process_special_mode(job):
         # Paste DESIGN POINT at bottom
         combined_image.paste(design_section, (0, 600))
         
-        # Convert to base64 WITH PADDING
-        combined_base64 = image_to_base64(combined_image, keep_transparency=False, for_google_script=True)
+        # Convert to base64 with platform-specific padding
+        combined_base64 = image_to_base64(combined_image, keep_transparency=False, target_platform=target_platform)
         
         # FIXED: Return single structure for Make.com
         return {
@@ -777,8 +779,8 @@ def process_special_mode(job):
                 "korean_encoding": "UTF-8-FIXED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
-                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT",
-                "make_com_compatible": True
+                "base64_padding": "REMOVED" if target_platform != "google" else "INCLUDED",
+                "target_platform": target_platform
             }
         }
     
@@ -797,7 +799,7 @@ def process_special_mode(job):
         logger.info(f"✅ Creating MD TALK with Korean text: {text_content[:50]}...")
         
         section_image = create_md_talk_section(text_content)
-        section_base64 = image_to_base64(section_image, keep_transparency=False, for_google_script=True)
+        section_base64 = image_to_base64(section_image, keep_transparency=False, target_platform=target_platform)
         
         return {
             "output": {
@@ -814,7 +816,8 @@ def process_special_mode(job):
                 "korean_encoding": "UTF-8-FIXED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
-                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT"
+                "base64_padding": "REMOVED" if target_platform != "google" else "INCLUDED",
+                "target_platform": target_platform
             }
         }
     
@@ -833,7 +836,7 @@ def process_special_mode(job):
         logger.info(f"✅ Creating DESIGN POINT with Korean text: {text_content[:50]}...")
         
         section_image = create_design_point_section(text_content)
-        section_base64 = image_to_base64(section_image, keep_transparency=False, for_google_script=True)
+        section_base64 = image_to_base64(section_image, keep_transparency=False, target_platform=target_platform)
         
         return {
             "output": {
@@ -850,7 +853,8 @@ def process_special_mode(job):
                 "korean_encoding": "UTF-8-FIXED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
-                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT"
+                "base64_padding": "REMOVED" if target_platform != "google" else "INCLUDED",
+                "target_platform": target_platform
             }
         }
     
@@ -1144,20 +1148,23 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - FIXED FOR MAKE.COM"""
+    """Main enhancement processing - Platform aware"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 STABLE: Always apply background removal for transparency")
+    logger.info("🎯 PLATFORM AWARE: Now supporting both Make.com and Google Script")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment and margins")
     logger.info("🔧 AC PATTERN: Now using 20% white overlay (increased from 12%)")
     logger.info("🔧 AB PATTERN: Using 16% white overlay")
     logger.info("✨ ALL PATTERNS: Increased brightness and sharpness")
-    logger.info("📌 GOOGLE SCRIPT: Base64 WITH padding")
-    logger.info("🔧 MAKE.COM: Fixed return structure for compatibility")
-    logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
+    logger.info("📌 BASE64 PADDING: Platform-specific handling")
+    
     start_time = time.time()
     
     try:
+        # Determine target platform
+        target_platform = job.get('target_platform', 'make')  # Default to make.com
+        logger.info(f"🎯 Target platform: {target_platform}")
+        
         # Check for special mode first
         if job.get('special_mode'):
             return process_special_mode(job)
@@ -1272,8 +1279,8 @@ def process_enhancement(job):
         # CRITICAL: NO BACKGROUND COMPOSITE - Keep transparency
         logger.info("💎 NO background composite - keeping pure transparency")
         
-        # Save to base64 as PNG with transparency - WITH PADDING for Google Script
-        enhanced_base64 = image_to_base64(image, keep_transparency=True, for_google_script=True)
+        # Save to base64 as PNG with transparency - Platform aware
+        enhanced_base64 = image_to_base64(image, keep_transparency=True, target_platform=target_platform)
         
         # Build filename
         enhanced_filename = filename
@@ -1316,29 +1323,28 @@ def process_enhancement(job):
                     "009-010": "Thumbnail",
                     "011": "COLOR section"
                 },
-                "base64_padding": "INCLUDED_FOR_GOOGLE_SCRIPT",
-                "google_script_info": "Base64 includes padding for Google Script compatibility",
-                "make_com_info": "Return structure fixed for Make.com compatibility",
+                "base64_padding": "REMOVED" if target_platform != "google" else "INCLUDED",
+                "target_platform": target_platform,
+                "platform_info": {
+                    "make": "Base64 without padding (= removed)",
+                    "google": "Base64 with padding (= included)"
+                },
                 "optimization_features": [
-                    "✅ MAKE.COM FIX: Single structure return for compatibility",
-                    "✅ GOOGLE SCRIPT FIX: Base64 WITH padding",
-                    "✅ V32 AC PATTERN: 20% white overlay (increased from 12%)",
-                    "✅ BRIGHTNESS: AC/AB 1.02 (up from 1.005), Other 1.12 (up from 1.08)",
-                    "✅ SHARPNESS: Other 1.5 (up from 1.4), Final 1.8 (up from 1.6)",
-                    "✅ CONTRAST: 1.08 (up from 1.05)",
-                    "✅ AB PATTERN: Maintained at 16% white overlay",
+                    "✅ PLATFORM AWARE: Automatic padding handling",
+                    "✅ MAKE.COM: Base64 without padding",
+                    "✅ GOOGLE SCRIPT: Base64 with padding",
+                    "✅ V33 AC PATTERN: 20% white overlay",
+                    "✅ BRIGHTNESS: AC/AB 1.02, Other 1.12",
+                    "✅ SHARPNESS: Other 1.5, Final 1.8",
+                    "✅ CONTRAST: 1.08",
+                    "✅ AB PATTERN: 16% white overlay",
                     "✅ STABLE TRANSPARENT PNG: Verified at every step",
                     "✅ WORKING FONT URLS: Google Fonts GitHub raw URLs",
-                    "✅ SIMPLIFIED ENCODING: No complex encoding conversions",
-                    "✅ OPTIMIZED: Single sharpening pass (1.8)",
-                    "✅ CRITICAL: RGBA mode enforced throughout",
                     "✅ ULTRA PRECISE edge detection maintained",
                     "✅ Ring hole detection with transparency",
                     "✅ Pattern-specific enhancement preserved",
                     "✅ Ready for Figma transparent overlay",
-                    "✅ Pure PNG with full alpha channel",
-                    "✅ Google Script compatible base64 (with padding)",
-                    "✅ Text sections with professional layout"
+                    "✅ Pure PNG with full alpha channel"
                 ],
                 "processing_order": "1.U2Net-Ultra → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
@@ -1355,7 +1361,7 @@ def process_enhancement(job):
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with increased values")
+        logger.info("✅ Enhancement completed successfully with platform-aware output")
         return output
         
     except Exception as e:
@@ -1372,7 +1378,7 @@ def process_enhancement(job):
         }
 
 def handler(event):
-    """RunPod handler function - FIXED"""
+    """RunPod handler function - Platform aware"""
     logger.info(f"Handler received event type: {type(event)}")
     logger.info(f"Handler received event: {json.dumps(event, indent=2)[:500]}...")
     
