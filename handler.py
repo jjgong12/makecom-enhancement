@@ -796,7 +796,7 @@ def ensure_ring_holes_transparent_ultra(image: Image.Image) -> Image.Image:
     return result
 
 def image_to_base64(image, keep_transparency=True):
-    """Convert to base64 without padding - TRULY preserving transparency"""
+    """Convert to base64 WITH padding - FIXED for Google Script compatibility"""
     buffered = BytesIO()
     
     # CRITICAL FIX: Force RGBA and save as PNG
@@ -814,15 +814,15 @@ def image_to_base64(image, keep_transparency=True):
     
     buffered.seek(0)
     base64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-    # Remove padding for Make.com compatibility
-    return base64_str.rstrip('=')
+    # FIXED: Always return WITH padding for Google Script compatibility
+    return base64_str
 
 def process_special_mode(job):
-    """Process special modes - FIXED FOR GOOGLE SCRIPT COMPATIBILITY"""
+    """Process special modes - KOREAN ENCODING FIXED"""
     special_mode = job.get('special_mode', '')
-    logger.info(f"🔤 Processing special mode with FIXED Google Script compatibility: {special_mode}")
+    logger.info(f"🔤 Processing special mode with FIXED Korean encoding: {special_mode}")
     
-    # BOTH TEXT SECTIONS - Return for Google Script Multiple Upload
+    # BOTH TEXT SECTIONS - Return TWO separate images
     if special_mode == 'both_text_sections':
         # Get text content with proper Korean encoding
         md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)"""
@@ -846,32 +846,28 @@ def process_special_mode(job):
         md_section = create_md_talk_section(md_talk_text)
         design_section = create_design_point_section(design_point_text)
         
-        # Convert to base64
-        md_base64_no_padding = image_to_base64(md_section, keep_transparency=False)
-        design_base64_no_padding = image_to_base64(design_section, keep_transparency=False)
+        # Convert to base64 WITH padding
+        md_base64 = image_to_base64(md_section, keep_transparency=False)
+        design_base64 = image_to_base64(design_section, keep_transparency=False)
         
-        # Return GOOGLE SCRIPT COMPATIBLE FORMAT
+        # Return BOTH images separately
         return {
             "output": {
-                "success": True,
-                "mode": "google_script_multiple",
                 "images": [
                     {
-                        "imageData": md_base64_no_padding,  # FIXED: Changed from enhanced_image to imageData
-                        "fileName": "ac_wedding_004.png",
-                        "folderType": "main",
-                        "productId": "004",
+                        "enhanced_image": md_base64,
+                        "enhanced_image_with_prefix": f"data:image/png;base64,{md_base64}",
                         "section_type": "md_talk",
+                        "filename": "ac_wedding_004.png",
                         "file_number": "004",
                         "final_size": list(md_section.size),
                         "format": "PNG"
                     },
                     {
-                        "imageData": design_base64_no_padding,  # FIXED: Changed from enhanced_image to imageData
-                        "fileName": "ac_wedding_008.png",
-                        "folderType": "main",
-                        "productId": "008",
+                        "enhanced_image": design_base64,
+                        "enhanced_image_with_prefix": f"data:image/png;base64,{design_base64}",
                         "section_type": "design_point",
+                        "filename": "ac_wedding_008.png",
                         "file_number": "008",
                         "final_size": list(design_section.size),
                         "format": "PNG"
@@ -885,8 +881,7 @@ def process_special_mode(job):
                 "korean_encoding": "UTF-8-FIXED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
-                "google_script_ready": True,  # NEW: Indicates Google Script compatibility
-                "compatibility_notes": "Output format compatible with Google Script handleMultipleImages"
+                "base64_padding": "INCLUDED"
             }
         }
     
@@ -905,12 +900,12 @@ def process_special_mode(job):
         logger.info(f"✅ Creating MD TALK with Korean text: {text_content[:50]}...")
         
         section_image = create_md_talk_section(text_content)
-        section_base64_no_padding = image_to_base64(section_image, keep_transparency=False)
+        section_base64 = image_to_base64(section_image, keep_transparency=False)
         
         return {
             "output": {
-                "enhanced_image": section_base64_no_padding,
-                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
+                "enhanced_image": section_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64}",
                 "section_type": "md_talk",
                 "filename": "ac_wedding_004.png",
                 "file_number": "004",
@@ -921,7 +916,8 @@ def process_special_mode(job):
                 "special_mode": special_mode,
                 "korean_encoding": "UTF-8-FIXED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
-                "korean_font_path": KOREAN_FONT_PATH
+                "korean_font_path": KOREAN_FONT_PATH,
+                "base64_padding": "INCLUDED"
             }
         }
     
@@ -940,12 +936,12 @@ def process_special_mode(job):
         logger.info(f"✅ Creating DESIGN POINT with Korean text: {text_content[:50]}...")
         
         section_image = create_design_point_section(text_content)
-        section_base64_no_padding = image_to_base64(section_image, keep_transparency=False)
+        section_base64 = image_to_base64(section_image, keep_transparency=False)
         
         return {
             "output": {
-                "enhanced_image": section_base64_no_padding,
-                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64_no_padding}",
+                "enhanced_image": section_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{section_base64}",
                 "section_type": "design_point",
                 "filename": "ac_wedding_008.png",
                 "file_number": "008",
@@ -956,7 +952,8 @@ def process_special_mode(job):
                 "special_mode": special_mode,
                 "korean_encoding": "UTF-8-FIXED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
-                "korean_font_path": KOREAN_FONT_PATH
+                "korean_font_path": KOREAN_FONT_PATH,
+                "base64_padding": "INCLUDED"
             }
         }
     
@@ -1041,15 +1038,16 @@ def decode_base64_fast(base64_str: str) -> bytes:
         valid_chars = set(string.ascii_letters + string.digits + '+/=')
         base64_str = ''.join(c for c in base64_str if c in valid_chars)
         
-        no_pad = base64_str.rstrip('=')
-        
+        # FIXED: Try with padding first (normal base64)
         try:
-            decoded = base64.b64decode(no_pad, validate=False)
+            decoded = base64.b64decode(base64_str, validate=True)
             return decoded
         except:
+            # If fails, try without padding
+            no_pad = base64_str.rstrip('=')
             padding_needed = (4 - len(no_pad) % 4) % 4
             padded = no_pad + ('=' * padding_needed)
-            decoded = base64.b64decode(padded, validate=False)
+            decoded = base64.b64decode(padded, validate=True)
             return decoded
             
     except Exception as e:
@@ -1267,7 +1265,7 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - V32 AC 20% White Overlay, Increased Brightness/Sharpness"""
+    """Main enhancement processing - V32 AC 20% White Overlay, Increased Brightness/Sharpness - BASE64 PADDING FIXED"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 STABLE: Always apply background removal for transparency")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
@@ -1275,7 +1273,7 @@ def process_enhancement(job):
     logger.info("🔧 AC PATTERN: Now using 20% white overlay (increased from 12%)")
     logger.info("🔧 AB PATTERN: Using 16% white overlay")
     logger.info("✨ ALL PATTERNS: Increased brightness and sharpness")
-    logger.info("🔧 GOOGLE SCRIPT: Fixed both_text_sections mode for multiple upload")
+    logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
@@ -1394,8 +1392,8 @@ def process_enhancement(job):
         # CRITICAL: NO BACKGROUND COMPOSITE - Keep transparency
         logger.info("💎 NO background composite - keeping pure transparency")
         
-        # Save to base64 as PNG with transparency
-        enhanced_base64_no_padding = image_to_base64(image, keep_transparency=True)
+        # Save to base64 as PNG with transparency - WITH PADDING
+        enhanced_base64 = image_to_base64(image, keep_transparency=True)
         
         # Build filename
         enhanced_filename = filename
@@ -1408,8 +1406,8 @@ def process_enhancement(job):
         
         output = {
             "output": {
-                "enhanced_image": enhanced_base64_no_padding,
-                "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64_no_padding}",
+                "enhanced_image": enhanced_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64}",
                 "detected_type": detected_type,
                 "pattern_type": pattern_type,
                 "is_wedding_ring": True,
@@ -1426,6 +1424,7 @@ def process_enhancement(job):
                 "background_applied": False,
                 "format": "PNG",
                 "output_mode": "RGBA",
+                "base64_padding": "INCLUDED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
                 "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
@@ -1443,17 +1442,11 @@ def process_enhancement(job):
                     "✅ Center alignment with proper margins (100px on sides)",
                     "✅ Text wrapping to fit within content width",
                     "✅ Vertical centering when space allows",
-                    "✅ Maintained Korean font support",
-                    "✅ GOOGLE SCRIPT COMPATIBILITY: both_text_sections returns proper format"
+                    "✅ Maintained Korean font support"
                 ],
-                "google_script_compatibility": {
-                    "both_text_sections": "Returns {images: [{imageData, fileName, folderType, productId}...]}",
-                    "single_sections": "Returns standard format with enhanced_image",
-                    "make_com_integration": "Make.com should use output.images for multiple upload"
-                },
                 "optimization_features": [
-                    "✅ V32-Fixed: Google Script compatible both_text_sections mode",
                     "✅ V32 AC PATTERN: 20% white overlay (increased from 12%)",
+                    "✅ BASE64 PADDING: ALWAYS INCLUDED for Google Script",
                     "✅ BRIGHTNESS: AC/AB 1.02 (up from 1.005), Other 1.12 (up from 1.08)",
                     "✅ SHARPNESS: Other 1.5 (up from 1.4), Final 1.8 (up from 1.6)",
                     "✅ CONTRAST: 1.08 (up from 1.05)",
@@ -1468,7 +1461,7 @@ def process_enhancement(job):
                     "✅ Pattern-specific enhancement preserved",
                     "✅ Ready for Figma transparent overlay",
                     "✅ Pure PNG with full alpha channel",
-                    "✅ Make.com compatible base64 (no padding)",
+                    "✅ Google Script compatible base64 (with padding)",
                     "✅ Text sections with professional layout"
                 ],
                 "processing_order": "1.U2Net-Ultra → 2.Enhancement → 3.SwinIR",
@@ -1483,7 +1476,7 @@ def process_enhancement(job):
                 "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
                 "transparency_info": "Full RGBA transparency preserved - NO background",
-                "make_com_compatibility": "Base64 without padding"
+                "google_script_compatibility": "Base64 WITH padding - FIXED"
             }
         }
         
