@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: New-Neo-V1-Ultra-Precision
+# VERSION: New-Neo-V2-Shadow-Fix
 ################################
 
-VERSION = "New-Neo-V1-Ultra-Precision"
+VERSION = "New-Neo-V2-Shadow-Fix"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -502,8 +502,8 @@ def create_design_point_section(text_content=None, width=1200):
     logger.info(f"✅ DESIGN POINT section created: {fixed_width}x{fixed_height} (no bottom line)")
     return section_img
 
-def u2net_ultra_precise_removal_v2(image: Image.Image) -> Image.Image:
-    """ULTRA PRECISE V2 U2Net background removal with multi-stage verification"""
+def u2net_ultra_precise_removal_v3_shadow_fix(image: Image.Image) -> Image.Image:
+    """ULTRA PRECISE V3 with Shadow Fix - Enhanced edge cleaning and shadow removal"""
     try:
         from rembg import remove
         
@@ -513,18 +513,15 @@ def u2net_ultra_precise_removal_v2(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net ULTRA PRECISE V2 Background Removal with Multi-Stage Verification")
+        logger.info("🔷 U2Net ULTRA PRECISE V3 - Shadow Fix Edition")
         
         # CRITICAL: Ensure RGBA mode before processing
         if image.mode != 'RGBA':
-            if image.mode == 'RGB':
-                image = image.convert('RGBA')
-            else:
-                image = image.convert('RGBA')
+            image = image.convert('RGBA')
         
-        # Pre-process image for better edge detection
+        # Enhanced pre-processing for better shadow detection
         contrast = ImageEnhance.Contrast(image)
-        image_enhanced = contrast.enhance(1.15)  # Slightly higher contrast
+        image_enhanced = contrast.enhance(1.2)  # Higher contrast for shadow detection
         
         # Save image to buffer
         buffered = BytesIO()
@@ -537,9 +534,9 @@ def u2net_ultra_precise_removal_v2(image: Image.Image) -> Image.Image:
             img_data,
             session=REMBG_SESSION,
             alpha_matting=True,
-            alpha_matting_foreground_threshold=290,  # Even higher for better edges
+            alpha_matting_foreground_threshold=300,  # Even higher for cleaner edges
             alpha_matting_background_threshold=0,
-            alpha_matting_erode_size=0,
+            alpha_matting_erode_size=2,  # Slight erosion to remove edge artifacts
             only_mask=False,
             post_process_mask=True
         )
@@ -550,7 +547,7 @@ def u2net_ultra_precise_removal_v2(image: Image.Image) -> Image.Image:
         if result_image.mode != 'RGBA':
             result_image = result_image.convert('RGBA')
         
-        # ULTRA PRECISE V2 edge refinement with verification stages
+        # ULTRA PRECISE V3 edge refinement with shadow removal
         r, g, b, a = result_image.split()
         alpha_array = np.array(a, dtype=np.uint8)
         rgb_array = np.array(result_image.convert('RGB'), dtype=np.uint8)
@@ -558,181 +555,172 @@ def u2net_ultra_precise_removal_v2(image: Image.Image) -> Image.Image:
         # Convert to float for processing
         alpha_float = alpha_array.astype(np.float32) / 255.0
         
-        # STAGE 1: Advanced edge detection using multiple methods
+        # STAGE 1: Shadow detection and removal
+        logger.info("🔍 Detecting and removing shadow artifacts...")
+        
         gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
         
+        # Enhanced shadow detection
+        # Shadows typically have low alpha but still visible gray values
+        potential_shadows = (alpha_float > 0.05) & (alpha_float < 0.4) & (gray > 100)
+        
+        # Edge proximity check for shadows
+        edges = cv2.Canny(gray, 50, 150)
+        edge_dilated = cv2.dilate(edges, np.ones((7,7)), iterations=2)
+        
+        # Shadows are often near edges but not on the main object
+        shadow_candidates = potential_shadows & edge_dilated.astype(bool)
+        
+        # Color consistency check for shadows
+        if np.any(shadow_candidates):
+            shadow_coords = np.where(shadow_candidates)
+            for i in range(0, len(shadow_coords[0]), 100):  # Sample points
+                y, x = shadow_coords[0][i], shadow_coords[1][i]
+                # Check local color variance
+                local_region = rgb_array[max(0,y-5):y+5, max(0,x-5):x+5]
+                if local_region.size > 0:
+                    color_std = np.std(local_region)
+                    # Shadows have low color variance
+                    if color_std < 20:
+                        # Mark as shadow to remove
+                        alpha_float[y-3:y+3, x-3:x+3] = 0
+        
+        # STAGE 2: Multi-method edge detection
+        logger.info("🔍 Enhanced edge detection for cleaner boundaries...")
+        
         # Sobel edge detection
-        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
+        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=5)
         edge_magnitude = np.sqrt(sobelx**2 + sobely**2)
         edge_magnitude = (edge_magnitude / edge_magnitude.max() * 255).astype(np.uint8)
         
-        # Canny edge detection for comparison
-        edges_canny = cv2.Canny(gray, 50, 150)
+        # Scharr edge detection (more accurate than Sobel)
+        scharrx = cv2.Scharr(gray, cv2.CV_64F, 1, 0)
+        scharry = cv2.Scharr(gray, cv2.CV_64F, 0, 1)
+        scharr_magnitude = np.sqrt(scharrx**2 + scharry**2)
+        scharr_magnitude = (scharr_magnitude / scharr_magnitude.max() * 255).astype(np.uint8)
         
         # Combine edge detections
-        combined_edges = np.maximum(edge_magnitude > 30, edges_canny > 0)
-        edge_dilated = cv2.dilate(combined_edges.astype(np.uint8), np.ones((3,3)), iterations=2)
+        combined_edges = np.maximum(edge_magnitude > 40, scharr_magnitude > 40)
+        combined_edges = np.maximum(combined_edges, edges > 0)
         
-        # STAGE 2: Narrow area detection for ring holes
-        logger.info("🔍 Detecting narrow areas and ring holes...")
+        # STAGE 3: Aggressive edge cleaning
+        logger.info("🔍 Aggressive edge cleaning to remove artifacts...")
         
-        # Use morphological operations to find narrow areas
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        closed = cv2.morphologyEx(alpha_array, cv2.MORPH_CLOSE, kernel_close)
-        
-        # Find difference to detect narrow gaps
-        narrow_areas = cv2.absdiff(closed, alpha_array)
-        narrow_mask = narrow_areas > 50
-        
-        # STAGE 3: Multi-pass guided filter with verification
-        gray_float = gray.astype(np.float32) / 255.0
-        
-        try:
-            # First pass - very fine details
-            alpha_guided1 = cv2.ximgproc.guidedFilter(
-                guide=gray_float,
-                src=alpha_float,
-                radius=1,
-                eps=0.00001  # Ultra-small epsilon
-            )
-            
-            # Second pass - smooth transitions
-            alpha_guided2 = cv2.ximgproc.guidedFilter(
-                guide=gray_float,
-                src=alpha_guided1,
-                radius=3,
-                eps=0.0005
-            )
-            
-            # Third pass - overall smoothing
-            alpha_guided3 = cv2.ximgproc.guidedFilter(
-                guide=gray_float,
-                src=alpha_guided2,
-                radius=5,
-                eps=0.001
-            )
-            
-            # Adaptive blending based on edge proximity
-            # FIXED: Convert boolean to uint8
-            edge_distance = cv2.distanceTransform((~edge_dilated).astype(np.uint8), cv2.DIST_L2, 3)
-            edge_weight = np.clip(edge_distance / 10, 0, 1)
-            
-            alpha_float = (alpha_guided1 * (1 - edge_weight) + 
-                          alpha_guided3 * edge_weight)
-            
-        except AttributeError:
-            # Fallback with enhanced bilateral filter
-            alpha_uint8 = (alpha_float * 255).astype(np.uint8)
-            alpha_bilateral = cv2.bilateralFilter(alpha_uint8, 7, 100, 100)
-            alpha_float = alpha_bilateral.astype(np.float32) / 255.0
-        
-        # STAGE 4: Verification stage - check for missed areas
-        logger.info("🔍 Verification stage - checking for missed areas...")
-        
-        # Create verification mask
-        bright_areas = gray > 240
-        low_contrast = cv2.Laplacian(gray, cv2.CV_64F).var() < 100
-        potential_missed = bright_areas & (alpha_float < 0.1)
-        
-        # Re-evaluate missed areas
-        if np.any(potential_missed):
-            logger.info("Found potential missed areas, re-evaluating...")
-            # Use local analysis for missed areas
-            for y in range(0, gray.shape[0], 50):
-                for x in range(0, gray.shape[1], 50):
-                    region = potential_missed[y:y+50, x:x+50]
-                    if np.any(region):
-                        local_region = gray[y:y+50, x:x+50]
-                        local_mean = np.mean(local_region)
-                        if local_mean > 230:
-                            # This might be a hole, keep it transparent
-                            alpha_float[y:y+50, x:x+50][region[0:min(50, alpha_float.shape[0]-y), 0:min(50, alpha_float.shape[1]-x)]] = 0
-        
-        # STAGE 5: Enhanced sigmoid with adaptive threshold
-        k = 60  # Higher steepness
-        
-        # Adaptive threshold based on image statistics
-        alpha_mean = np.mean(alpha_float[alpha_float > 0.1])
-        threshold = min(0.5, max(0.3, alpha_mean * 0.8))
-        
-        alpha_sigmoid = 1 / (1 + np.exp(-k * (alpha_float - threshold)))
-        
-        # STAGE 6: Narrow area preservation
-        alpha_smooth = alpha_sigmoid.copy()
-        
-        # Preserve narrow areas detected earlier
-        alpha_smooth[narrow_mask] = alpha_float[narrow_mask]
-        
-        # Edge-aware smoothing
-        non_edge_mask = ~edge_dilated.astype(bool) & ~narrow_mask
-        if np.any(non_edge_mask):
-            alpha_smooth_temp = cv2.GaussianBlur(alpha_sigmoid, (5, 5), 1.0)
-            alpha_smooth[non_edge_mask] = alpha_smooth_temp[non_edge_mask]
-        
-        # STAGE 7: Fine detail preservation with enhanced detection
-        # High-frequency detail detection
-        alpha_highpass = alpha_float - cv2.GaussianBlur(alpha_float, (7, 7), 2.0)
-        fine_details = np.abs(alpha_highpass) > 0.03  # Lower threshold for more details
-        
-        # Preserve fine details
-        detail_dilated = cv2.dilate(fine_details.astype(np.uint8), np.ones((3,3)), iterations=1)
-        alpha_smooth[detail_dilated.astype(bool)] = alpha_float[detail_dilated.astype(bool)]
-        
-        # STAGE 8: Connected component analysis with size adaptation
-        alpha_binary = (alpha_smooth > 0.5).astype(np.uint8)
+        # Find the main object using connected components
+        alpha_binary = (alpha_float > 0.7).astype(np.uint8)
         num_labels, labels = cv2.connectedComponents(alpha_binary)
         
-        if num_labels > 2:
+        if num_labels > 1:
+            # Find the largest component (main object)
             sizes = [np.sum(labels == i) for i in range(1, num_labels)]
             if sizes:
-                # Adaptive size threshold
-                total_size = alpha_array.size
-                min_size = max(int(total_size * 0.0001), 50)  # Minimum 50 pixels
+                main_label = np.argmax(sizes) + 1
+                main_mask = (labels == main_label)
                 
-                valid_labels = [i+1 for i, size in enumerate(sizes) if size > min_size]
+                # Create a clean boundary around the main object
+                kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                main_mask_cleaned = cv2.morphologyEx(main_mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel_clean)
+                main_mask_cleaned = cv2.morphologyEx(main_mask_cleaned, cv2.MORPH_OPEN, kernel_clean)
                 
-                valid_mask = np.zeros_like(alpha_binary, dtype=bool)
+                # Distance transform for smooth edge transition
+                dist_transform = cv2.distanceTransform(main_mask_cleaned, cv2.DIST_L2, 5)
+                
+                # Create smooth alpha based on distance from edge
+                edge_width = 3  # Narrower edge for cleaner look
+                alpha_smooth = np.where(dist_transform > edge_width, 1.0,
+                                      dist_transform / edge_width)
+                
+                # Apply the cleaned alpha
+                alpha_float = alpha_smooth
+        
+        # STAGE 4: Color-based refinement for remaining artifacts
+        logger.info("🔍 Color-based refinement for edge artifacts...")
+        
+        # HSV analysis for better color understanding
+        hsv = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2HSV)
+        h_channel, s_channel, v_channel = cv2.split(hsv)
+        
+        # Detect grayish artifacts (low saturation, medium brightness)
+        gray_artifacts = (s_channel < 30) & (v_channel > 100) & (v_channel < 200)
+        edge_artifacts = gray_artifacts & (alpha_float > 0) & (alpha_float < 0.5)
+        
+        if np.any(edge_artifacts):
+            # Remove gray artifacts near edges
+            alpha_float[edge_artifacts] = 0
+        
+        # STAGE 5: Anti-aliasing with controlled feathering
+        logger.info("🔍 Applying anti-aliasing for smooth edges...")
+        
+        # Very controlled gaussian blur for anti-aliasing
+        alpha_aa = cv2.GaussianBlur(alpha_float, (3, 3), 0.5)
+        
+        # Sharp threshold to maintain clean edges
+        alpha_aa = np.where(alpha_aa > 0.1, alpha_aa, 0)
+        alpha_aa = np.where(alpha_aa > 0.9, 1.0, alpha_aa)
+        
+        # STAGE 6: Final sigmoid for clean transition
+        k = 80  # Very high steepness for sharp edges
+        threshold = 0.4  # Higher threshold to exclude more artifacts
+        
+        alpha_sigmoid = 1 / (1 + np.exp(-k * (alpha_aa - threshold)))
+        
+        # STAGE 7: Ring hole preservation (from previous version)
+        logger.info("🔍 Preserving ring holes...")
+        
+        # Narrow area detection for ring holes
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        closed = cv2.morphologyEx((alpha_sigmoid > 0.5).astype(np.uint8), cv2.MORPH_CLOSE, kernel_close)
+        
+        # Find difference to detect narrow gaps
+        narrow_areas = cv2.absdiff(closed, (alpha_sigmoid > 0.5).astype(np.uint8))
+        narrow_mask = narrow_areas > 0
+        
+        # Check if narrow areas are actually holes
+        if np.any(narrow_mask):
+            narrow_coords = np.where(narrow_mask)
+            for i in range(0, len(narrow_coords[0]), 10):
+                y, x = narrow_coords[0][i], narrow_coords[1][i]
+                local_region = gray[max(0,y-10):y+10, max(0,x-10):x+10]
+                if local_region.size > 0 and np.mean(local_region) > 230:
+                    # This is likely a hole, keep it transparent
+                    alpha_sigmoid[max(0,y-5):y+5, max(0,x-5):x+5] = 0
+        
+        # STAGE 8: Final cleanup pass
+        logger.info("🔍 Final cleanup pass...")
+        
+        # Remove any remaining small artifacts
+        alpha_binary_final = (alpha_sigmoid > 0.5).astype(np.uint8)
+        
+        # Remove small components
+        num_labels_final, labels_final = cv2.connectedComponents(alpha_binary_final)
+        if num_labels_final > 2:
+            sizes_final = [np.sum(labels_final == i) for i in range(1, num_labels_final)]
+            if sizes_final:
+                # Keep only significant components
+                min_size = max(100, alpha_array.size * 0.0001)
+                valid_labels = [i+1 for i, size in enumerate(sizes_final) if size > min_size]
+                
+                valid_mask = np.zeros_like(alpha_binary_final, dtype=bool)
                 for label in valid_labels:
-                    valid_mask |= (labels == label)
+                    valid_mask |= (labels_final == label)
                 
-                # Don't remove small components near edges or in narrow areas
-                removal_mask = ~valid_mask & ~edge_dilated.astype(bool) & ~narrow_mask
-                alpha_smooth[removal_mask] = 0
-        
-        # STAGE 9: Final verification pass
-        logger.info("🔍 Final verification pass...")
-        
-        # Check for any remaining artifacts
-        final_binary = (alpha_smooth > 0.5).astype(np.uint8)
-        
-        # Small morphological cleanup
-        kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        final_cleaned = cv2.morphologyEx(final_binary, cv2.MORPH_OPEN, kernel_small)
-        final_cleaned = cv2.morphologyEx(final_cleaned, cv2.MORPH_CLOSE, kernel_small)
-        
-        # Apply cleanup only where safe
-        safe_cleanup_mask = ~edge_dilated.astype(bool) & ~narrow_mask
-        alpha_smooth[safe_cleanup_mask] = alpha_smooth[safe_cleanup_mask] * final_cleaned[safe_cleanup_mask]
+                alpha_sigmoid[~valid_mask] = 0
         
         # Convert back to uint8
-        alpha_array = np.clip(alpha_smooth * 255, 0, 255).astype(np.uint8)
+        alpha_array = np.clip(alpha_sigmoid * 255, 0, 255).astype(np.uint8)
         
-        # STAGE 10: Ultra-fine feathering
+        # STAGE 9: Ultra-fine final feathering
         kernel_feather = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         alpha_eroded = cv2.erode(alpha_array, kernel_feather, iterations=1)
-        alpha_dilated = cv2.dilate(alpha_array, kernel_feather, iterations=1)
         
-        feather_mask = (alpha_dilated > 0) & (alpha_eroded < 255)
+        feather_mask = (alpha_array > 0) & (alpha_eroded < 255)
         if np.any(feather_mask):
-            # Smoother feathering
-            feather_alpha = alpha_array[feather_mask].astype(np.float32)
-            eroded_alpha = alpha_eroded[feather_mask].astype(np.float32)
-            smooth_factor = 0.7  # Smoother transition
-            alpha_array[feather_mask] = (feather_alpha * smooth_factor + 
-                                        eroded_alpha * (1 - smooth_factor)).astype(np.uint8)
+            # Very subtle feathering
+            alpha_array[feather_mask] = ((alpha_array[feather_mask].astype(np.float32) * 0.8 + 
+                                        alpha_eroded[feather_mask].astype(np.float32) * 0.2)).astype(np.uint8)
         
-        logger.info("✅ ULTRA PRECISE V2 background removal complete with verification")
+        logger.info("✅ ULTRA PRECISE V3 Shadow Fix complete")
         
         a_new = Image.fromarray(alpha_array)
         result = Image.merge('RGBA', (r, g, b, a_new))
@@ -751,13 +739,13 @@ def u2net_ultra_precise_removal_v2(image: Image.Image) -> Image.Image:
             return image.convert('RGBA')
         return image
 
-def ensure_ring_holes_transparent_ultra_v2(image: Image.Image) -> Image.Image:
-    """ULTRA PRECISE V2 ring hole detection with narrow area support"""
+def ensure_ring_holes_transparent_ultra_v3(image: Image.Image) -> Image.Image:
+    """ULTRA PRECISE V3 ring hole detection with enhanced shadow removal"""
     # CRITICAL: Preserve RGBA mode
     if image.mode != 'RGBA':
         image = image.convert('RGBA')
     
-    logger.info("🔍 ULTRA PRECISE V2 Ring Hole Detection with Narrow Area Support")
+    logger.info("🔍 ULTRA PRECISE V3 Ring Hole Detection with Shadow Removal")
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -769,48 +757,49 @@ def ensure_ring_holes_transparent_ultra_v2(image: Image.Image) -> Image.Image:
     hsv = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2HSV)
     h_channel, s_channel, v_channel = cv2.split(hsv)
     
-    # STAGE 1: Multi-criteria hole detection
-    very_bright = v_channel > 240
-    low_saturation = s_channel < 30
-    alpha_holes = alpha_array < 50
+    # STAGE 1: Multi-criteria hole detection with shadow exclusion
+    very_bright = v_channel > 245  # Higher threshold
+    very_low_saturation = s_channel < 20  # Lower threshold
+    alpha_holes = alpha_array < 30  # Lower threshold for cleaner holes
     
     # Additional criteria for narrow areas
     gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
-    high_brightness_gray = gray > 235
+    high_brightness_gray = gray > 240  # Higher threshold
     
-    potential_holes = (very_bright & low_saturation) | alpha_holes | high_brightness_gray
+    # Exclude potential shadow areas
+    not_shadow = ~((v_channel < 200) & (s_channel < 40))
     
-    # STAGE 2: Narrow area specific detection
-    logger.info("🔍 Detecting narrow ring areas...")
+    potential_holes = ((very_bright & very_low_saturation) | alpha_holes | high_brightness_gray) & not_shadow
+    
+    # STAGE 2: Enhanced narrow area detection
+    logger.info("🔍 Enhanced narrow ring area detection...")
     
     # Use distance transform to find narrow regions
     if np.any(alpha_array > 128):
-        # FIXED: Convert boolean to uint8
-        dist_transform = cv2.distanceTransform((alpha_array > 128).astype(np.uint8), cv2.DIST_L2, 3)
-        narrow_regions = (dist_transform > 0) & (dist_transform < 20)  # Narrow band
+        dist_transform = cv2.distanceTransform((alpha_array > 128).astype(np.uint8), cv2.DIST_L2, 5)
+        narrow_regions = (dist_transform > 0) & (dist_transform < 15)  # Narrower band
         
-        # Check brightness in narrow regions
-        narrow_bright = narrow_regions & (gray > 230)
+        # Check brightness in narrow regions with shadow exclusion
+        narrow_bright = narrow_regions & (gray > 235) & not_shadow
         potential_holes |= narrow_bright
     
-    # Clean up noise with smaller kernel for narrow areas
-    kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    # Clean up noise with minimal processing
+    kernel_clean = np.ones((2, 2), dtype=np.uint8)  # Smaller kernel
     potential_holes = cv2.morphologyEx(potential_holes.astype(np.uint8), cv2.MORPH_OPEN, kernel_clean)
-    potential_holes = cv2.morphologyEx(potential_holes, cv2.MORPH_CLOSE, kernel_clean)
     
     # Find connected components
     num_labels, labels = cv2.connectedComponents(potential_holes)
     
     holes_mask = np.zeros_like(alpha_array, dtype=np.float32)
     
-    # STAGE 3: Analyze each component with enhanced criteria
+    # STAGE 3: Analyze each component with stricter criteria
     for label in range(1, num_labels):
         component = (labels == label)
         component_size = np.sum(component)
         
         # Adjusted size filtering for narrow areas
-        min_size = h * w * 0.00005  # Smaller minimum for narrow holes
-        max_size = h * w * 0.2
+        min_size = max(20, h * w * 0.00002)  # Smaller minimum
+        max_size = h * w * 0.15  # Smaller maximum
         
         if min_size < component_size < max_size:
             coords = np.where(component)
@@ -826,92 +815,79 @@ def ensure_ring_holes_transparent_ultra_v2(image: Image.Image) -> Image.Image:
             if comp_height == 0 or comp_width == 0:
                 continue
             
-            # More flexible aspect ratio for various hole shapes
-            aspect_ratio = comp_width / comp_height
-            shape_valid = 0.1 < aspect_ratio < 10.0  # Very flexible
-            
-            # Check if it's a narrow hole
-            is_narrow = min(comp_width, comp_height) < 30
-            
-            center_y, center_x = (min_y + max_y) / 2, (min_x + max_x) / 2
-            center_distance = np.sqrt((center_x - w/2)**2 + (center_y - h/2)**2)
-            position_valid = center_distance < max(w, h) * 0.48  # Slightly larger range
-            
+            # Check for shadow characteristics
             component_pixels = rgb_array[component]
             if len(component_pixels) > 0:
                 brightness = np.mean(component_pixels)
                 brightness_std = np.std(component_pixels)
                 
-                # Adjusted thresholds for narrow areas
-                brightness_threshold = 225 if is_narrow else 230
-                std_threshold = 30 if is_narrow else 25
+                # Shadow detection: moderate brightness with low variance
+                is_shadow = (brightness > 120) & (brightness < 200) & (brightness_std < 15)
+                
+                if is_shadow:
+                    logger.info(f"Skipping shadow-like component: brightness={brightness:.1f}, std={brightness_std:.1f}")
+                    continue
+                
+                # Strict criteria for holes
+                brightness_threshold = 235  # Higher threshold
+                std_threshold = 20  # Lower threshold
                 
                 brightness_valid = brightness > brightness_threshold
                 consistency_valid = brightness_std < std_threshold
+                
+                # Color check - holes should be nearly white
+                color_variance = np.std(component_pixels, axis=2).mean()
+                color_valid = color_variance < 10  # Very low color variance
                 
                 # Shape analysis
                 component_uint8 = component.astype(np.uint8) * 255
                 contours, _ = cv2.findContours(component_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 
-                circularity_valid = False
-                smoothness_valid = True
-                
+                shape_valid = False
                 if contours:
                     contour = contours[0]
                     area = cv2.contourArea(contour)
                     perimeter = cv2.arcLength(contour, True)
-                    if perimeter > 0:
-                        circularity = 4 * np.pi * area / (perimeter * perimeter)
-                        # More lenient circularity for narrow holes
-                        circularity_threshold = 0.2 if is_narrow else 0.3
-                        circularity_valid = circularity > circularity_threshold
-                    
-                    # Edge smoothness check
-                    edges = cv2.Canny(component_uint8, 50, 150)
-                    if perimeter > 0:
-                        edge_ratio = np.sum(edges > 0) / perimeter
-                        smoothness_threshold = 3.0 if is_narrow else 2.0
-                        smoothness_valid = edge_ratio < smoothness_threshold
+                    if perimeter > 0 and area > 0:
+                        # Check for smooth shape (not jagged shadow edges)
+                        smoothness = (4 * np.pi * area) / (perimeter * perimeter)
+                        shape_valid = smoothness > 0.4  # Higher threshold
                 
-                # Confidence calculation with narrow area bonus
+                # Confidence calculation
                 confidence = 0.0
                 if brightness_valid: confidence += 0.3
                 if consistency_valid: confidence += 0.2
-                if position_valid: confidence += 0.15
-                if circularity_valid: confidence += 0.15
-                if smoothness_valid: confidence += 0.1
-                if is_narrow: confidence += 0.1  # Bonus for narrow areas
+                if color_valid: confidence += 0.3
+                if shape_valid: confidence += 0.2
                 
-                # Lower threshold for narrow areas
-                confidence_threshold = 0.35 if is_narrow else 0.45
-                
-                if confidence > confidence_threshold and (shape_valid or is_narrow):
+                # Higher threshold for confidence
+                if confidence > 0.6:
                     holes_mask[component] = 255
-                    logger.info(f"{'Narrow ' if is_narrow else ''}Hole detected with confidence: {confidence:.2f}")
+                    logger.info(f"Hole detected with confidence: {confidence:.2f}")
     
-    # STAGE 4: Apply holes with smooth transitions
+    # STAGE 4: Apply holes with minimal transition
     if np.any(holes_mask > 0):
-        # Extra smoothing for narrow areas
-        holes_mask_smooth = cv2.GaussianBlur(holes_mask, (3, 3), 0.5)
+        # Minimal smoothing to keep edges clean
+        holes_mask_smooth = cv2.GaussianBlur(holes_mask, (3, 3), 0.3)
         
-        # Smaller dilation for narrow areas
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        # Very small dilation
+        kernel_dilate = np.ones((2, 2), dtype=np.uint8)
         holes_dilated = cv2.dilate(holes_mask, kernel_dilate, iterations=1)
         transition_zone = (holes_dilated > 0) & (holes_mask < 255)
         
         alpha_float = alpha_array.astype(np.float32)
         
         # Make holes fully transparent
-        alpha_float[holes_mask_smooth > 200] = 0
+        alpha_float[holes_mask_smooth > 128] = 0  # Higher threshold
         
-        # Smooth transition
+        # Minimal transition
         if np.any(transition_zone):
             transition_alpha = 1 - (holes_mask_smooth[transition_zone] / 255)
-            alpha_float[transition_zone] *= transition_alpha
+            alpha_float[transition_zone] *= transition_alpha * 0.5  # Stronger transition
         
         alpha_array = np.clip(alpha_float, 0, 255).astype(np.uint8)
         
-        logger.info("✅ Ring holes (including narrow areas) made transparent")
+        logger.info("✅ Ring holes made transparent with shadow exclusion")
     
     a_new = Image.fromarray(alpha_array)
     result = Image.merge('RGBA', (r, g, b, a_new))
@@ -1397,9 +1373,9 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - New Neo V1 Ultra Precision"""
+    """Main enhancement processing - New Neo V2 Shadow Fix"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 NEW NEO V1: Ultra Precision Background Removal")
+    logger.info("🎯 NEW NEO V2: Shadow Fix Edition")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment and margins")
     logger.info("🔧 AC PATTERN: 20% white overlay")
@@ -1407,8 +1383,9 @@ def process_enhancement(job):
     logger.info("✨ ALL PATTERNS: Increased brightness and sharpness")
     logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
     logger.info("🗜️ COMPRESSION: Level 3 (balanced speed/size)")
-    logger.info("🆕 DESIGN POINT: Bottom gray line removed")
-    logger.info("🆕 NARROW AREA DETECTION: Enhanced for thin ring holes")
+    logger.info("🆕 SHADOW FIX: Enhanced shadow detection and removal")
+    logger.info("🆕 EDGE CLEANING: Aggressive artifact removal")
+    logger.info("🆕 COLOR-BASED REFINEMENT: Remove gray artifacts")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
     
@@ -1442,11 +1419,11 @@ def process_enhancement(job):
             logger.info(f"Converting {image.mode} to RGBA immediately")
             image = image.convert('RGBA')
         
-        # STEP 1: ULTRA PRECISE V2 BACKGROUND REMOVAL - ALWAYS APPLY
-        logger.info("📸 STEP 1: ALWAYS applying ULTRA PRECISE V2 background removal")
+        # STEP 1: ULTRA PRECISE V3 SHADOW FIX BACKGROUND REMOVAL
+        logger.info("📸 STEP 1: Applying ULTRA PRECISE V3 Shadow Fix background removal")
         removal_start = time.time()
-        image = u2net_ultra_precise_removal_v2(image)
-        logger.info(f"⏱️ Ultra precise V2 background removal took: {time.time() - removal_start:.2f}s")
+        image = u2net_ultra_precise_removal_v3_shadow_fix(image)
+        logger.info(f"⏱️ Ultra precise V3 Shadow Fix removal took: {time.time() - removal_start:.2f}s")
         
         # Verify RGBA after removal
         if image.mode != 'RGBA':
@@ -1502,9 +1479,9 @@ def process_enhancement(job):
         # Apply pattern-specific enhancements (preserving transparency)
         image = apply_pattern_enhancement_transparent(image, pattern_type)
         
-        # ULTRA PRECISE V2 ring hole detection
-        logger.info("🔍 Applying ULTRA PRECISE V2 ring hole detection")
-        image = ensure_ring_holes_transparent_ultra_v2(image)
+        # ULTRA PRECISE V3 ring hole detection with shadow fix
+        logger.info("🔍 Applying ULTRA PRECISE V3 ring hole detection with shadow exclusion")
+        image = ensure_ring_holes_transparent_ultra_v3(image)
         
         logger.info(f"⏱️ Enhancement took: {time.time() - enhancement_start:.2f}s")
         
@@ -1573,23 +1550,22 @@ def process_enhancement(job):
                     "009-010": "Thumbnail",
                     "011": "COLOR section"
                 },
-                "new_neo_v1_features": [
-                    "✅ ULTRA PRECISE V2: Multi-stage verification background removal",
-                    "✅ NARROW AREA DETECTION: Enhanced for thin ring holes",
-                    "✅ DESIGN POINT: Bottom gray line removed",
-                    "✅ VERIFICATION STAGES: Added missed area re-evaluation",
-                    "✅ ADAPTIVE THRESHOLD: Based on image statistics",
-                    "✅ ENHANCED EDGE DETECTION: Combined Sobel and Canny",
-                    "✅ NARROW HOLE SUPPORT: Lower size and confidence thresholds",
-                    "✅ MULTI-PASS GUIDED FILTER: 3 passes with adaptive blending",
-                    "✅ FINE DETAIL PRESERVATION: Lower threshold (0.03)",
-                    "✅ SMOOTHER FEATHERING: Factor 0.7 for natural edges",
-                    "✅ FIXED: OpenCV distanceTransform type conversion"
+                "new_neo_v2_shadow_fix_features": [
+                    "✅ SHADOW DETECTION: Enhanced detection and removal of shadow artifacts",
+                    "✅ AGGRESSIVE EDGE CLEANING: Remove gray artifacts and shadows from edges",
+                    "✅ COLOR-BASED REFINEMENT: Detect and remove grayish edge artifacts",
+                    "✅ MULTI-METHOD EDGE DETECTION: Sobel + Scharr + Canny combination",
+                    "✅ MAIN OBJECT ISOLATION: Focus on largest component for cleaner results",
+                    "✅ CONTROLLED FEATHERING: Minimal transition for sharp edges",
+                    "✅ ANTI-ALIASING: Smooth edges without creating artifacts",
+                    "✅ SHADOW EXCLUSION: Prevent shadows from being detected as holes",
+                    "✅ HIGHER THRESHOLDS: Stricter criteria for cleaner results",
+                    "✅ MINIMAL SMOOTHING: Keep edges crisp and clean"
                 ],
-                "processing_order": "1.U2Net-Ultra-V2 → 2.Enhancement → 3.SwinIR",
+                "processing_order": "1.U2Net-Ultra-V3-Shadow-Fix → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
                 "png_support": True,
-                "edge_detection": "ULTRA PRECISE V2 (Multi-method + Verification)",
+                "edge_detection": "ULTRA PRECISE V3 (Multi-method + Shadow Fix)",
                 "korean_support": "COMPLETELY FIXED - No encoding parameter needed",
                 "white_overlay": "AC: 20% | AB: 16% | Other: None",
                 "brightness_values": "AC/AB: 1.02 | Other: 1.12",
@@ -1602,7 +1578,7 @@ def process_enhancement(job):
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with NEW NEO V1 features")
+        logger.info("✅ Enhancement completed successfully with NEW NEO V2 Shadow Fix")
         return output
         
     except Exception as e:
