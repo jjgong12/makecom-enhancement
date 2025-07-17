@@ -1198,10 +1198,10 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         logger.info("✅ AB Pattern enhancement applied with 16% white overlay")
         
     else:
-        logger.info("🔍 Other Pattern - Standard enhancement with increased values")
-        # Increased brightness for other patterns
+        logger.info("🔍 Other Pattern - Standard enhancement with brightness 1.08")
+        # Fixed brightness value for other patterns
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.12)  # Increased from 1.08
+        rgb_image = brightness.enhance(1.08)  # FIXED from 1.12
         
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.99)
@@ -1340,7 +1340,7 @@ def process_enhancement(job):
     logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment and margins")
     logger.info("🔧 AC PATTERN: 20% white overlay")
     logger.info("🔧 AB PATTERN: 16% white overlay")
-    logger.info("✨ ALL PATTERNS: Increased brightness and sharpness")
+    logger.info("✨ OTHER PATTERNS: Brightness 1.08 (FIXED from 1.12)")
     logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
     logger.info("🗜️ COMPRESSION: Level 3 (balanced speed/size)")
     logger.info("🆕 SHADOW FIX: Enhanced shadow detection and removal")
@@ -1528,13 +1528,14 @@ def process_enhancement(job):
                 "edge_detection": "ULTRA PRECISE V3 (Multi-method + Shadow Fix)",
                 "korean_support": "FIXED - Using requests instead of urllib",
                 "white_overlay": "AC: 20% | AB: 16% | Other: None",
-                "brightness_values": "AC/AB: 1.02 | Other: 1.12",
+                "brightness_values": "AC/AB: 1.02 | Other: 1.08",
                 "sharpness_values": "Other: 1.5 → Final: 1.8",
                 "contrast_value": "1.08",
                 "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
                 "transparency_info": "Full RGBA transparency preserved - NO background",
-                "google_script_compatibility": "Base64 WITH padding - FIXED"
+                "google_script_compatibility": "Base64 WITH padding - FIXED",
+                "brightness_update": "Other pattern brightness changed from 1.12 to 1.08"
             }
         }
         
