@@ -12,8 +12,6 @@ import re
 import replicate
 import requests
 import string
-import urllib.request
-import urllib.error
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,7 +37,7 @@ if REPLICATE_API_TOKEN:
 # Global rembg session with U2Net
 REMBG_SESSION = None
 
-# Korean font cache - COMPLETELY FIXED
+# Korean font cache - FIXED TO MATCH THUMBNAIL
 KOREAN_FONT_PATH = None
 KOREAN_FONT_VERIFIED = False
 FONT_CACHE = {}
@@ -61,7 +59,7 @@ def init_rembg_session():
 init_rembg_session()
 
 def download_korean_font():
-    """Download and verify Korean font - ENCODING FIXED"""
+    """Download and verify Korean font - FIXED TO USE REQUESTS LIKE THUMBNAIL"""
     global KOREAN_FONT_PATH, KOREAN_FONT_VERIFIED
     
     if KOREAN_FONT_PATH and KOREAN_FONT_VERIFIED:
@@ -71,90 +69,50 @@ def download_korean_font():
     try:
         font_path = '/tmp/NanumGothic.ttf'
         
-        # Always remove existing font file to ensure fresh download
-        if os.path.exists(font_path):
-            os.remove(font_path)
-            logger.info("🔄 Removed existing font file for fresh download")
+        # Check if font exists and verify it
+        if os.path.exists(font_path) and not KOREAN_FONT_VERIFIED:
+            if verify_korean_font(font_path):
+                KOREAN_FONT_PATH = font_path
+                KOREAN_FONT_VERIFIED = True
+                logger.info("✅ Korean font verified and cached")
+                return font_path
+            else:
+                os.remove(font_path)
+                logger.info("🔄 Removed invalid font file")
         
-        # FIXED: Working font sources with proper URLs
-        font_sources = [
-            {
-                'url': 'https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf',
-                'name': 'Google Fonts GitHub (Primary)'
-            },
-            {
-                'url': 'https://fonts.gstatic.com/s/nanumgothic/v17/PN_3Rfi-oW3hYwmKDpxS7F_D-d7qPgJc.ttf',
-                'name': 'Google Fonts Direct'
-            },
-            {
-                'url': 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/nanumgothic/NanumGothic-Regular.ttf',
-                'name': 'JSDelivr CDN'
-            },
-            {
-                'url': 'https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Regular.ttf',
-                'name': 'GitHub Raw'
-            }
-        ]
-        
-        for source in font_sources:
-            try:
-                logger.info(f"🔽 Downloading Korean font from: {source['name']}")
-                
-                # Use urllib for better control
-                req = urllib.request.Request(
-                    source['url'],
-                    headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': 'application/font-ttf,font/*,*/*'
-                    }
-                )
-                
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    font_data = response.read()
-                
-                # Validate font data
-                if len(font_data) < 50000:  # TTF files should be at least 50KB
-                    logger.warning(f"❌ Font file too small: {len(font_data)} bytes")
+        # Download if not exists or verification failed
+        if not os.path.exists(font_path):
+            # FIXED: Use same URLs as thumbnail handler
+            font_urls = [
+                'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
+                'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
+                'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothicBold.ttf'
+            ]
+            
+            for url in font_urls:
+                try:
+                    logger.info(f"Downloading font from: {url}")
+                    # FIXED: Use requests instead of urllib
+                    response = requests.get(url, timeout=30)
+                    if response.status_code == 200 and len(response.content) > 100000:
+                        with open(font_path, 'wb') as f:
+                            f.write(response.content)
+                        
+                        # Verify the font works with Korean
+                        if verify_korean_font(font_path):
+                            KOREAN_FONT_PATH = font_path
+                            KOREAN_FONT_VERIFIED = True
+                            logger.info("✅ Korean font downloaded and verified successfully")
+                            return font_path
+                        else:
+                            logger.warning(f"❌ Font verification failed for: {url}")
+                            if os.path.exists(font_path):
+                                os.remove(font_path)
+                except Exception as e:
+                    logger.error(f"Failed to download from {url}: {e}")
                     continue
-                
-                # Save font file
-                with open(font_path, 'wb') as f:
-                    f.write(font_data)
-                
-                # CRITICAL: Verify Korean font works
-                if verify_korean_font(font_path):
-                    KOREAN_FONT_PATH = font_path
-                    KOREAN_FONT_VERIFIED = True
-                    logger.info(f"✅ Korean font successfully downloaded and verified: {source['name']}")
-                    return font_path
-                else:
-                    logger.warning(f"❌ Font verification failed for: {source['name']}")
-                    if os.path.exists(font_path):
-                        os.remove(font_path)
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to download from {source['name']}: {e}")
-                continue
         
-        # If all downloads fail, try to use system fonts
-        logger.warning("🔄 All downloads failed, trying system fonts...")
-        system_fonts = [
-            '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
-            '/usr/share/fonts/TTF/NanumGothic.ttf',
-            '/System/Library/Fonts/AppleSDGothicNeo.ttc',
-            '/Windows/Fonts/malgun.ttf',
-            '/System/Library/Fonts/AppleGothic.ttf'
-        ]
-        
-        for sys_font in system_fonts:
-            if os.path.exists(sys_font):
-                if verify_korean_font(sys_font):
-                    KOREAN_FONT_PATH = sys_font
-                    KOREAN_FONT_VERIFIED = True
-                    logger.info(f"✅ Using system Korean font: {sys_font}")
-                    return sys_font
-        
-        logger.error("❌ No valid Korean font found")
+        logger.error("❌ Failed to download Korean font from all sources")
         return None
         
     except Exception as e:
@@ -162,7 +120,7 @@ def download_korean_font():
         return None
 
 def verify_korean_font(font_path):
-    """Verify that the font can render Korean text properly - FIXED"""
+    """Verify that the font can render Korean text properly"""
     try:
         # Test with multiple Korean texts
         test_texts = [
@@ -177,8 +135,8 @@ def verify_korean_font(font_path):
         
         # Test multiple font sizes
         for size in [20, 24, 28, 48]:
-            # FIXED: Remove encoding parameter completely
-            font = ImageFont.truetype(font_path, size)
+            # FIXED: Use encoding='utf-8' like thumbnail handler
+            font = ImageFont.truetype(font_path, size, encoding='utf-8')
             
             # Create test image
             test_img = Image.new('RGB', (500, 200), 'white')
@@ -187,7 +145,7 @@ def verify_korean_font(font_path):
             y_pos = 10
             for text in test_texts:
                 try:
-                    # Test text rendering with proper UTF-8 string
+                    # Test text rendering
                     bbox = draw.textbbox((10, y_pos), text, font=font)
                     draw.text((10, y_pos), text, font=font, fill='black')
                     
@@ -210,7 +168,7 @@ def verify_korean_font(font_path):
         return False
 
 def get_font(size, force_korean=True):
-    """Get font with Korean support - ENCODING FIXED"""
+    """Get font with Korean support - FIXED TO MATCH THUMBNAIL"""
     global KOREAN_FONT_PATH, FONT_CACHE
     
     cache_key = f"{size}_{force_korean}"
@@ -231,8 +189,8 @@ def get_font(size, force_korean=True):
         
         if KOREAN_FONT_PATH and os.path.exists(KOREAN_FONT_PATH):
             try:
-                # FIXED: Remove encoding parameter completely
-                font = ImageFont.truetype(KOREAN_FONT_PATH, size)
+                # FIXED: Use encoding='utf-8' like thumbnail handler
+                font = ImageFont.truetype(KOREAN_FONT_PATH, size, encoding='utf-8')
                 logger.info(f"✅ Korean font loaded: size {size}")
             except Exception as e:
                 logger.error(f"❌ Failed to load Korean font: {e}")
@@ -254,13 +212,13 @@ def get_font(size, force_korean=True):
     return font
 
 def safe_draw_text(draw, position, text, font, fill):
-    """Safely draw Korean text - ENCODING FIXED"""
+    """Safely draw Korean text"""
     try:
         if not text or not font:
             logger.warning("⚠️ No text or font provided")
             return
         
-        # FIXED: Simplified encoding handling - just ensure UTF-8 string
+        # Handle encoding
         if isinstance(text, bytes):
             text = text.decode('utf-8', errors='replace')
         
@@ -270,7 +228,7 @@ def safe_draw_text(draw, position, text, font, fill):
             logger.warning("⚠️ Empty text after processing")
             return
         
-        # Draw the text directly - PIL handles Korean properly now
+        # Draw the text
         draw.text(position, text, font=font, fill=fill)
         logger.info(f"✅ Successfully drew text: {text[:20]}...")
         
@@ -284,7 +242,7 @@ def safe_draw_text(draw, position, text, font, fill):
             pass
 
 def get_text_size(draw, text, font):
-    """Get text size - FIXED for Korean"""
+    """Get text size compatible with different PIL versions"""
     try:
         if not text or not font:
             return (0, 0)
@@ -304,6 +262,8 @@ def get_text_size(draw, text, font):
         
         return (max(0, width), max(0, height))
         
+    except AttributeError:
+        return draw.textsize(text, font=font)
     except Exception as e:
         logger.error(f"❌ Text size calculation error: {e}")
         return (100, 20)  # Fallback size
@@ -1566,7 +1526,7 @@ def process_enhancement(job):
                 "swinir_applied": True,
                 "png_support": True,
                 "edge_detection": "ULTRA PRECISE V3 (Multi-method + Shadow Fix)",
-                "korean_support": "COMPLETELY FIXED - No encoding parameter needed",
+                "korean_support": "FIXED - Using requests instead of urllib",
                 "white_overlay": "AC: 20% | AB: 16% | Other: None",
                 "brightness_values": "AC/AB: 1.02 | Other: 1.12",
                 "sharpness_values": "Other: 1.5 → Final: 1.8",
