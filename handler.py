@@ -59,22 +59,26 @@ def init_rembg_session():
 init_rembg_session()
 
 def download_korean_font():
-    """Download and verify Korean font - FIXED TO USE REQUESTS LIKE THUMBNAIL"""
+    """Download and verify Korean font - ENHANCED WITH BETTER ERROR HANDLING"""
     global KOREAN_FONT_PATH, KOREAN_FONT_VERIFIED
     
-    if KOREAN_FONT_PATH and KOREAN_FONT_VERIFIED:
+    if KOREAN_FONT_PATH and KOREAN_FONT_VERIFIED and os.path.exists(KOREAN_FONT_PATH):
         logger.info(f"✅ Using cached Korean font: {KOREAN_FONT_PATH}")
         return KOREAN_FONT_PATH
     
     try:
         font_path = '/tmp/NanumGothic.ttf'
         
+        # Reset verification flag if file doesn't exist
+        if not os.path.exists(font_path):
+            KOREAN_FONT_VERIFIED = False
+        
         # Check if font exists and verify it
         if os.path.exists(font_path) and not KOREAN_FONT_VERIFIED:
             if verify_korean_font(font_path):
                 KOREAN_FONT_PATH = font_path
                 KOREAN_FONT_VERIFIED = True
-                logger.info("✅ Korean font verified and cached")
+                logger.info("✅ Existing Korean font verified and cached")
                 return font_path
             else:
                 os.remove(font_path)
@@ -82,7 +86,6 @@ def download_korean_font():
         
         # Download if not exists or verification failed
         if not os.path.exists(font_path):
-            # FIXED: Use same URLs as thumbnail handler
             font_urls = [
                 'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
                 'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
@@ -92,8 +95,7 @@ def download_korean_font():
             for url in font_urls:
                 try:
                     logger.info(f"Downloading font from: {url}")
-                    # FIXED: Use requests instead of urllib
-                    response = requests.get(url, timeout=30)
+                    response = requests.get(url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
                     if response.status_code == 200 and len(response.content) > 100000:
                         with open(font_path, 'wb') as f:
                             f.write(response.content)
@@ -120,7 +122,7 @@ def download_korean_font():
         return None
 
 def verify_korean_font(font_path):
-    """Verify that the font can render Korean text properly"""
+    """Verify that the font can render Korean text properly - ENHANCED"""
     try:
         # Test with multiple Korean texts
         test_texts = [
@@ -135,30 +137,35 @@ def verify_korean_font(font_path):
         
         # Test multiple font sizes
         for size in [20, 24, 28, 48]:
-            # FIXED: Use encoding='utf-8' like thumbnail handler
-            font = ImageFont.truetype(font_path, size, encoding='utf-8')
-            
-            # Create test image
-            test_img = Image.new('RGB', (500, 200), 'white')
-            draw = ImageDraw.Draw(test_img)
-            
-            y_pos = 10
-            for text in test_texts:
-                try:
-                    # Test text rendering
-                    bbox = draw.textbbox((10, y_pos), text, font=font)
-                    draw.text((10, y_pos), text, font=font, fill='black')
-                    
-                    # Check if bbox is valid
-                    if bbox[2] - bbox[0] <= 0 or bbox[3] - bbox[1] <= 0:
-                        logger.warning(f"❌ Invalid bbox for text: {text}")
+            try:
+                # Load font with UTF-8 encoding
+                font = ImageFont.truetype(font_path, size, encoding='utf-8')
+                
+                # Create test image
+                test_img = Image.new('RGB', (500, 200), 'white')
+                draw = ImageDraw.Draw(test_img)
+                
+                y_pos = 10
+                for text in test_texts:
+                    try:
+                        # Test text rendering
+                        bbox = draw.textbbox((10, y_pos), text, font=font)
+                        draw.text((10, y_pos), text, font=font, fill='black')
+                        
+                        # Check if bbox is valid
+                        if bbox[2] - bbox[0] <= 0 or bbox[3] - bbox[1] <= 0:
+                            logger.warning(f"❌ Invalid bbox for text: {text}")
+                            return False
+                        
+                        y_pos += 25
+                        
+                    except Exception as e:
+                        logger.warning(f"❌ Failed to render text '{text}': {e}")
                         return False
-                    
-                    y_pos += 25
-                    
-                except Exception as e:
-                    logger.warning(f"❌ Failed to render text '{text}': {e}")
-                    return False
+                        
+            except Exception as e:
+                logger.error(f"❌ Failed to load font size {size}: {e}")
+                return False
         
         logger.info("✅ Korean font verification passed")
         return True
@@ -168,20 +175,22 @@ def verify_korean_font(font_path):
         return False
 
 def get_font(size, force_korean=True):
-    """Get font with Korean support - FIXED TO MATCH THUMBNAIL"""
+    """Get font with Korean support - ENHANCED ERROR HANDLING"""
     global KOREAN_FONT_PATH, FONT_CACHE
     
     cache_key = f"{size}_{force_korean}"
     
     # Return cached font if available
     if cache_key in FONT_CACHE:
-        return FONT_CACHE[cache_key]
+        cached_font = FONT_CACHE[cache_key]
+        if cached_font:
+            return cached_font
     
     font = None
     
     if force_korean:
         # Ensure Korean font is available
-        if not KOREAN_FONT_PATH or not KOREAN_FONT_VERIFIED:
+        if not KOREAN_FONT_PATH or not KOREAN_FONT_VERIFIED or not os.path.exists(KOREAN_FONT_PATH):
             korean_path = download_korean_font()
             if not korean_path:
                 logger.error("❌ No Korean font available")
@@ -189,7 +198,7 @@ def get_font(size, force_korean=True):
         
         if KOREAN_FONT_PATH and os.path.exists(KOREAN_FONT_PATH):
             try:
-                # FIXED: Use encoding='utf-8' like thumbnail handler
+                # Load font with UTF-8 encoding
                 font = ImageFont.truetype(KOREAN_FONT_PATH, size, encoding='utf-8')
                 logger.info(f"✅ Korean font loaded: size {size}")
             except Exception as e:
@@ -199,45 +208,57 @@ def get_font(size, force_korean=True):
     # Fallback to default font
     if font is None:
         try:
+            # Try to get a basic font that supports some Unicode
             font = ImageFont.load_default()
             logger.warning(f"⚠️ Using default font for size {size}")
         except Exception as e:
             logger.error(f"❌ Failed to load default font: {e}")
-            font = None
+            # Create a minimal font as last resort
+            try:
+                font = ImageFont.load_default()
+            except:
+                font = None
     
-    # Cache the font
+    # Cache the font only if successfully loaded
     if font:
         FONT_CACHE[cache_key] = font
     
     return font
 
 def safe_draw_text(draw, position, text, font, fill):
-    """Safely draw Korean text"""
+    """Safely draw Korean text - ENHANCED"""
     try:
         if not text or not font:
             logger.warning("⚠️ No text or font provided")
             return
         
-        # Handle encoding
+        # Handle encoding properly
         if isinstance(text, bytes):
             text = text.decode('utf-8', errors='replace')
         
+        # Ensure string and normalize
         text = str(text).strip()
         
         if not text:
             logger.warning("⚠️ Empty text after processing")
             return
         
-        # Draw the text
-        draw.text(position, text, font=font, fill=fill)
-        logger.info(f"✅ Successfully drew text: {text[:20]}...")
+        # Try to draw the text
+        try:
+            draw.text(position, text, font=font, fill=fill)
+            logger.info(f"✅ Successfully drew text: {text[:20]}...")
+        except UnicodeEncodeError:
+            # Handle unicode errors
+            logger.warning(f"⚠️ Unicode error, trying with replacement")
+            safe_text = text.encode('utf-8', errors='replace').decode('utf-8')
+            draw.text(position, safe_text, font=font, fill=fill)
         
     except Exception as e:
         logger.error(f"❌ Text drawing error: {e}, text: {repr(text)}")
-        # Simple fallback
+        # Fallback text
         try:
             if font:
-                draw.text(position, "[한글 오류]", font=font, fill=fill)
+                draw.text(position, "[Text Error]", font=font, fill=fill)
         except:
             pass
 
@@ -263,21 +284,31 @@ def get_text_size(draw, text, font):
         return (max(0, width), max(0, height))
         
     except AttributeError:
-        return draw.textsize(text, font=font)
+        # Fallback for older PIL versions
+        try:
+            return draw.textsize(text, font=font)
+        except:
+            return (100, 20)
     except Exception as e:
         logger.error(f"❌ Text size calculation error: {e}")
         return (100, 20)  # Fallback size
 
 def wrap_text(text, font, max_width, draw):
     """Wrap text to fit within max_width"""
+    if not text or not font:
+        return []
+        
     words = text.split()
     lines = []
     current_line = []
     
     for word in words:
         test_line = ' '.join(current_line + [word])
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        width = bbox[2] - bbox[0]
+        try:
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            width = bbox[2] - bbox[0]
+        except:
+            width = max_width + 1  # Force new line
         
         if width <= max_width:
             current_line.append(word)
@@ -296,7 +327,7 @@ def wrap_text(text, font, max_width, draw):
     return lines
 
 def create_md_talk_section(text_content=None, width=1200):
-    """Create MD TALK section - FIXED SIZE 1200x600"""
+    """Create MD TALK section - FIXED SIZE 1200x600 with ENHANCED Korean support"""
     logger.info("🔤 Creating MD TALK section with FIXED size 1200x600")
     
     # Fixed dimensions
@@ -310,7 +341,9 @@ def create_md_talk_section(text_content=None, width=1200):
     content_width = fixed_width - left_margin - right_margin
     
     # Ensure Korean font is ready
-    download_korean_font()
+    font_path = download_korean_font()
+    if not font_path:
+        logger.error("❌ Korean font not available")
     
     # Get fonts with proper sizes
     title_font = get_font(48, force_korean=True)
@@ -322,7 +355,8 @@ def create_md_talk_section(text_content=None, width=1200):
         error_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
         error_draw = ImageDraw.Draw(error_img)
         try:
-            error_draw.text((50, 50), "Font Error - MD TALK", fill='red')
+            default_font = ImageFont.load_default()
+            error_draw.text((50, 50), "Font Error - MD TALK", fill='red', font=default_font)
         except:
             pass
         return error_img
@@ -349,6 +383,8 @@ def create_md_talk_section(text_content=None, width=1200):
     if isinstance(text, bytes):
         text = text.decode('utf-8', errors='replace')
     text = str(text).strip()
+    
+    logger.info(f"MD TALK text to render: {text[:50]}...")
     
     # Wrap text to fit within margins
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
@@ -392,7 +428,9 @@ def create_design_point_section(text_content=None, width=1200):
     content_width = fixed_width - left_margin - right_margin
     
     # Ensure Korean font is ready
-    download_korean_font()
+    font_path = download_korean_font()
+    if not font_path:
+        logger.error("❌ Korean font not available")
     
     # Get fonts
     title_font = get_font(48, force_korean=True)
@@ -404,7 +442,8 @@ def create_design_point_section(text_content=None, width=1200):
         error_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
         error_draw = ImageDraw.Draw(error_img)
         try:
-            error_draw.text((50, 50), "Font Error - DESIGN POINT", fill='red')
+            default_font = ImageFont.load_default()
+            error_draw.text((50, 50), "Font Error - DESIGN POINT", fill='red', font=default_font)
         except:
             pass
         return error_img
@@ -431,6 +470,8 @@ def create_design_point_section(text_content=None, width=1200):
     if isinstance(text, bytes):
         text = text.decode('utf-8', errors='replace')
     text = str(text).strip()
+    
+    logger.info(f"DESIGN POINT text to render: {text[:50]}...")
     
     # Wrap text to fit within margins
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
@@ -936,9 +977,9 @@ def image_to_base64(image, keep_transparency=True):
     return base64_str
 
 def process_special_mode(job):
-    """Process special modes - KOREAN ENCODING FIXED"""
+    """Process special modes - ENHANCED KOREAN SUPPORT"""
     special_mode = job.get('special_mode', '')
-    logger.info(f"🔤 Processing special mode with FIXED Korean encoding: {special_mode}")
+    logger.info(f"🔤 Processing special mode with ENHANCED Korean support: {special_mode}")
     
     # BOTH TEXT SECTIONS - Return TWO separate images
     if special_mode == 'both_text_sections':
@@ -947,7 +988,7 @@ def process_special_mode(job):
         
         design_point_text = job.get('design_point_content', '') or job.get('design_point', '') or """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
         
-        # Handle encoding properly - FIXED
+        # Handle encoding properly
         if isinstance(md_talk_text, bytes):
             md_talk_text = md_talk_text.decode('utf-8', errors='replace')
         if isinstance(design_point_text, bytes):
@@ -996,7 +1037,7 @@ def process_special_mode(job):
                 "sections_included": ["MD_TALK", "DESIGN_POINT"],
                 "version": VERSION,
                 "status": "success",
-                "korean_encoding": "UTF-8-FIXED",
+                "korean_encoding": "UTF-8-ENHANCED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED",
@@ -1012,7 +1053,7 @@ def process_special_mode(job):
         if not text_content:
             text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."""
         
-        # Handle encoding - FIXED
+        # Handle encoding
         if isinstance(text_content, bytes):
             text_content = text_content.decode('utf-8', errors='replace')
         text_content = str(text_content).strip()
@@ -1034,7 +1075,7 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "korean_encoding": "UTF-8-FIXED",
+                "korean_encoding": "UTF-8-ENHANCED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED",
@@ -1049,7 +1090,7 @@ def process_special_mode(job):
         if not text_content:
             text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
         
-        # Handle encoding - FIXED
+        # Handle encoding
         if isinstance(text_content, bytes):
             text_content = text_content.decode('utf-8', errors='replace')
         text_content = str(text_content).strip()
@@ -1071,7 +1112,7 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "korean_encoding": "UTF-8-FIXED",
+                "korean_encoding": "UTF-8-ENHANCED",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED",
@@ -1192,7 +1233,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Apply pattern enhancement while TRULY preserving transparency - AC 20%, AB 16%"""
+    """Apply pattern enhancement while TRULY preserving transparency - AC 20%, AB 16% - UPDATED BRIGHTNESS"""
     # CRITICAL: Ensure RGBA mode
     if image.mode != 'RGBA':
         logger.warning(f"⚠️ Converting {image.mode} to RGBA in pattern enhancement")
@@ -1207,8 +1248,8 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
     
     # Apply enhancements based on pattern type
     if pattern_type == "ac_pattern":
-        logger.info("🔍 AC Pattern - Applying 20% white overlay (increased from 12%)")
-        # Apply 20% white overlay (increased from 12%)
+        logger.info("🔍 AC Pattern - Applying 20% white overlay with brightness 1.03")
+        # Apply 20% white overlay
         white_overlay = 0.20
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
         img_array = np.clip(img_array, 0, 255)
@@ -1216,17 +1257,17 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         # Convert back to image
         rgb_image = Image.fromarray(img_array.astype(np.uint8))
         
-        # Slightly increased brightness for AC pattern
+        # UPDATED: Brightness increased by 0.01
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.02)  # Increased from 1.005
+        rgb_image = brightness.enhance(1.03)  # Changed from 1.02
         
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.98)
         
-        logger.info("✅ AC Pattern enhancement applied with 20% white overlay")
+        logger.info("✅ AC Pattern enhancement applied with 20% white overlay and brightness 1.03")
     
     elif pattern_type == "ab_pattern":
-        logger.info("🔍 AB Pattern - Applying 16% white overlay and cool tone")
+        logger.info("🔍 AB Pattern - Applying 16% white overlay with brightness 1.03")
         # Apply 16% white overlay
         white_overlay = 0.16
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
@@ -1246,37 +1287,37 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.88)
         
-        # Slightly increased brightness for AB pattern
+        # UPDATED: Brightness increased by 0.01
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.02)  # Increased from 1.005
+        rgb_image = brightness.enhance(1.03)  # Changed from 1.02
         
-        logger.info("✅ AB Pattern enhancement applied with 16% white overlay")
+        logger.info("✅ AB Pattern enhancement applied with 16% white overlay and brightness 1.03")
         
     else:
-        logger.info("🔍 Other Pattern - Standard enhancement with brightness 1.08")
-        # Fixed brightness value for other patterns
+        logger.info("🔍 Other Pattern - Standard enhancement with brightness 1.09")
+        # UPDATED: Brightness increased by 0.01
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.08)  # FIXED from 1.12
+        rgb_image = brightness.enhance(1.09)  # Changed from 1.08
         
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.99)
         
         sharpness = ImageEnhance.Sharpness(rgb_image)
-        rgb_image = sharpness.enhance(1.5)  # Increased from 1.4
+        rgb_image = sharpness.enhance(1.5)
     
-    # Apply common enhancements
+    # UPDATED: Apply common enhancements with contrast 1.1
     contrast = ImageEnhance.Contrast(rgb_image)
-    rgb_image = contrast.enhance(1.08)  # Slightly increased from 1.05
+    rgb_image = contrast.enhance(1.1)  # Changed from 1.08
     
-    # Apply sharpening - Increased for all patterns
+    # Apply sharpening
     sharpness = ImageEnhance.Sharpness(rgb_image)
-    rgb_image = sharpness.enhance(1.8)  # Increased from 1.6
+    rgb_image = sharpness.enhance(1.8)
     
     # CRITICAL: Recombine with ORIGINAL alpha channel
     r2, g2, b2 = rgb_image.split()
     enhanced_image = Image.merge('RGBA', (r2, g2, b2, a))
     
-    logger.info(f"✅ Enhancement applied while preserving transparency. Mode: {enhanced_image.mode}")
+    logger.info(f"✅ Enhancement applied with contrast 1.1 and brightness adjustments. Mode: {enhanced_image.mode}")
     
     # Verify RGBA mode
     if enhanced_image.mode != 'RGBA':
@@ -1388,14 +1429,14 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - New Neo V3 Shadow Fix Ultra Enhanced"""
+    """Main enhancement processing - UPDATED with new contrast and brightness"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 NEW NEO V3: Shadow Fix Ultra Enhanced Edition")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
-    logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with center alignment and margins")
-    logger.info("🔧 AC PATTERN: 20% white overlay")
-    logger.info("🔧 AB PATTERN: 16% white overlay")
-    logger.info("✨ OTHER PATTERNS: Brightness 1.08 (FIXED from 1.12)")
+    logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with enhanced Korean support")
+    logger.info("🔧 AC PATTERN: 20% white overlay, brightness 1.03, contrast 1.1")
+    logger.info("🔧 AB PATTERN: 16% white overlay, brightness 1.03, contrast 1.1")
+    logger.info("✨ OTHER PATTERNS: Brightness 1.09, contrast 1.1")
     logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
     logger.info("🗜️ COMPRESSION: Level 3 (balanced speed/size)")
     logger.info("🆕 AGGRESSIVE SHADOW REMOVAL: Multi-level + multi-color space")
@@ -1557,6 +1598,7 @@ def process_enhancement(job):
                 "compression": "level_3",
                 "korean_font_verified": KOREAN_FONT_VERIFIED,
                 "korean_font_path": KOREAN_FONT_PATH,
+                "korean_support": "ENHANCED",
                 "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
                 "file_number_info": {
                     "001-003": "Enhancement",
@@ -1588,24 +1630,29 @@ def process_enhancement(job):
                     "🔹 Shape analysis (circularity, convexity, solidity)",
                     "🔹 Multi-space brightness validation"
                 ],
+                "contrast_brightness_update": {
+                    "contrast": "1.1 (updated from 1.08)",
+                    "brightness_ac_ab": "1.03 (increased from 1.02)",
+                    "brightness_other": "1.09 (increased from 1.08)",
+                    "reason": "User requested +0.01 brightness and contrast 1.1"
+                },
                 "processing_order": "1.U2Net-Ultra-V3-Enhanced → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
                 "png_support": True,
                 "edge_detection": "ULTRA PRECISE V3 ENHANCED (6-method combination)",
-                "korean_support": "FIXED - Using requests instead of urllib",
+                "korean_support": "ENHANCED with better error handling",
                 "white_overlay": "AC: 20% | AB: 16% | Other: None",
-                "brightness_values": "AC/AB: 1.02 | Other: 1.08",
+                "brightness_values": "AC/AB: 1.03 | Other: 1.09",
                 "sharpness_values": "Other: 1.5 → Final: 1.8",
-                "contrast_value": "1.08",
+                "contrast_value": "1.1",
                 "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
                 "transparency_info": "Full RGBA transparency preserved - NO background",
-                "google_script_compatibility": "Base64 WITH padding - FIXED",
-                "brightness_update": "Other pattern brightness changed from 1.12 to 1.08"
+                "google_script_compatibility": "Base64 WITH padding - FIXED"
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with NEW NEO V3 Shadow Fix Ultra Enhanced")
+        logger.info("✅ Enhancement completed successfully with UPDATED contrast and brightness")
         return output
         
     except Exception as e:
