@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Korean-Encoding-Fixed-V4
+# VERSION: Korean-Encoding-Fixed-V5
 ################################
 
-VERSION = "Korean-Encoding-Fixed-V4"
+VERSION = "Korean-Encoding-Fixed-V5"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -318,17 +318,17 @@ def wrap_text(text, font, max_width, draw):
     return lines
 
 def create_md_talk_section(text_content=None, width=1200):
-    """Create MD TALK section - FIXED Korean rendering"""
-    logger.info("🔤 Creating MD TALK section with FIXED Korean support")
+    """Create MD TALK section - FIXED Korean rendering with reduced height"""
+    logger.info("🔤 Creating MD TALK section with FIXED Korean support and optimized layout")
     
-    # Fixed dimensions
+    # Fixed dimensions - REDUCED HEIGHT
     fixed_width = 1200
-    fixed_height = 600
+    fixed_height = 400  # Reduced from 600
     
     # Margins
     left_margin = 100
     right_margin = 100
-    top_margin = 80
+    top_margin = 60  # Reduced from 80
     content_width = fixed_width - left_margin - right_margin
     
     # Get fonts
@@ -372,8 +372,8 @@ def create_md_talk_section(text_content=None, width=1200):
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
     
     # Calculate positions
-    line_height = 50
-    title_bottom_margin = 80
+    line_height = 45  # Reduced from 50
+    title_bottom_margin = 60  # Reduced from 80
     y_pos = top_margin + title_height + title_bottom_margin
     
     # Draw body text
@@ -392,17 +392,17 @@ def create_md_talk_section(text_content=None, width=1200):
     return section_img
 
 def create_design_point_section(text_content=None, width=1200):
-    """Create DESIGN POINT section - FIXED Korean rendering"""
-    logger.info("🔤 Creating DESIGN POINT section with FIXED Korean support")
+    """Create DESIGN POINT section - FIXED Korean rendering with reduced height"""
+    logger.info("🔤 Creating DESIGN POINT section with FIXED Korean support and optimized layout")
     
-    # Fixed dimensions
+    # Fixed dimensions - REDUCED HEIGHT
     fixed_width = 1200
-    fixed_height = 600
+    fixed_height = 350  # Reduced from 600
     
     # Margins
     left_margin = 100
     right_margin = 100
-    top_margin = 80
+    top_margin = 60  # Reduced from 80
     content_width = fixed_width - left_margin - right_margin
     
     # Get fonts
@@ -446,8 +446,8 @@ def create_design_point_section(text_content=None, width=1200):
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
     
     # Calculate positions
-    line_height = 45
-    title_bottom_margin = 100
+    line_height = 40  # Reduced from 45
+    title_bottom_margin = 70  # Reduced from 100
     y_pos = top_margin + title_height + title_bottom_margin
     
     # Draw body text
@@ -1000,12 +1000,12 @@ def process_special_mode(job):
                 "sections_included": ["MD_TALK", "DESIGN_POINT"],
                 "version": VERSION,
                 "status": "success",
-                "korean_encoding": "UTF-8-FIXED-V4",
+                "korean_encoding": "UTF-8-FIXED-V5",
                 "korean_font_verified": True,
                 "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED",
                 "compression": "level_3",
-                "design_point_update": "Bottom gray line removed"
+                "layout_update": "Optimized height: MD_TALK=400px, DESIGN_POINT=350px"
             }
         }
     
@@ -1038,11 +1038,12 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "korean_encoding": "UTF-8-FIXED-V4",
+                "korean_encoding": "UTF-8-FIXED-V5",
                 "korean_font_verified": True,
                 "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED",
-                "compression": "level_3"
+                "compression": "level_3",
+                "layout_update": "Optimized height: 400px"
             }
         }
     
@@ -1075,12 +1076,12 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "korean_encoding": "UTF-8-FIXED-V4",
+                "korean_encoding": "UTF-8-FIXED-V5",
                 "korean_font_verified": True,
                 "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED",
                 "compression": "level_3",
-                "design_point_update": "Bottom gray line removed"
+                "layout_update": "Optimized height: 350px"
             }
         }
     
@@ -1196,7 +1197,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Apply pattern enhancement while TRULY preserving transparency - AC 20%, AB 16% - UPDATED BRIGHTNESS"""
+    """Apply pattern enhancement while TRULY preserving transparency - AC 20%, AB 16%, Other 5% - UPDATED"""
     # CRITICAL: Ensure RGBA mode
     if image.mode != 'RGBA':
         logger.warning(f"⚠️ Converting {image.mode} to RGBA in pattern enhancement")
@@ -1257,7 +1258,15 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         logger.info("✅ AB Pattern enhancement applied with 16% white overlay and brightness 1.03")
         
     else:
-        logger.info("🔍 Other Pattern - Standard enhancement with brightness 1.09")
+        logger.info("🔍 Other Pattern - Applying 5% white overlay with brightness 1.09")
+        # NEW: Apply 5% white overlay for other patterns
+        white_overlay = 0.05
+        img_array = img_array * (1 - white_overlay) + 255 * white_overlay
+        img_array = np.clip(img_array, 0, 255)
+        
+        # Convert back to image
+        rgb_image = Image.fromarray(img_array.astype(np.uint8))
+        
         # UPDATED: Brightness increased by 0.01
         brightness = ImageEnhance.Brightness(rgb_image)
         rgb_image = brightness.enhance(1.09)  # Changed from 1.08
@@ -1267,6 +1276,8 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         
         sharpness = ImageEnhance.Sharpness(rgb_image)
         rgb_image = sharpness.enhance(1.5)
+        
+        logger.info("✅ Other Pattern enhancement applied with 5% white overlay and brightness 1.09")
     
     # UPDATED: Apply common enhancements with contrast 1.1
     contrast = ImageEnhance.Contrast(rgb_image)
@@ -1392,15 +1403,15 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - UPDATED with Korean V4 fixes"""
+    """Main enhancement processing - UPDATED with Korean V5 fixes and Other 5% overlay"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 KOREAN ENCODING FIXED V4: Enhanced error handling and font verification")
+    logger.info("🎯 KOREAN ENCODING FIXED V5: Enhanced error handling, font verification, and layout")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
     logger.info("🔤 FIXED: Better font fallback, encoding handling, text rendering")
-    logger.info("🔤 FIXED TEXT SECTIONS: 1200x600 with verified Korean support")
+    logger.info("🔤 FIXED TEXT SECTIONS: MD_TALK=1200x400, DESIGN_POINT=1200x350")
     logger.info("🔧 AC PATTERN: 20% white overlay, brightness 1.03, contrast 1.1")
     logger.info("🔧 AB PATTERN: 16% white overlay, brightness 1.03, contrast 1.1")
-    logger.info("✨ OTHER PATTERNS: Brightness 1.09, contrast 1.1")
+    logger.info("✨ OTHER PATTERNS: 5% white overlay, brightness 1.09, contrast 1.1")
     logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
@@ -1489,8 +1500,8 @@ def process_enhancement(job):
         detected_type = {
             "ac_pattern": "무도금화이트(0.20)",
             "ab_pattern": "무도금화이트-쿨톤(0.16)",
-            "other": "기타색상(no_overlay)"
-        }.get(pattern_type, "기타색상(no_overlay)")
+            "other": "기타색상(0.05)"
+        }.get(pattern_type, "기타색상(0.05)")
         
         # Apply pattern-specific enhancements (preserving transparency)
         image = apply_pattern_enhancement_transparent(image, pattern_type)
@@ -1556,18 +1567,18 @@ def process_enhancement(job):
                 "compression": "level_3",
                 "korean_font_verified": True,
                 "korean_font_path": KOREAN_FONT_PATH,
-                "korean_support": "FIXED-V4",
+                "korean_support": "FIXED-V5",
                 "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
                 "file_number_info": {
                     "001-003": "Enhancement",
-                    "004": "MD TALK (1200x600)",
+                    "004": "MD TALK (1200x400)",
                     "005-006": "Enhancement",
                     "007": "Thumbnail",
-                    "008": "DESIGN POINT (1200x600)",
+                    "008": "DESIGN POINT (1200x350)",
                     "009-010": "Thumbnail",
                     "011": "COLOR section"
                 },
-                "korean_fixes_v4": [
+                "korean_fixes_v5": [
                     "✅ Enhanced font download with verification",
                     "✅ Added Korean character rendering test",
                     "✅ Better font caching mechanism",
@@ -1576,25 +1587,28 @@ def process_enhancement(job):
                     "✅ Better error messages and logging",
                     "✅ Fixed Unicode encoding errors",
                     "✅ Added default font fallback",
-                    "✅ Improved text size calculation compatibility"
+                    "✅ Improved text size calculation compatibility",
+                    "✅ Optimized text section heights: MD_TALK=400px, DESIGN_POINT=350px",
+                    "✅ Added 5% white overlay for Other patterns"
                 ],
                 "processing_order": "1.U2Net-Ultra-V3-Enhanced → 2.Enhancement → 3.SwinIR",
                 "swinir_applied": True,
                 "png_support": True,
                 "edge_detection": "ULTRA PRECISE V3 ENHANCED (6-method combination)",
                 "korean_encoding": "UTF-8 with enhanced error handling",
-                "white_overlay": "AC: 20% | AB: 16% | Other: None",
+                "white_overlay": "AC: 20% | AB: 16% | Other: 5%",
                 "brightness_values": "AC/AB: 1.03 | Other: 1.09",
                 "sharpness_values": "Other: 1.5 → Final: 1.8",
                 "contrast_value": "1.1",
                 "expected_input": "2000x2600 (any format)",
                 "output_size": "1200x1560",
                 "transparency_info": "Full RGBA transparency preserved - NO background",
-                "google_script_compatibility": "Base64 WITH padding - FIXED"
+                "google_script_compatibility": "Base64 WITH padding - FIXED",
+                "layout_optimization": "Text sections height reduced for better proportions"
             }
         }
         
-        logger.info("✅ Enhancement completed successfully with FIXED Korean support V4")
+        logger.info("✅ Enhancement completed successfully with FIXED Korean support V5")
         return output
         
     except Exception as e:
