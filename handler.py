@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Korean-Encoding-Fixed-V5-Ultra-Refined
+# VERSION: Korean-Encoding-Fixed-V5-Ultra-Refined-Bright112
 ################################
 
-VERSION = "Korean-Encoding-Fixed-V5-Ultra-Refined"
+VERSION = "Korean-Encoding-Fixed-V5-Ultra-Refined-Bright112"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -1464,7 +1464,7 @@ def detect_pattern_type(filename: str) -> str:
         return "other"
 
 def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str) -> Image.Image:
-    """Apply pattern enhancement while TRULY preserving transparency - AC 20%, AB 16%, Other 5% - UPDATED"""
+    """Apply pattern enhancement while TRULY preserving transparency - AC 20%, AB 16%, Other 5% - BRIGHTNESS 1.12"""
     # CRITICAL: Ensure RGBA mode
     if image.mode != 'RGBA':
         logger.warning(f"⚠️ Converting {image.mode} to RGBA in pattern enhancement")
@@ -1525,7 +1525,7 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         logger.info("✅ AB Pattern enhancement applied with 16% white overlay and brightness 1.03")
         
     else:
-        logger.info("🔍 Other Pattern - Applying 5% white overlay with brightness 1.09")
+        logger.info("🔍 Other Pattern - Applying 5% white overlay with brightness 1.12")
         # NEW: Apply 5% white overlay for other patterns
         white_overlay = 0.05
         img_array = img_array * (1 - white_overlay) + 255 * white_overlay
@@ -1534,9 +1534,9 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         # Convert back to image
         rgb_image = Image.fromarray(img_array.astype(np.uint8))
         
-        # UPDATED: Brightness increased by 0.01
+        # BRIGHTNESS INCREASED TO 1.12
         brightness = ImageEnhance.Brightness(rgb_image)
-        rgb_image = brightness.enhance(1.09)  # Changed from 1.08
+        rgb_image = brightness.enhance(1.12)  # Increased from 1.09
         
         color = ImageEnhance.Color(rgb_image)
         rgb_image = color.enhance(0.99)
@@ -1544,7 +1544,7 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
         sharpness = ImageEnhance.Sharpness(rgb_image)
         rgb_image = sharpness.enhance(1.5)
         
-        logger.info("✅ Other Pattern enhancement applied with 5% white overlay and brightness 1.09")
+        logger.info("✅ Other Pattern enhancement applied with 5% white overlay and brightness 1.12")
     
     # UPDATED: Apply common enhancements with contrast 1.1
     contrast = ImageEnhance.Contrast(rgb_image)
@@ -1670,7 +1670,7 @@ def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
         return image
 
 def process_enhancement(job):
-    """Main enhancement processing - UPDATED with Ultra V3 Enhanced Refined"""
+    """Main enhancement processing - UPDATED with Ultra V3 Enhanced Refined - BRIGHTNESS 1.12 for Other"""
     logger.info(f"=== Enhancement {VERSION} Started ===")
     logger.info("🎯 ULTRA PRECISE V3 ENHANCED REFINED: Maximum quality background removal")
     logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
@@ -1687,7 +1687,7 @@ def process_enhancement(job):
     logger.info("🔤 FIXED TEXT SECTIONS: MD_TALK=1200x400, DESIGN_POINT=1200x350")
     logger.info("🔧 AC PATTERN: 20% white overlay, brightness 1.03, contrast 1.1")
     logger.info("🔧 AB PATTERN: 16% white overlay, brightness 1.03, contrast 1.1")
-    logger.info("✨ OTHER PATTERNS: 5% white overlay, brightness 1.09, contrast 1.1")
+    logger.info("✨ OTHER PATTERNS: 5% white overlay, brightness 1.12, contrast 1.1")
     logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
     logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
     start_time = time.time()
@@ -1877,7 +1877,7 @@ def process_enhancement(job):
                 "edge_detection": "ULTRA PRECISE V3 ENHANCED REFINED (8-method combination)",
                 "korean_encoding": "UTF-8 with enhanced error handling",
                 "white_overlay": "AC: 20% | AB: 16% | Other: 5%",
-                "brightness_values": "AC/AB: 1.03 | Other: 1.09",
+                "brightness_values": "AC/AB: 1.03 | Other: 1.12",
                 "sharpness_values": "Other: 1.5 → Final: 1.8",
                 "contrast_value": "1.1",
                 "expected_input": "2000x2600 (any format)",
@@ -1885,7 +1885,8 @@ def process_enhancement(job):
                 "transparency_info": "Full RGBA transparency preserved - NO background",
                 "google_script_compatibility": "Base64 WITH padding - FIXED",
                 "layout_optimization": "Text sections height reduced for better proportions",
-                "shadow_elimination": "REFINED with feathering and multi-level detection"
+                "shadow_elimination": "REFINED with feathering and multi-level detection",
+                "brightness_update": "Other pattern brightness increased to 1.12 for better visibility"
             }
         }
         
