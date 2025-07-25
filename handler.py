@@ -17,11 +17,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 ################################
-# ENHANCEMENT HANDLER SIMPLIFIED - 1200x1560
-# VERSION: Enhancement-Simplified-V1-NukkiResize
+# ENHANCEMENT HANDLER - 1200x1560
+# VERSION: Enhancement-NukkiRingResize-V1
 ################################
 
-VERSION = "Enhancement-Simplified-V1-NukkiResize"
+VERSION = "Enhancement-NukkiRingResize-V1"
 
 # Global rembg session with U2Net
 REMBG_SESSION = None
@@ -1276,12 +1276,12 @@ def resize_image_proportional(image, target_width=1200, target_height=1560):
     return result
 
 def handler(event):
-    """Simplified Enhancement handler - Background removal and resize only"""
+    """Enhancement handler - Background removal, ring holes, and resize only"""
     try:
         logger.info(f"=== Enhancement {VERSION} Started ===")
-        logger.info("🎯 SIMPLIFIED VERSION: Background removal + Resize only")
-        logger.info("❌ REMOVED: White balance, pattern enhancement, ring holes")
-        logger.info("✅ RETAINED: U2Net background removal, resize to 1200x1560")
+        logger.info("🎯 PROCESSING: Background removal + Ring holes + Resize")
+        logger.info("❌ REMOVED: White balance, pattern enhancement")
+        logger.info("✅ RETAINED: U2Net background removal, ring hole detection, resize to 1200x1560")
         logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
         
         # Check for special mode first
@@ -1314,8 +1314,17 @@ def handler(event):
             logger.error("❌ Image lost RGBA after background removal!")
             image = image.convert('RGBA')
         
-        # STEP 2: Resize to target dimensions
-        logger.info("📏 STEP 2: Resizing to 1200x1560")
+        # STEP 2: Apply ring hole detection
+        logger.info("🔍 STEP 2: Applying ULTRA PRECISE V4 RING-AWARE hole detection")
+        image = ensure_ring_holes_transparent_ultra_v4_ring_aware(image)
+        
+        # Verify RGBA after hole detection
+        if image.mode != 'RGBA':
+            logger.error("❌ Image lost RGBA after hole detection!")
+            image = image.convert('RGBA')
+        
+        # STEP 3: Resize to target dimensions
+        logger.info("📏 STEP 3: Resizing to 1200x1560")
         image = resize_image_proportional(image, 1200, 1560)
         
         # Final verification
@@ -1347,16 +1356,17 @@ def handler(event):
                 "has_transparency": True,
                 "transparency_preserved": True,
                 "background_removed": True,
+                "ring_holes_applied": True,
                 "base64_padding": "INCLUDED",
                 "compression": "level_3",
                 "processing_steps": [
                     "1. U2Net Ultra Precise V4 Ring-Aware background removal",
-                    "2. Proportional resize to 1200x1560"
+                    "2. Ultra Precise V4 Ring-Aware hole detection",
+                    "3. Proportional resize to 1200x1560"
                 ],
                 "removed_features": [
                     "Auto white balance",
-                    "Pattern enhancement",
-                    "Ring hole detection"
+                    "Pattern enhancement"
                 ],
                 "special_modes_available": ["both_text_sections", "md_talk", "design_point"],
                 "ring_detection_features": [
@@ -1365,7 +1375,11 @@ def handler(event):
                     "✅ CIRCULARITY METRICS: Detect circular and elliptical rings",
                     "✅ HOUGH CIRCLE TRANSFORM: Perfect circle detection",
                     "✅ HOLLOW CENTER VALIDATION: Ensure rings have interior space",
-                    "✅ RING-AWARE MASKING: Interior regions marked as transparent"
+                    "✅ RING-AWARE MASKING: Interior regions marked as transparent",
+                    "✅ RING HOLE DETECTION: Multi-criteria confidence scoring",
+                    "✅ TEXTURE ANALYSIS: LBP variance for hole detection",
+                    "✅ TOPOLOGY ANALYSIS: Enclosed region detection",
+                    "✅ ADAPTIVE TRANSITIONS: Multi-scale hole edge smoothing"
                 ],
                 "google_script_compatibility": "Base64 WITH padding - FIXED",
                 "expected_input": "Any size image",
