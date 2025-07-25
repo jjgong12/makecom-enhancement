@@ -12,16 +12,18 @@ import re
 import replicate
 import requests
 import string
+from sklearn.cluster import DBSCAN
+from scipy import ndimage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Korean-Encoding-Fixed-V5-Ultra-Refined-Bright112
+# VERSION: Ring-Detection-Ultra-V4-Enhanced-Korean-Fixed-Bright112
 ################################
 
-VERSION = "Korean-Encoding-Fixed-V5-Ultra-Refined-Bright112"
+VERSION = "Ring-Detection-Ultra-V4-Enhanced-Korean-Fixed-Bright112"
 
 # ===== GLOBAL INITIALIZATION =====
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -318,6 +320,129 @@ def wrap_text(text, font, max_width, draw):
     
     return lines
 
+def detect_ring_structure(image):
+    """Advanced ring detection using multiple techniques"""
+    logger.info("🔍 Starting advanced ring structure detection...")
+    
+    if image.mode != 'RGBA':
+        image = image.convert('RGBA')
+    
+    # Convert to grayscale for analysis
+    gray = np.array(image.convert('L'))
+    h, w = gray.shape
+    
+    # 1. Edge detection with multiple methods
+    edges_canny = cv2.Canny(gray, 50, 150)
+    edges_sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    edges_sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    edges_sobel = np.sqrt(edges_sobel_x**2 + edges_sobel_y**2)
+    edges_sobel = (edges_sobel / edges_sobel.max() * 255).astype(np.uint8)
+    
+    # Combine edges
+    combined_edges = edges_canny | (edges_sobel > 50)
+    
+    # 2. Find contours and analyze shapes
+    contours, _ = cv2.findContours(combined_edges.astype(np.uint8), 
+                                   cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+    ring_candidates = []
+    
+    for i, contour in enumerate(contours):
+        area = cv2.contourArea(contour)
+        if area < 100 or area > h * w * 0.8:  # Skip too small or too large
+            continue
+        
+        # Calculate shape properties
+        perimeter = cv2.arcLength(contour, True)
+        if perimeter == 0:
+            continue
+            
+        # Circularity
+        circularity = 4 * np.pi * area / (perimeter * perimeter)
+        
+        # Fit ellipse if possible
+        if len(contour) >= 5:
+            ellipse = cv2.fitEllipse(contour)
+            (center, (width, height), angle) = ellipse
+            
+            # Check if it's ring-like (circular or elliptical)
+            aspect_ratio = min(width, height) / max(width, height) if max(width, height) > 0 else 0
+            
+            # Ring criteria
+            if circularity > 0.3 or aspect_ratio > 0.5:
+                # Check if it's hollow (has inner space)
+                mask = np.zeros(gray.shape, np.uint8)
+                cv2.drawContours(mask, [contour], -1, 255, -1)
+                
+                # Erode to find potential inner area
+                kernel = np.ones((5,5), np.uint8)
+                eroded = cv2.erode(mask, kernel, iterations=2)
+                
+                # Find inner contours
+                inner_contours, _ = cv2.findContours(eroded, cv2.RETR_EXTERNAL, 
+                                                    cv2.CHAIN_APPROX_SIMPLE)
+                
+                for inner in inner_contours:
+                    inner_area = cv2.contourArea(inner)
+                    if inner_area > area * 0.1:  # Inner area should be significant
+                        ring_candidates.append({
+                            'outer_contour': contour,
+                            'inner_contour': inner,
+                            'center': center,
+                            'size': (width, height),
+                            'angle': angle,
+                            'circularity': circularity,
+                            'aspect_ratio': aspect_ratio,
+                            'area': area,
+                            'inner_area': inner_area
+                        })
+    
+    # 3. Hough Circle Transform for circular rings
+    circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
+                              param1=50, param2=30, minRadius=10, maxRadius=int(min(h, w)/2))
+    
+    if circles is not None:
+        circles = np.uint16(np.around(circles))
+        for circle in circles[0, :]:
+            x, y, r = circle
+            # Check if this could be a ring (has hollow center)
+            mask = np.zeros(gray.shape, np.uint8)
+            cv2.circle(mask, (x, y), r, 255, -1)
+            cv2.circle(mask, (x, y), max(1, r//3), 0, -1)  # Hollow center
+            
+            # Verify it matches the actual image structure
+            overlap = cv2.bitwise_and(combined_edges, mask)
+            if np.sum(overlap) > r * 2 * np.pi * 0.3:  # At least 30% edge overlap
+                ring_candidates.append({
+                    'type': 'circle',
+                    'center': (x, y),
+                    'radius': r,
+                    'inner_radius': r//3
+                })
+    
+    logger.info(f"✅ Found {len(ring_candidates)} ring candidates")
+    return ring_candidates
+
+def create_ring_aware_mask(image, ring_candidates):
+    """Create mask that properly handles ring interior"""
+    logger.info("🎯 Creating ring-aware mask...")
+    
+    h, w = image.size[1], image.size[0]
+    ring_mask = np.zeros((h, w), dtype=np.uint8)
+    
+    for ring in ring_candidates:
+        if 'type' in ring and ring['type'] == 'circle':
+            # Circular ring
+            cv2.circle(ring_mask, ring['center'], ring['radius'], 255, -1)
+            cv2.circle(ring_mask, ring['center'], ring['inner_radius'], 0, -1)
+        elif 'outer_contour' in ring:
+            # Contour-based ring
+            cv2.drawContours(ring_mask, [ring['outer_contour']], -1, 255, -1)
+            if 'inner_contour' in ring:
+                cv2.drawContours(ring_mask, [ring['inner_contour']], -1, 0, -1)
+    
+    return ring_mask
+
 def create_md_talk_section(text_content=None, width=1200):
     """Create MD TALK section - FIXED Korean rendering with reduced height"""
     logger.info("🔤 Creating MD TALK section with FIXED Korean support and optimized layout")
@@ -467,8 +592,8 @@ def create_design_point_section(text_content=None, width=1200):
     logger.info(f"✅ DESIGN POINT section created: {fixed_width}x{fixed_height}")
     return section_img
 
-def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image) -> Image.Image:
-    """ULTRA PRECISE V3 ENHANCED WITH REFINED EDGE PROCESSING"""
+def u2net_ultra_precise_removal_v4_ring_aware(image: Image.Image) -> Image.Image:
+    """ULTRA PRECISE V4 WITH RING-AWARE DETECTION"""
     try:
         from rembg import remove
         
@@ -478,11 +603,15 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🔷 U2Net ULTRA PRECISE V3 ENHANCED REFINED - Maximum Quality")
+        logger.info("🔷 U2Net ULTRA PRECISE V4 RING-AWARE - Maximum Quality")
         
         # CRITICAL: Ensure RGBA mode before processing
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
+        
+        # First, detect ring structure
+        ring_candidates = detect_ring_structure(image)
+        ring_mask = create_ring_aware_mask(image, ring_candidates)
         
         # Enhanced pre-processing for jewelry with adaptive enhancement
         img_array = np.array(image, dtype=np.float32)
@@ -538,6 +667,14 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
         
         # Convert to float for processing
         alpha_float = alpha_array.astype(np.float32) / 255.0
+        
+        # Apply ring mask to ensure ring interior is transparent
+        if ring_mask is not None and ring_mask.shape == alpha_float.shape:
+            # Invert ring mask - interior should be 0 (transparent)
+            ring_interior = (ring_mask == 0).astype(np.float32)
+            
+            # Apply ring interior mask
+            alpha_float = alpha_float * (1 - ring_interior)
         
         # STAGE 1: REFINED shadow detection with color spill analysis
         logger.info("🔍 REFINED shadow and color spill detection...")
@@ -632,8 +769,8 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
         all_edges = (sobel_edges | scharr_edges | laplacian_edges | 
                     (canny_low > 0) | (canny_mid > 0) | (canny_high > 0) | (canny_ultra > 0))
         
-        # STAGE 3: Intelligent component analysis with shape metrics
-        logger.info("🔍 Advanced component analysis with shape metrics...")
+        # STAGE 3: Ring-aware component analysis
+        logger.info("🔍 Ring-aware component analysis...")
         
         # Binary mask for main object
         alpha_binary = (alpha_float > 0.5).astype(np.uint8)
@@ -687,6 +824,15 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
                             img_center = np.array([alpha_array.shape[0]/2, alpha_array.shape[1]/2])
                             dist_from_center = np.linalg.norm(component_center - img_center)
                             
+                            # Check if component is inside a ring
+                            is_inside_ring = False
+                            for ring in ring_candidates:
+                                if 'center' in ring and 'radius' in ring:
+                                    dist_to_ring_center = np.linalg.norm(component_center - np.array(ring['center']))
+                                    if dist_to_ring_center < ring['radius']:
+                                        is_inside_ring = True
+                                        break
+                            
                             component_stats.append({
                                 'label': i,
                                 'size': size,
@@ -694,7 +840,8 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
                                 'solidity': solidity,
                                 'eccentricity': eccentricity,
                                 'dist_from_center': dist_from_center,
-                                'edge_ratio': np.sum(all_edges[component]) / size
+                                'edge_ratio': np.sum(all_edges[component]) / size,
+                                'is_inside_ring': is_inside_ring
                             })
             
             # Keep components based on comprehensive criteria
@@ -707,12 +854,17 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
                 
                 valid_components = []
                 for stats in component_stats:
+                    # Skip components inside rings
+                    if stats['is_inside_ring']:
+                        logger.info(f"Skipping component inside ring: size={stats['size']}")
+                        continue
+                    
                     # Multi-criteria validation
                     size_valid = stats['size'] > min_component_size
                     shape_valid = (stats['solidity'] > 0.3 or stats['circularity'] > 0.2)
                     edge_valid = stats['edge_ratio'] > 0.1
                     
-                    # Special case for very circular components (gems, holes)
+                    # Special case for very circular components (gems, holes) that are NOT inside rings
                     is_circular = stats['circularity'] > 0.7
                     
                     if (size_valid and (shape_valid or edge_valid)) or is_circular:
@@ -815,7 +967,7 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
         # Convert back to uint8
         alpha_array = np.clip(alpha_final * 255, 0, 255).astype(np.uint8)
         
-        logger.info("✅ ULTRA PRECISE V3 ENHANCED REFINED complete")
+        logger.info("✅ ULTRA PRECISE V4 RING-AWARE complete")
         
         a_new = Image.fromarray(alpha_array)
         result = Image.merge('RGBA', (r, g, b, a_new))
@@ -834,13 +986,16 @@ def u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image: Image.Image)
             return image.convert('RGBA')
         return image
 
-def ensure_ring_holes_transparent_ultra_v3_enhanced(image: Image.Image) -> Image.Image:
-    """ULTRA PRECISE V3 ENHANCED WITH REFINED HOLE DETECTION"""
+def ensure_ring_holes_transparent_ultra_v4_ring_aware(image: Image.Image) -> Image.Image:
+    """ULTRA PRECISE V4 RING-AWARE HOLE DETECTION"""
     # CRITICAL: Preserve RGBA mode
     if image.mode != 'RGBA':
         image = image.convert('RGBA')
     
-    logger.info("🔍 ULTRA PRECISE V3 ENHANCED REFINED Ring Hole Detection")
+    logger.info("🔍 ULTRA PRECISE V4 RING-AWARE Hole Detection")
+    
+    # First, detect ring structure
+    ring_candidates = detect_ring_structure(image)
     
     r, g, b, a = image.split()
     alpha_array = np.array(a, dtype=np.uint8)
@@ -856,6 +1011,37 @@ def ensure_ring_holes_transparent_ultra_v3_enhanced(image: Image.Image) -> Image
     l_channel, a_channel, b_channel = cv2.split(lab)
     
     gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
+    
+    # Create hole mask
+    holes_mask = np.zeros_like(alpha_array, dtype=np.float32)
+    
+    # Process each ring candidate
+    for ring in ring_candidates:
+        if 'center' in ring:
+            # Create mask for ring interior
+            ring_interior_mask = np.zeros_like(alpha_array, dtype=np.uint8)
+            
+            if 'radius' in ring:
+                # Circular ring
+                cv2.circle(ring_interior_mask, tuple(map(int, ring['center'])), 
+                          int(ring.get('inner_radius', ring['radius'] * 0.6)), 255, -1)
+            elif 'inner_contour' in ring:
+                # Contour-based ring
+                cv2.drawContours(ring_interior_mask, [ring['inner_contour']], -1, 255, -1)
+            
+            # Check brightness in ring interior
+            if np.any(ring_interior_mask > 0):
+                interior_brightness = np.mean(gray[ring_interior_mask > 0])
+                interior_v = np.mean(v_channel[ring_interior_mask > 0])
+                interior_saturation = np.mean(s_channel[ring_interior_mask > 0])
+                
+                logger.info(f"Ring interior: brightness={interior_brightness:.1f}, "
+                          f"V={interior_v:.1f}, saturation={interior_saturation:.1f}")
+                
+                # If interior is bright and low saturation, it's likely a hole
+                if (interior_brightness > 220 or interior_v > 225) and interior_saturation < 30:
+                    holes_mask[ring_interior_mask > 0] = 255
+                    logger.info("✅ Ring interior identified as hole")
     
     # STAGE 1: Comprehensive hole detection with refined thresholds
     # Multiple criteria for hole detection
@@ -955,7 +1141,7 @@ def ensure_ring_holes_transparent_ultra_v3_enhanced(image: Image.Image) -> Image
         lbp = np.zeros_like(image)
         
         for i in range(radius, rows - radius):
-            for j in range(radius, cols - cols):
+            for j in range(radius, cols - radius):
                 center = image[i, j]
                 binary_string = ''
                 
@@ -992,9 +1178,7 @@ def ensure_ring_holes_transparent_ultra_v3_enhanced(image: Image.Image) -> Image
     # Find connected components
     num_labels, labels = cv2.connectedComponents(potential_holes)
     
-    holes_mask = np.zeros_like(alpha_array, dtype=np.float32)
-    
-    # STAGE 4: Validate each hole candidate with enhanced criteria
+    # STAGE 4: Validate each hole candidate with ring awareness
     for label in range(1, num_labels):
         component = (labels == label)
         component_size = np.sum(component)
@@ -1007,6 +1191,17 @@ def ensure_ring_holes_transparent_ultra_v3_enhanced(image: Image.Image) -> Image
             coords = np.where(component)
             if len(coords[0]) == 0:
                 continue
+            
+            # Check if component is within a ring
+            component_center = np.mean(coords, axis=1)
+            is_in_ring = False
+            
+            for ring in ring_candidates:
+                if 'center' in ring and 'radius' in ring:
+                    dist_to_center = np.linalg.norm(component_center - np.array(ring['center']))
+                    if dist_to_center < ring.get('inner_radius', ring['radius'] * 0.6):
+                        is_in_ring = True
+                        break
             
             # Comprehensive component analysis
             component_pixels_rgb = rgb_array[component]
@@ -1126,18 +1321,23 @@ def ensure_ring_holes_transparent_ultra_v3_enhanced(image: Image.Image) -> Image
                 if is_enclosed:
                     confidence += 0.25
                 
+                # Bonus for being inside a ring
+                if is_in_ring:
+                    confidence += 0.3
+                    logger.info("Component is inside a ring - boosting confidence")
+                
                 # Alpha channel bonus
                 if np.mean(component_alpha) < 200:
                     confidence += 0.1
                 
                 # Apply hole mask based on confidence
-                if confidence > 0.45:  # Slightly lower threshold for better detection
+                if confidence > 0.4:  # Lower threshold for better detection
                     holes_mask[component] = 255
                     logger.info(f"Hole detected: brightness={brightness_metrics['rgb_mean']:.1f}, "
                               f"saturation={saturation_metrics['mean']:.1f}, "
                               f"uniformity={uniformity_metrics['rgb_std']:.1f}, "
                               f"shape={shape_metrics.get('circularity', 0):.2f}, "
-                              f"enclosed={is_enclosed}, confidence={confidence:.2f}")
+                              f"enclosed={is_enclosed}, in_ring={is_in_ring}, confidence={confidence:.2f}")
     
     # STAGE 5: Apply holes with refined transitions
     if np.any(holes_mask > 0):
@@ -1558,369 +1758,4 @@ def apply_pattern_enhancement_transparent(image: Image.Image, pattern_type: str)
     r2, g2, b2 = rgb_image.split()
     enhanced_image = Image.merge('RGBA', (r2, g2, b2, a))
     
-    logger.info(f"✅ Enhancement applied with contrast 1.1 and brightness adjustments. Mode: {enhanced_image.mode}")
-    
-    # Verify RGBA mode
-    if enhanced_image.mode != 'RGBA':
-        logger.error("❌ WARNING: Enhanced image is not RGBA!")
-        enhanced_image = enhanced_image.convert('RGBA')
-    
-    return enhanced_image
-
-def resize_to_target_dimensions(image: Image.Image, target_width=1200, target_height=1560) -> Image.Image:
-    """Resize image to target dimensions preserving transparency"""
-    # CRITICAL: Ensure RGBA mode
-    if image.mode != 'RGBA':
-        logger.warning(f"⚠️ Converting {image.mode} to RGBA in resize")
-        image = image.convert('RGBA')
-    
-    width, height = image.size
-    
-    img_ratio = width / height
-    target_ratio = target_width / target_height
-    
-    expected_ratio = 2000 / 2600
-    
-    if abs(img_ratio - expected_ratio) < 0.05:
-        resized = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
-    else:
-        if img_ratio > target_ratio:
-            new_height = target_height
-            new_width = int(target_height * img_ratio)
-        else:
-            new_width = target_width
-            new_height = int(target_width / img_ratio)
-        
-        resized = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
-        if new_width != target_width or new_height != target_height:
-            left = (new_width - target_width) // 2
-            top = (new_height - target_height) // 2
-            right = left + target_width
-            bottom = top + target_height
-            
-            resized = resized.crop((left, top, right, bottom))
-    
-    # Verify RGBA mode
-    if resized.mode != 'RGBA':
-        logger.error("❌ WARNING: Resized image is not RGBA!")
-        resized = resized.convert('RGBA')
-    
-    return resized
-
-def apply_swinir_enhancement_transparent(image: Image.Image) -> Image.Image:
-    """Apply SwinIR enhancement while preserving transparency"""
-    if not REPLICATE_CLIENT:
-        logger.warning("SwinIR skipped - no Replicate client")
-        return image
-    
-    try:
-        logger.info("🎨 Applying SwinIR enhancement with transparency")
-        
-        # CRITICAL: Ensure RGBA mode
-        if image.mode != 'RGBA':
-            logger.warning(f"⚠️ Converting {image.mode} to RGBA for SwinIR")
-            image = image.convert('RGBA')
-        
-        # Separate alpha channel
-        r, g, b, a = image.split()
-        rgb_image = Image.merge('RGB', (r, g, b))
-        
-        buffered = BytesIO()
-        rgb_image.save(buffered, format="PNG", optimize=True, compress_level=3)
-        buffered.seek(0)
-        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        img_data_url = f"data:image/png;base64,{img_base64}"
-        
-        output = REPLICATE_CLIENT.run(
-            "jingyunliang/swinir:660d922d33153019e8c263a3bba265de882e7f4f70396546b6c9c8f9d47a021a",
-            input={
-                "image": img_data_url,
-                "task_type": "Real-World Image Super-Resolution",
-                "scale": 1,
-                "noise_level": 10,
-                "jpeg_quality": 50
-            }
-        )
-        
-        if output:
-            if isinstance(output, str):
-                response = requests.get(output)
-                enhanced_image = Image.open(BytesIO(response.content))
-            else:
-                enhanced_image = Image.open(BytesIO(base64.b64decode(output)))
-            
-            # Recombine with original alpha channel
-            r2, g2, b2 = enhanced_image.split()
-            result = Image.merge('RGBA', (r2, g2, b2, a))
-            
-            logger.info("✅ SwinIR enhancement successful with transparency preserved")
-            
-            # Verify RGBA mode
-            if result.mode != 'RGBA':
-                logger.error("❌ WARNING: SwinIR result is not RGBA!")
-                result = result.convert('RGBA')
-            
-            return result
-        else:
-            return image
-            
-    except Exception as e:
-        logger.warning(f"SwinIR error: {str(e)}")
-        return image
-
-def process_enhancement(job):
-    """Main enhancement processing - UPDATED with Ultra V3 Enhanced Refined - BRIGHTNESS 1.12 for Other"""
-    logger.info(f"=== Enhancement {VERSION} Started ===")
-    logger.info("🎯 ULTRA PRECISE V3 ENHANCED REFINED: Maximum quality background removal")
-    logger.info("💎 TRANSPARENT OUTPUT: Preserving alpha channel throughout")
-    logger.info("🔤 KOREAN ENCODING FIXED V5: Enhanced error handling, font verification, and layout")
-    logger.info("🔍 REFINED FEATURES:")
-    logger.info("  - Adaptive contrast based on image statistics")
-    logger.info("  - Color spill detection (green/blue screen)")
-    logger.info("  - Multi-scale edge detection (8 methods)")
-    logger.info("  - Texture-based artifact removal with LBP")
-    logger.info("  - Advanced shape metrics for component analysis")
-    logger.info("  - Bilateral filtering for edge-aware smoothing")
-    logger.info("  - Refined hole detection with multi-criteria scoring")
-    logger.info("  - Feathered shadow removal based on distance")
-    logger.info("🔤 FIXED TEXT SECTIONS: MD_TALK=1200x400, DESIGN_POINT=1200x350")
-    logger.info("🔧 AC PATTERN: 20% white overlay, brightness 1.03, contrast 1.1")
-    logger.info("🔧 AB PATTERN: 16% white overlay, brightness 1.03, contrast 1.1")
-    logger.info("✨ OTHER PATTERNS: 5% white overlay, brightness 1.12, contrast 1.1")
-    logger.info("📌 BASE64 PADDING: ALWAYS INCLUDED for Google Script compatibility")
-    logger.info(f"Received job data: {json.dumps(job, indent=2)[:500]}...")
-    start_time = time.time()
-    
-    try:
-        # Check for special mode first
-        if job.get('special_mode'):
-            return process_special_mode(job)
-        
-        # Normal enhancement processing continues here...
-        filename = find_filename_fast(job)
-        file_number = extract_file_number(filename) if filename else None
-        image_data = find_input_data_fast(job)
-        
-        if not image_data:
-            return {
-                "output": {
-                    "error": "No image data found",
-                    "status": "error",
-                    "version": VERSION
-                }
-            }
-        
-        image_bytes = decode_base64_fast(image_data)
-        image = Image.open(BytesIO(image_bytes))
-        
-        # Log initial image info
-        logger.info(f"Input image mode: {image.mode}, size: {image.size}")
-        
-        # CRITICAL: Convert to RGBA immediately
-        if image.mode != 'RGBA':
-            logger.info(f"Converting {image.mode} to RGBA immediately")
-            image = image.convert('RGBA')
-        
-        # STEP 1: ULTRA PRECISE V3 ENHANCED REFINED BACKGROUND REMOVAL
-        logger.info("📸 STEP 1: Applying ULTRA PRECISE V3 ENHANCED REFINED background removal")
-        removal_start = time.time()
-        image = u2net_ultra_precise_removal_v3_shadow_fix_ultra_enhanced(image)
-        logger.info(f"⏱️ Ultra precise V3 Enhanced Refined removal took: {time.time() - removal_start:.2f}s")
-        
-        # Verify RGBA after removal
-        if image.mode != 'RGBA':
-            logger.error("❌ Image lost RGBA after background removal!")
-            image = image.convert('RGBA')
-        
-        # STEP 2: ENHANCEMENT (preserving transparency)
-        logger.info("🎨 STEP 2: Applying enhancements with TRUE transparency preservation")
-        enhancement_start = time.time()
-        
-        # Enhanced auto white balance with alpha preservation
-        def auto_white_balance_rgba(rgba_img):
-            if rgba_img.mode != 'RGBA':
-                rgba_img = rgba_img.convert('RGBA')
-            
-            r, g, b, a = rgba_img.split()
-            rgb_img = Image.merge('RGB', (r, g, b))
-            
-            img_array = np.array(rgb_img, dtype=np.float32)
-            
-            gray_pixels = img_array[::15, ::15]
-            gray_mask = (
-                (np.abs(gray_pixels[:,:,0] - gray_pixels[:,:,1]) < 15) & 
-                (np.abs(gray_pixels[:,:,1] - gray_pixels[:,:,2]) < 15) &
-                (gray_pixels[:,:,0] > 180)
-            )
-            
-            if np.sum(gray_mask) > 10:
-                r_avg = np.mean(gray_pixels[gray_mask, 0])
-                g_avg = np.mean(gray_pixels[gray_mask, 1])
-                b_avg = np.mean(gray_pixels[gray_mask, 2])
-                
-                gray_avg = (r_avg + g_avg + b_avg) / 3
-                
-                img_array[:,:,0] *= (gray_avg / r_avg) if r_avg > 0 else 1
-                img_array[:,:,1] *= (gray_avg / g_avg) if g_avg > 0 else 1
-                img_array[:,:,2] *= (gray_avg / b_avg) if b_avg > 0 else 1
-            
-            rgb_balanced = Image.fromarray(np.clip(img_array, 0, 255).astype(np.uint8))
-            r2, g2, b2 = rgb_balanced.split()
-            return Image.merge('RGBA', (r2, g2, b2, a))
-        
-        image = auto_white_balance_rgba(image)
-        
-        # Detect pattern type
-        pattern_type = detect_pattern_type(filename)
-        detected_type = {
-            "ac_pattern": "무도금화이트(0.20)",
-            "ab_pattern": "무도금화이트-쿨톤(0.16)",
-            "other": "기타색상(0.05)"
-        }.get(pattern_type, "기타색상(0.05)")
-        
-        # Apply pattern-specific enhancements (preserving transparency)
-        image = apply_pattern_enhancement_transparent(image, pattern_type)
-        
-        # ULTRA PRECISE V3 ENHANCED REFINED ring hole detection
-        logger.info("🔍 Applying ULTRA PRECISE V3 ENHANCED REFINED ring hole detection")
-        image = ensure_ring_holes_transparent_ultra_v3_enhanced(image)
-        
-        logger.info(f"⏱️ Enhancement took: {time.time() - enhancement_start:.2f}s")
-        
-        # RESIZE (preserving transparency)
-        image = resize_to_target_dimensions(image, 1200, 1560)
-        
-        # STEP 3: SWINIR ENHANCEMENT (preserving transparency)
-        logger.info("🚀 STEP 3: Applying SwinIR enhancement")
-        swinir_start = time.time()
-        image = apply_swinir_enhancement_transparent(image)
-        logger.info(f"⏱️ SwinIR took: {time.time() - swinir_start:.2f}s")
-        
-        # Final verification
-        if image.mode != 'RGBA':
-            logger.error("❌ CRITICAL: Final image is not RGBA! Converting...")
-            image = image.convert('RGBA')
-        
-        logger.info(f"✅ Final image mode: {image.mode}, size: {image.size}")
-        
-        # CRITICAL: NO BACKGROUND COMPOSITE - Keep transparency
-        logger.info("💎 NO background composite - keeping pure transparency")
-        
-        # Save to base64 as PNG with transparency - WITH PADDING
-        enhanced_base64 = image_to_base64(image, keep_transparency=True)
-        
-        # Build filename
-        enhanced_filename = filename
-        if filename and file_number:
-            base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
-            enhanced_filename = f"{base_name}_enhanced_transparent.png"
-        
-        total_time = time.time() - start_time
-        logger.info(f"✅ Enhancement completed in {total_time:.2f}s")
-        
-        output = {
-            "output": {
-                "enhanced_image": enhanced_base64,
-                "enhanced_image_with_prefix": f"data:image/png;base64,{enhanced_base64}",
-                "detected_type": detected_type,
-                "pattern_type": pattern_type,
-                "is_wedding_ring": True,
-                "filename": filename,
-                "enhanced_filename": enhanced_filename,
-                "file_number": file_number,
-                "final_size": list(image.size),
-                "version": VERSION,
-                "status": "success",
-                "processing_time": f"{total_time:.2f}s",
-                "has_transparency": True,
-                "transparency_preserved": True,
-                "background_removed": True,
-                "background_applied": False,
-                "format": "PNG",
-                "output_mode": "RGBA",
-                "base64_padding": "INCLUDED",
-                "compression": "level_3",
-                "korean_font_verified": True,
-                "korean_font_path": KOREAN_FONT_PATH,
-                "korean_support": "FIXED-V5",
-                "special_modes_available": ["md_talk", "design_point", "both_text_sections"],
-                "file_number_info": {
-                    "001-003": "Enhancement",
-                    "004": "MD TALK (1200x400)",
-                    "005-006": "Enhancement",
-                    "007": "Thumbnail",
-                    "008": "DESIGN POINT (1200x350)",
-                    "009-010": "Thumbnail",
-                    "011": "COLOR section"
-                },
-                "ultra_v3_refined_features": [
-                    "✅ ADAPTIVE CONTRAST: Dynamic adjustment based on image statistics",
-                    "✅ COLOR SPILL DETECTION: Green/blue screen removal",
-                    "✅ MULTI-SCALE EDGE DETECTION: 8 methods including 4 Sobel scales",
-                    "✅ TEXTURE ANALYSIS: Local Binary Patterns for artifact detection",
-                    "✅ ADVANCED SHAPE METRICS: Circularity, solidity, eccentricity, aspect ratio",
-                    "✅ FEATHERED SHADOW REMOVAL: Distance-based strength adjustment",
-                    "✅ BILATERAL FILTERING: Edge-aware smoothing",
-                    "✅ ADAPTIVE SIGMOID: Different sharpness for strong/weak edges",
-                    "✅ MULTI-SCALE TRANSITIONS: 3 levels of hole edge smoothing",
-                    "✅ CONFIDENCE SCORING: Multi-criteria validation (0.45 threshold)",
-                    "✅ TOPOLOGY ANALYSIS: Convex hull for enclosed region detection",
-                    "✅ GRADIENT-BASED SHADOWS: Low gradient area detection",
-                    "✅ MORPHOLOGICAL CLEANUP: Adaptive kernel sizes",
-                    "✅ COMPONENT VALIDATION: Edge ratio and shape descriptors",
-                    "✅ TEXTURE UNIFORMITY: LBP variance for hole detection"
-                ],
-                "processing_order": "1.U2Net-Ultra-V3-Enhanced-Refined → 2.Enhancement → 3.SwinIR",
-                "swinir_applied": True,
-                "png_support": True,
-                "edge_detection": "ULTRA PRECISE V3 ENHANCED REFINED (8-method combination)",
-                "korean_encoding": "UTF-8 with enhanced error handling",
-                "white_overlay": "AC: 20% | AB: 16% | Other: 5%",
-                "brightness_values": "AC/AB: 1.03 | Other: 1.12",
-                "sharpness_values": "Other: 1.5 → Final: 1.8",
-                "contrast_value": "1.1",
-                "expected_input": "2000x2600 (any format)",
-                "output_size": "1200x1560",
-                "transparency_info": "Full RGBA transparency preserved - NO background",
-                "google_script_compatibility": "Base64 WITH padding - FIXED",
-                "layout_optimization": "Text sections height reduced for better proportions",
-                "shadow_elimination": "REFINED with feathering and multi-level detection",
-                "brightness_update": "Other pattern brightness increased to 1.12 for better visibility"
-            }
-        }
-        
-        logger.info("✅ Enhancement completed successfully with ULTRA PRECISE V3 ENHANCED REFINED")
-        return output
-        
-    except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        import traceback
-        
-        return {
-            "output": {
-                "error": str(e),
-                "status": "error",
-                "version": VERSION,
-                "traceback": traceback.format_exc()
-            }
-        }
-
-def handler(event):
-    """RunPod handler function"""
-    logger.info(f"Handler received event type: {type(event)}")
-    logger.info(f"Handler received event: {json.dumps(event, indent=2)[:500]}...")
-    
-    # Handle different event structures
-    if isinstance(event, dict):
-        if 'input' in event:
-            job = event['input']
-        else:
-            job = event
-    else:
-        job = event
-    
-    return process_enhancement(job)
-
-# RunPod handler
-runpod.serverless.start({"handler": handler})
+    logger.info(f"✅ Enhancement applie
