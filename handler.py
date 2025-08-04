@@ -388,6 +388,69 @@ def create_design_point_section(text_content=None, width=1200):
     logger.info(f"✅ DESIGN POINT section created: {fixed_width}x{fixed_height}")
     return section_img
 
+def find_special_mode(data):
+    """Find special mode in nested data structures"""
+    if isinstance(data, str):
+        return None
+    
+    if isinstance(data, dict):
+        # Direct check
+        if 'special_mode' in data:
+            return data['special_mode']
+        
+        # Check common nested structures
+        for key in ['input', 'data', 'payload', 'body', 'request', 'parameters']:
+            if key in data and isinstance(data[key], dict):
+                result = find_special_mode(data[key])
+                if result:
+                    return result
+        
+        # Check numbered keys (Make.com compatibility)
+        for i in range(20):
+            key = str(i)
+            if key in data:
+                if isinstance(data[key], dict):
+                    result = find_special_mode(data[key])
+                    if result:
+                        return result
+                elif isinstance(data[key], str) and data[key] in ['both_text_sections', 'md_talk', 'design_point']:
+                    return data[key]
+    
+    return None
+
+def find_text_content(data, content_type):
+    """Find text content for MD TALK or DESIGN POINT"""
+    if isinstance(data, dict):
+        # Keys to search for based on content type
+        if content_type == 'md_talk':
+            keys = ['md_talk_content', 'md_talk', 'md_talk_text', 'text_content', 'claude_text']
+        elif content_type == 'design_point':
+            keys = ['design_point_content', 'design_point', 'design_point_text', 'text_content', 'claude_text']
+        else:
+            keys = ['text_content', 'claude_text']
+        
+        # Direct check
+        for key in keys:
+            if key in data and isinstance(data[key], str) and data[key].strip():
+                return data[key]
+        
+        # Check nested structures
+        for nest_key in ['input', 'data', 'payload', 'body', 'request']:
+            if nest_key in data and isinstance(data[nest_key], dict):
+                for key in keys:
+                    if key in data[nest_key] and isinstance(data[nest_key][key], str) and data[nest_key][key].strip():
+                        return data[nest_key][key]
+        
+        # Check numbered keys
+        for i in range(20):
+            num_key = str(i)
+            if num_key in data and isinstance(data[num_key], dict):
+                result = find_text_content(data[num_key], content_type)
+                if result:
+                    return result
+    
+    return None
+
 def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
     """
     PHASE 1: Fast Ring Detection - 빠른 링 위치 파악
@@ -894,16 +957,16 @@ def process_special_mode(job):
     download_korean_font()
     
     if special_mode == 'both_text_sections':
-        # Get text content from various possible keys
-        md_talk_text = (job.get('md_talk_content', '') or 
-                       job.get('md_talk', '') or 
-                       job.get('md_talk_text', '') or
-                       """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)""")
+        # Find text content with improved search
+        md_talk_text = find_text_content(job, 'md_talk')
+        design_point_text = find_text_content(job, 'design_point')
         
-        design_point_text = (job.get('design_point_content', '') or 
-                            job.get('design_point', '') or
-                            job.get('design_point_text', '') or
-                            """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다.""")
+        # Default texts if not found
+        if not md_talk_text:
+            md_talk_text = """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)"""
+        
+        if not design_point_text:
+            design_point_text = """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
         
         # Ensure text is properly decoded
         if isinstance(md_talk_text, bytes):
@@ -961,12 +1024,8 @@ def process_special_mode(job):
         }
     
     elif special_mode == 'md_talk':
-        # Get text content from various possible keys
-        text_content = (job.get('text_content', '') or 
-                       job.get('claude_text', '') or 
-                       job.get('md_talk', '') or
-                       job.get('md_talk_content', '') or
-                       job.get('md_talk_text', ''))
+        # Find text content with improved search
+        text_content = find_text_content(job, 'md_talk')
         
         if not text_content:
             text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다. 특별한 날은 물론 평범한 일상까지 모든 순간을 빛나게 만들어주는 당신만의 특별한 주얼리입니다."""
@@ -1000,12 +1059,8 @@ def process_special_mode(job):
         }
     
     elif special_mode == 'design_point':
-        # Get text content from various possible keys
-        text_content = (job.get('text_content', '') or 
-                       job.get('claude_text', '') or 
-                       job.get('design_point', '') or
-                       job.get('design_point_content', '') or
-                       job.get('design_point_text', ''))
+        # Find text content with improved search
+        text_content = find_text_content(job, 'design_point')
         
         if not text_content:
             text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
@@ -1176,15 +1231,19 @@ def handler(event):
         logger.info("✅ Phase 2: Focused precise removal (0.5-1s)")
         logger.info("✅ Fixed: Korean font download and verification")
         logger.info("✅ Fixed: Text encoding and rendering")
+        logger.info("✅ Fixed: Special mode detection in nested structures")
         
         # Log input structure for debugging
         logger.info(f"Input event type: {type(event)}")
         if isinstance(event, dict):
             logger.info(f"Input keys: {list(event.keys())[:10]}")  # First 10 keys
+            # Log more details for debugging
+            logger.info(f"Event structure (first 500 chars): {json.dumps(event, indent=2)[:500]}...")
         
-        # Check for special mode first
-        special_mode = event.get('special_mode', '')
-        if special_mode in ['both_text_sections', 'md_talk', 'design_point']:
+        # IMPROVED: Find special mode in nested structures
+        special_mode = find_special_mode(event)
+        
+        if special_mode and special_mode in ['both_text_sections', 'md_talk', 'design_point']:
             logger.info(f"📝 Special mode detected: {special_mode}")
             return process_special_mode(event)
         
@@ -1280,7 +1339,8 @@ def handler(event):
                     "✅ Expected 8-17x speedup vs original",
                     "✅ Better quality through focused processing",
                     "✅ Fixed Korean font download and verification",
-                    "✅ Fixed text encoding and rendering for MD TALK/DESIGN POINT"
+                    "✅ Fixed text encoding and rendering for MD TALK/DESIGN POINT",
+                    "✅ Fixed special mode detection in nested Make.com structures"
                 ],
                 "phase_info": {
                     "phase1": "Fast detection (0.1-0.2s)",
