@@ -388,66 +388,76 @@ def create_design_point_section(text_content=None, width=1200):
     logger.info(f"✅ DESIGN POINT section created: {fixed_width}x{fixed_height}")
     return section_img
 
-def find_special_mode(data):
-    """Find special mode in nested data structures"""
+def find_special_mode(data, path=""):
+    """Find special mode in nested data structures with deep search"""
     if isinstance(data, str):
+        if data in ['both_text_sections', 'md_talk', 'design_point']:
+            logger.info(f"✅ Found special_mode as string at {path}: {data}")
+            return data
         return None
     
     if isinstance(data, dict):
         # Direct check
-        if 'special_mode' in data:
+        if 'special_mode' in data and data['special_mode']:
+            logger.info(f"✅ Found special_mode at {path}.special_mode: {data['special_mode']}")
             return data['special_mode']
         
-        # Check common nested structures
-        for key in ['input', 'data', 'payload', 'body', 'request', 'parameters']:
-            if key in data and isinstance(data[key], dict):
-                result = find_special_mode(data[key])
+        # Check all keys recursively
+        for key, value in data.items():
+            new_path = f"{path}.{key}" if path else key
+            
+            # Skip keys that are definitely not special_mode
+            if key in ['enhanced_image', 'image', 'base64', 'image_base64'] and isinstance(value, str) and len(value) > 1000:
+                continue
+                
+            if isinstance(value, dict):
+                result = find_special_mode(value, new_path)
                 if result:
                     return result
-        
-        # Check numbered keys (Make.com compatibility)
-        for i in range(20):
-            key = str(i)
-            if key in data:
-                if isinstance(data[key], dict):
-                    result = find_special_mode(data[key])
+            elif isinstance(value, str) and value in ['both_text_sections', 'md_talk', 'design_point']:
+                logger.info(f"✅ Found special_mode at {new_path}: {value}")
+                return value
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    result = find_special_mode(item, f"{new_path}[{i}]")
                     if result:
                         return result
-                elif isinstance(data[key], str) and data[key] in ['both_text_sections', 'md_talk', 'design_point']:
-                    return data[key]
     
     return None
 
 def find_text_content(data, content_type):
-    """Find text content for MD TALK or DESIGN POINT"""
+    """Find text content for MD TALK or DESIGN POINT with deep search"""
     if isinstance(data, dict):
         # Keys to search for based on content type
         if content_type == 'md_talk':
-            keys = ['md_talk_content', 'md_talk', 'md_talk_text', 'text_content', 'claude_text']
+            keys = ['md_talk_content', 'md_talk', 'md_talk_text', 'text_content', 'claude_text', 'mdtalk', 'MD_TALK']
         elif content_type == 'design_point':
-            keys = ['design_point_content', 'design_point', 'design_point_text', 'text_content', 'claude_text']
+            keys = ['design_point_content', 'design_point', 'design_point_text', 'text_content', 'claude_text', 'designpoint', 'DESIGN_POINT']
         else:
-            keys = ['text_content', 'claude_text']
+            keys = ['text_content', 'claude_text', 'text']
         
         # Direct check
         for key in keys:
             if key in data and isinstance(data[key], str) and data[key].strip():
+                logger.info(f"✅ Found {content_type} content at key: {key}")
                 return data[key]
         
-        # Check nested structures
-        for nest_key in ['input', 'data', 'payload', 'body', 'request']:
-            if nest_key in data and isinstance(data[nest_key], dict):
-                for key in keys:
-                    if key in data[nest_key] and isinstance(data[nest_key][key], str) and data[nest_key][key].strip():
-                        return data[nest_key][key]
-        
-        # Check numbered keys
-        for i in range(20):
-            num_key = str(i)
-            if num_key in data and isinstance(data[num_key], dict):
-                result = find_text_content(data[num_key], content_type)
+        # Check all keys recursively
+        for key, value in data.items():
+            # Skip image data
+            if key in ['enhanced_image', 'image', 'base64', 'image_base64'] and isinstance(value, str) and len(value) > 1000:
+                continue
+                
+            if isinstance(value, dict):
+                result = find_text_content(value, content_type)
                 if result:
                     return result
+            elif isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        result = find_text_content(item, content_type)
+                        if result:
+                            return result
     
     return None
 
@@ -951,7 +961,44 @@ def resize_image_proportional(image, target_width=1200, target_height=1560):
 def process_special_mode(job):
     """Process special modes - MD TALK and DESIGN POINT"""
     special_mode = job.get('special_mode', '')
-    logger.info(f"🔤 Processing special mode: {special_mode}")
+    
+    # If special_mode is not found in job, try to find it again
+    if not special_mode:
+        special_mode = find_special_mode(job)
+    
+    logger.info(f"🔤 Processing special mode: '{special_mode}'")
+    
+    # Validate special_mode
+    if not special_mode or special_mode not in ['both_text_sections', 'md_talk', 'design_point']:
+        logger.error(f"❌ Invalid special mode: '{special_mode}'")
+        logger.info("📋 Valid modes: both_text_sections, md_talk, design_point")
+        
+        # Try to auto-detect based on content
+        md_talk_content = find_text_content(job, 'md_talk')
+        design_point_content = find_text_content(job, 'design_point')
+        
+        if md_talk_content and design_point_content:
+            logger.info("📝 Auto-detected: both_text_sections")
+            special_mode = 'both_text_sections'
+        elif md_talk_content:
+            logger.info("📝 Auto-detected: md_talk")
+            special_mode = 'md_talk'
+        elif design_point_content:
+            logger.info("📝 Auto-detected: design_point")
+            special_mode = 'design_point'
+        else:
+            return {
+                "output": {
+                    "error": f"Invalid or missing special mode. Got: '{special_mode}'. Valid modes: both_text_sections, md_talk, design_point",
+                    "status": "error",
+                    "version": VERSION,
+                    "debug_info": {
+                        "special_mode_found": special_mode,
+                        "md_talk_content_found": bool(md_talk_content),
+                        "design_point_content_found": bool(design_point_content)
+                    }
+                }
+            }
     
     # Ensure Korean font is downloaded before processing
     download_korean_font()
@@ -1094,9 +1141,10 @@ def process_special_mode(job):
         }
     
     else:
+        logger.error(f"❌ Unexpected special mode after validation: '{special_mode}'")
         return {
             "output": {
-                "error": f"Unknown special mode: {special_mode}",
+                "error": f"Unexpected special mode: '{special_mode}'. This should not happen after validation.",
                 "status": "error",
                 "version": VERSION
             }
@@ -1117,75 +1165,72 @@ def extract_file_number(filename: str) -> str:
     
     return None
 
-def find_input_data_fast(data):
-    """Find input data - improved search logic"""
+def find_input_data_fast(data, depth=0, max_depth=10):
+    """Find input data - improved recursive search"""
+    if depth > max_depth:
+        return None
+        
     # Direct string check
     if isinstance(data, str) and len(data) > 50:
-        return data
+        # Basic check if it looks like base64
+        sample = data[:100].strip()
+        if all(c in string.ascii_letters + string.digits + '+/=' for c in sample):
+            return data
     
     if isinstance(data, dict):
         # Priority keys for image data
         priority_keys = ['enhanced_image', 'image', 'image_base64', 'base64', 'img', 
-                        'input_image', 'original_image', 'base64_image']
+                        'input_image', 'original_image', 'base64_image', 'imageData']
         
         # Check priority keys first
         for key in priority_keys:
             if key in data and isinstance(data[key], str) and len(data[key]) > 50:
                 return data[key]
         
-        # Check nested structures
-        for key in ['input', 'data', 'payload', 'body', 'request']:
-            if key in data:
-                if isinstance(data[key], str) and len(data[key]) > 50:
-                    return data[key]
-                elif isinstance(data[key], dict):
-                    result = find_input_data_fast(data[key])
-                    if result:
-                        return result
-        
-        # Check numbered keys (for Make.com compatibility)
-        for i in range(20):  # Check up to 20 numbered keys
-            key = str(i)
-            if key in data:
-                if isinstance(data[key], str) and len(data[key]) > 50:
-                    return data[key]
-                elif isinstance(data[key], dict):
-                    # Check if this dict contains image data
-                    result = find_input_data_fast(data[key])
-                    if result:
-                        return result
-        
-        # Last resort - check all keys
+        # Recursive search all keys
         for key, value in data.items():
-            if isinstance(value, str) and len(value) > 50 and 'base64' not in key.lower():
-                # Basic check if it looks like base64
-                if all(c in string.ascii_letters + string.digits + '+/=' for c in value[:100]):
+            if isinstance(value, str) and len(value) > 1000:
+                # Check if it might be base64
+                sample = value[:100].strip()
+                if all(c in string.ascii_letters + string.digits + '+/=' for c in sample):
+                    logger.info(f"✅ Found potential image data at key: {key}")
                     return value
+            elif isinstance(value, (dict, list)):
+                result = find_input_data_fast(value, depth + 1, max_depth)
+                if result:
+                    return result
+    
+    elif isinstance(data, list):
+        for item in data:
+            result = find_input_data_fast(item, depth + 1, max_depth)
+            if result:
+                return result
     
     return None
 
-def find_filename_fast(data):
-    """Find filename - improved search"""
+def find_filename_fast(data, depth=0, max_depth=10):
+    """Find filename - recursive search"""
+    if depth > max_depth:
+        return None
+        
     if isinstance(data, dict):
         # Direct filename keys
-        for key in ['filename', 'file_name', 'name', 'fileName']:
-            if key in data and isinstance(data[key], str):
+        for key in ['filename', 'file_name', 'name', 'fileName', 'file', 'fname']:
+            if key in data and isinstance(data[key], str) and data[key].strip():
                 return data[key]
         
-        # Check nested structures
-        for key in ['input', 'data', 'payload', 'body']:
-            if key in data and isinstance(data[key], dict):
-                for subkey in ['filename', 'file_name', 'name', 'fileName']:
-                    if subkey in data[key] and isinstance(data[key][subkey], str):
-                        return data[key][subkey]
-        
-        # Check numbered keys
-        for i in range(20):
-            key = str(i)
-            if key in data and isinstance(data[key], dict):
-                result = find_filename_fast(data[key])
+        # Recursive search all keys
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                result = find_filename_fast(value, depth + 1, max_depth)
                 if result:
                     return result
+    
+    elif isinstance(data, list):
+        for item in data:
+            result = find_filename_fast(item, depth + 1, max_depth)
+            if result:
+                return result
     
     return None
 
@@ -1238,14 +1283,19 @@ def handler(event):
         if isinstance(event, dict):
             logger.info(f"Input keys: {list(event.keys())[:10]}")  # First 10 keys
             # Log more details for debugging
-            logger.info(f"Event structure (first 500 chars): {json.dumps(event, indent=2)[:500]}...")
+            logger.info(f"Event structure (first 1000 chars): {json.dumps(event, indent=2)[:1000]}...")
         
-        # IMPROVED: Find special mode in nested structures
+        # IMPROVED: Find special mode in nested structures with deep search
         special_mode = find_special_mode(event)
+        logger.info(f"🔍 Special mode search result: {special_mode}")
         
+        # Check if this is a text section request
         if special_mode and special_mode in ['both_text_sections', 'md_talk', 'design_point']:
-            logger.info(f"📝 Special mode detected: {special_mode}")
+            logger.info(f"📝 Processing special mode: {special_mode}")
             return process_special_mode(event)
+        
+        # If no special mode or image processing request
+        logger.info("📸 No special mode found or image processing requested")
         
         # Find input data
         logger.info("🔍 Searching for input data...")
@@ -1253,9 +1303,27 @@ def handler(event):
         image_data_str = find_input_data_fast(event)
         
         if not image_data_str:
-            logger.error("❌ No input image data found")
-            logger.error(f"Event structure: {json.dumps(event, indent=2)[:500]}...")  # First 500 chars
-            raise ValueError("No input image data found")
+            # This might be a text-only request without special_mode set properly
+            # Check for text content as last resort
+            md_talk_content = find_text_content(event, 'md_talk')
+            design_point_content = find_text_content(event, 'design_point')
+            
+            if md_talk_content and design_point_content:
+                logger.info("📝 Found both text contents, assuming both_text_sections mode")
+                event['special_mode'] = 'both_text_sections'
+                return process_special_mode(event)
+            elif md_talk_content:
+                logger.info("📝 Found MD TALK content, assuming md_talk mode")
+                event['special_mode'] = 'md_talk'
+                return process_special_mode(event)
+            elif design_point_content:
+                logger.info("📝 Found DESIGN POINT content, assuming design_point mode")
+                event['special_mode'] = 'design_point'
+                return process_special_mode(event)
+            
+            logger.error("❌ No input image data or text content found")
+            logger.error(f"Event structure: {json.dumps(event, indent=2)[:1000]}...")
+            raise ValueError("No input image data or text content found")
         
         logger.info(f"✅ Found image data, length: {len(image_data_str)}")
         
