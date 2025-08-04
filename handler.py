@@ -818,15 +818,23 @@ def resize_image_proportional(image, target_width=1200, target_height=1560):
     return result
 
 def process_special_mode(job):
-    """Process special modes"""
+    """Process special modes - MD TALK and DESIGN POINT"""
     special_mode = job.get('special_mode', '')
     logger.info(f"🔤 Processing special mode: {special_mode}")
     
     if special_mode == 'both_text_sections':
-        md_talk_text = job.get('md_talk_content', '') or job.get('md_talk', '') or """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)"""
+        # Get text content from various possible keys
+        md_talk_text = (job.get('md_talk_content', '') or 
+                       job.get('md_talk', '') or 
+                       job.get('md_talk_text', '') or
+                       """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)""")
         
-        design_point_text = job.get('design_point_content', '') or job.get('design_point', '') or """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
+        design_point_text = (job.get('design_point_content', '') or 
+                            job.get('design_point', '') or
+                            job.get('design_point_text', '') or
+                            """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다.""")
         
+        # Ensure text is properly decoded
         if isinstance(md_talk_text, bytes):
             md_talk_text = md_talk_text.decode('utf-8', errors='replace')
         if isinstance(design_point_text, bytes):
@@ -835,9 +843,11 @@ def process_special_mode(job):
         md_talk_text = str(md_talk_text).strip()
         design_point_text = str(design_point_text).strip()
         
+        # Create sections
         md_section = create_md_talk_section(md_talk_text)
         design_section = create_design_point_section(design_point_text)
         
+        # Convert to base64
         md_base64 = image_to_base64(md_section, keep_transparency=False)
         design_base64 = image_to_base64(design_section, keep_transparency=False)
         
@@ -874,10 +884,15 @@ def process_special_mode(job):
         }
     
     elif special_mode == 'md_talk':
-        text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('md_talk', '')
+        # Get text content from various possible keys
+        text_content = (job.get('text_content', '') or 
+                       job.get('claude_text', '') or 
+                       job.get('md_talk', '') or
+                       job.get('md_talk_content', '') or
+                       job.get('md_talk_text', ''))
         
         if not text_content:
-            text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."""
+            text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다. 특별한 날은 물론 평범한 일상까지 모든 순간을 빛나게 만들어주는 당신만의 특별한 주얼리입니다."""
         
         if isinstance(text_content, bytes):
             text_content = text_content.decode('utf-8', errors='replace')
@@ -903,7 +918,12 @@ def process_special_mode(job):
         }
     
     elif special_mode == 'design_point':
-        text_content = job.get('text_content', '') or job.get('claude_text', '') or job.get('design_point', '')
+        # Get text content from various possible keys
+        text_content = (job.get('text_content', '') or 
+                       job.get('claude_text', '') or 
+                       job.get('design_point', '') or
+                       job.get('design_point_content', '') or
+                       job.get('design_point_text', ''))
         
         if not text_content:
             text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
@@ -956,18 +976,23 @@ def extract_file_number(filename: str) -> str:
     return None
 
 def find_input_data_fast(data):
-    """Find input data"""
+    """Find input data - improved search logic"""
+    # Direct string check
     if isinstance(data, str) and len(data) > 50:
         return data
     
     if isinstance(data, dict):
-        priority_keys = ['enhanced_image', 'image', 'image_base64', 'base64', 'img']
+        # Priority keys for image data
+        priority_keys = ['enhanced_image', 'image', 'image_base64', 'base64', 'img', 
+                        'input_image', 'original_image', 'base64_image']
         
+        # Check priority keys first
         for key in priority_keys:
             if key in data and isinstance(data[key], str) and len(data[key]) > 50:
                 return data[key]
         
-        for key in ['input', 'data', 'payload']:
+        # Check nested structures
+        for key in ['input', 'data', 'payload', 'body', 'request']:
             if key in data:
                 if isinstance(data[key], str) and len(data[key]) > 50:
                     return data[key]
@@ -976,46 +1001,75 @@ def find_input_data_fast(data):
                     if result:
                         return result
         
-        for i in range(10):
+        # Check numbered keys (for Make.com compatibility)
+        for i in range(20):  # Check up to 20 numbered keys
             key = str(i)
-            if key in data and isinstance(data[key], str) and len(data[key]) > 50:
-                return data[key]
+            if key in data:
+                if isinstance(data[key], str) and len(data[key]) > 50:
+                    return data[key]
+                elif isinstance(data[key], dict):
+                    # Check if this dict contains image data
+                    result = find_input_data_fast(data[key])
+                    if result:
+                        return result
+        
+        # Last resort - check all keys
+        for key, value in data.items():
+            if isinstance(value, str) and len(value) > 50 and 'base64' not in key.lower():
+                # Basic check if it looks like base64
+                if all(c in string.ascii_letters + string.digits + '+/=' for c in value[:100]):
+                    return value
     
     return None
 
 def find_filename_fast(data):
-    """Find filename"""
+    """Find filename - improved search"""
     if isinstance(data, dict):
-        for key in ['filename', 'file_name', 'name']:
+        # Direct filename keys
+        for key in ['filename', 'file_name', 'name', 'fileName']:
             if key in data and isinstance(data[key], str):
                 return data[key]
         
-        for key in ['input', 'data']:
+        # Check nested structures
+        for key in ['input', 'data', 'payload', 'body']:
             if key in data and isinstance(data[key], dict):
-                for subkey in ['filename', 'file_name', 'name']:
+                for subkey in ['filename', 'file_name', 'name', 'fileName']:
                     if subkey in data[key] and isinstance(data[key][subkey], str):
                         return data[key][subkey]
+        
+        # Check numbered keys
+        for i in range(20):
+            key = str(i)
+            if key in data and isinstance(data[key], dict):
+                result = find_filename_fast(data[key])
+                if result:
+                    return result
     
     return None
 
 def decode_base64_fast(base64_str: str) -> bytes:
-    """Fast base64 decode"""
+    """Fast base64 decode with padding support"""
     try:
         if not base64_str or len(base64_str) < 50:
             raise ValueError("Invalid base64 string")
         
+        # Remove data URI prefix if present
         if 'base64,' in base64_str:
             base64_str = base64_str.split('base64,')[-1]
         
+        # Remove whitespace
         base64_str = ''.join(base64_str.split())
         
+        # Remove invalid characters
         valid_chars = set(string.ascii_letters + string.digits + '+/=')
         base64_str = ''.join(c for c in base64_str if c in valid_chars)
         
+        # Try with existing padding first
         try:
             decoded = base64.b64decode(base64_str, validate=True)
             return decoded
         except:
+            # Add proper padding if needed
             no_pad = base64_str.rstrip('=')
             padding_needed = (4 - len(no_pad) % 4) % 4
             padded = no_pad + ('=' * padding_needed)
@@ -1035,17 +1089,28 @@ def handler(event):
         logger.info("✅ Phase 2: Focused precise removal (0.5-1s)")
         logger.info("✅ Expected total: 1-2s (vs 17s original)")
         
+        # Log input structure for debugging
+        logger.info(f"Input event type: {type(event)}")
+        if isinstance(event, dict):
+            logger.info(f"Input keys: {list(event.keys())[:10]}")  # First 10 keys
+        
         # Check for special mode first
         special_mode = event.get('special_mode', '')
         if special_mode in ['both_text_sections', 'md_talk', 'design_point']:
+            logger.info(f"📝 Special mode detected: {special_mode}")
             return process_special_mode(event)
         
         # Find input data
+        logger.info("🔍 Searching for input data...")
         filename = find_filename_fast(event)
         image_data_str = find_input_data_fast(event)
         
         if not image_data_str:
+            logger.error("❌ No input image data found")
+            logger.error(f"Event structure: {json.dumps(event, indent=2)[:500]}...")  # First 500 chars
             raise ValueError("No input image data found")
+        
+        logger.info(f"✅ Found image data, length: {len(image_data_str)}")
         
         # Decode and open image
         start_time = time.time()
@@ -1057,6 +1122,7 @@ def handler(event):
         
         decode_time = time.time() - start_time
         logger.info(f"⏱️ Image decode: {decode_time:.2f}s")
+        logger.info(f"📐 Original size: {image.size}")
         
         # STEP 1 & 2: Apply 2-phase processing (detection + removal combined)
         start_time = time.time()
@@ -1093,6 +1159,7 @@ def handler(event):
         output_filename = filename or "enhanced_image.png"
         file_number = extract_file_number(output_filename)
         
+        # Build response with proper structure for Make.com
         return {
             "output": {
                 "enhanced_image": enhanced_base64,
