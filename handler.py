@@ -20,18 +20,16 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Enhancement-V3-TwoPhase-KoreanFixed
+# VERSION: Enhancement-V3-Simplified-Korean
 ################################
 
-VERSION = "Enhancement-V3-TwoPhase-KoreanFixed"
+VERSION = "Enhancement-V3-Simplified-Korean"
 
 # Global rembg session with U2Net
 REMBG_SESSION = None
 
-# Korean font cache
-KOREAN_FONT_PATH = None
-FONT_CACHE = {}
-DEFAULT_FONT_CACHE = {}
+# Korean font
+KOREAN_FONT_PATH = "/tmp/NotoSansKR-Regular.ttf"
 
 def init_rembg_session():
     """Initialize rembg session with U2Net for faster processing"""
@@ -39,7 +37,6 @@ def init_rembg_session():
     if REMBG_SESSION is None:
         try:
             from rembg import new_session
-            # Use U2Net for faster processing
             REMBG_SESSION = new_session('u2net')
             logger.info("✅ U2Net session initialized")
         except Exception as e:
@@ -51,210 +48,59 @@ def init_rembg_session():
 init_rembg_session()
 
 def download_korean_font():
-    """Download and verify Korean font - FIXED VERSION"""
-    global KOREAN_FONT_PATH
-    
-    if KOREAN_FONT_PATH and os.path.exists(KOREAN_FONT_PATH):
+    """Simple Korean font download"""
+    if os.path.exists(KOREAN_FONT_PATH):
         return KOREAN_FONT_PATH
     
     try:
-        # Try multiple font options
-        font_options = [
-            {
-                'path': '/tmp/NotoSansKR-Regular.ttf',
-                'urls': [
-                    'https://github.com/google/fonts/raw/main/ofl/notosanskr/NotoSansKR-Regular.ttf',
-                    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR-Regular.ttf'
-                ]
-            },
-            {
-                'path': '/tmp/NanumGothic.ttf',
-                'urls': [
-                    'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
-                    'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf'
-                ]
-            },
-            {
-                'path': '/tmp/MalgunGothic.ttf',
-                'urls': [
-                    'https://github.com/codejamninja/fonts/raw/master/MalgunGothic.ttf'
-                ]
-            }
-        ]
+        url = 'https://github.com/google/fonts/raw/main/ofl/notosanskr/NotoSansKR-Regular.ttf'
+        response = requests.get(url, timeout=30)
         
-        for font_option in font_options:
-            font_path = font_option['path']
-            
-            # Check if already exists
-            if os.path.exists(font_path):
-                try:
-                    # Test font with Korean text
-                    test_font = ImageFont.truetype(font_path, 24)
-                    test_img = Image.new('RGB', (100, 50), 'white')
-                    test_draw = ImageDraw.Draw(test_img)
-                    test_draw.text((10, 10), "한글", font=test_font, fill='black')
-                    
-                    KOREAN_FONT_PATH = font_path
-                    logger.info(f"✅ Korean font loaded from cache: {font_path}")
-                    return font_path
-                except Exception as e:
-                    logger.error(f"Cached font verification failed: {e}")
-                    os.remove(font_path)
-                    continue
-            
-            # Try downloading
-            for url in font_option['urls']:
-                try:
-                    logger.info(f"Downloading font from: {url}")
-                    response = requests.get(url, timeout=60, headers={'User-Agent': 'Mozilla/5.0'})
-                    
-                    if response.status_code == 200 and len(response.content) > 100000:
-                        with open(font_path, 'wb') as f:
-                            f.write(response.content)
-                        
-                        # Verify font with Korean text
-                        test_font = ImageFont.truetype(font_path, 24)
-                        test_img = Image.new('RGB', (100, 50), 'white')
-                        test_draw = ImageDraw.Draw(test_img)
-                        test_draw.text((10, 10), "한글테스트", font=test_font, fill='black')
-                        
-                        KOREAN_FONT_PATH = font_path
-                        logger.info(f"✅ Korean font downloaded and verified: {font_path}")
-                        return font_path
-                except Exception as e:
-                    logger.error(f"Font download attempt failed: {e}")
-                    continue
-        
-        logger.error("❌ All font download attempts failed")
-        return None
-        
-    except Exception as e:
-        logger.error(f"❌ Font error: {e}")
-        return None
+        if response.status_code == 200:
+            with open(KOREAN_FONT_PATH, 'wb') as f:
+                f.write(response.content)
+            logger.info(f"✅ Korean font downloaded")
+            return KOREAN_FONT_PATH
+    except:
+        pass
+    
+    return None
 
-def get_font(size, force_korean=True):
-    """Get font with Korean support - IMPROVED"""
-    global KOREAN_FONT_PATH, FONT_CACHE
+def get_font(size):
+    """Get font - simplified"""
+    download_korean_font()
     
-    cache_key = f"{size}_{force_korean}"
-    if cache_key in FONT_CACHE:
-        return FONT_CACHE[cache_key]
-    
-    font = None
-    
-    if force_korean:
-        # Try to download Korean font if not available
-        if not KOREAN_FONT_PATH:
-            download_korean_font()
-        
-        if KOREAN_FONT_PATH and os.path.exists(KOREAN_FONT_PATH):
-            try:
-                font = ImageFont.truetype(KOREAN_FONT_PATH, size)
-                logger.info(f"✅ Korean font loaded size={size}")
-            except Exception as e:
-                logger.error(f"❌ Korean font loading failed: {e}")
-                font = None
-    
-    if font is None:
-        # Try system fonts with better Korean support
-        system_fonts = [
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.otf",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-        ]
-        
-        for font_path in system_fonts:
-            if os.path.exists(font_path):
-                try:
-                    font = ImageFont.truetype(font_path, size)
-                    logger.info(f"✅ System font loaded: {font_path}")
-                    break
-                except:
-                    continue
-        
-        if font is None:
-            # Last resort - use default font but warn about Korean
-            font = ImageFont.load_default()
-            logger.warning("⚠️ Using default font - Korean will not display properly!")
-    
-    FONT_CACHE[cache_key] = font
-    return font
-
-def safe_draw_text(draw, position, text, font, fill):
-    """Safely draw Korean text with better error handling"""
-    try:
-        if not text:
-            return
-        
-        # Ensure text is properly encoded UTF-8
-        if isinstance(text, bytes):
-            text = text.decode('utf-8', errors='replace')
-        else:
-            text = str(text)
-        
-        # Normalize unicode
-        import unicodedata
-        text = unicodedata.normalize('NFC', text)
-        
-        text = text.strip()
-        if not text:
-            return
-        
-        # Try to draw text
-        draw.text(position, text, font=font, fill=fill)
-        
-    except Exception as e:
-        logger.error(f"Text drawing error: {e}")
-        # Fallback - try to draw with ASCII only
+    if os.path.exists(KOREAN_FONT_PATH):
         try:
-            ascii_text = text.encode('ascii', 'replace').decode('ascii')
-            draw.text(position, ascii_text, font=font, fill=fill)
-        except Exception as e2:
-            logger.error(f"Fallback text drawing also failed: {e2}")
+            return ImageFont.truetype(KOREAN_FONT_PATH, size)
+        except:
+            pass
+    
+    # Fallback to system fonts
+    for font_path in [
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    ]:
+        if os.path.exists(font_path):
+            try:
+                return ImageFont.truetype(font_path, size)
+            except:
+                pass
+    
+    return ImageFont.load_default()
 
 def get_text_size(draw, text, font):
-    """Get text size with compatibility for different PIL versions"""
+    """Get text size"""
     try:
-        if not text or not font:
-            return (0, 0)
-        
-        if isinstance(text, bytes):
-            text = text.decode('utf-8', errors='replace')
-        
-        # Normalize unicode
-        import unicodedata
-        text = unicodedata.normalize('NFC', str(text)).strip()
-        
-        if not text:
-            return (0, 0)
-        
-        # Try new method first (PIL 8+)
-        try:
-            bbox = draw.textbbox((0, 0), text, font=font)
-            return (bbox[2] - bbox[0], bbox[3] - bbox[1])
-        except AttributeError:
-            # Fall back to old method
-            return draw.textsize(text, font=font)
-    except Exception as e:
-        logger.error(f"Error getting text size: {e}")
-        # Return reasonable default size based on character count
-        return (len(text) * 20, 30)
+        # Try new method first
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return (bbox[2] - bbox[0], bbox[3] - bbox[1])
+    except AttributeError:
+        # Old method
+        return draw.textsize(text, font=font)
 
 def wrap_text(text, font, max_width, draw):
-    """Wrap text to fit within max_width with better handling"""
-    if not text or not font:
-        return []
-    
-    if isinstance(text, bytes):
-        text = text.decode('utf-8', errors='replace')
-    
-    # Normalize unicode
-    import unicodedata
-    text = unicodedata.normalize('NFC', str(text)).strip()
-    
+    """Simple text wrapping"""
     lines = []
     paragraphs = text.split('\n')
     
@@ -263,43 +109,33 @@ def wrap_text(text, font, max_width, draw):
             lines.append('')
             continue
         
-        # For Korean text, we might need to split by characters instead of words
         words = paragraph.split()
         if not words:
-            # If no spaces (common in Korean), split by characters
-            words = list(paragraph)
+            words = list(paragraph)  # For Korean
         
         current_line = []
         
         for word in words:
             test_line = ' '.join(current_line + [word]) if current_line else word
-            try:
-                width, _ = get_text_size(draw, test_line, font)
-            except:
-                width = len(test_line) * 20  # Fallback estimate
+            width, _ = get_text_size(draw, test_line, font)
             
             if width <= max_width:
                 current_line.append(word)
             else:
                 if current_line:
-                    lines.append(' '.join(current_line) if len(current_line) > 1 else current_line[0])
+                    lines.append(' '.join(current_line))
                     current_line = [word]
                 else:
-                    # Word is too long, add it anyway
                     lines.append(word)
-                    current_line = []
         
         if current_line:
-            lines.append(' '.join(current_line) if len(current_line) > 1 else current_line[0])
+            lines.append(' '.join(current_line))
     
     return lines
 
 def create_md_talk_section(text_content=None, width=1200):
-    """Create MD TALK section with FIXED Korean support"""
-    logger.info("🔤 Creating MD TALK section with FIXED Korean support")
-    
-    # Ensure Korean font is available
-    download_korean_font()
+    """Create MD TALK section - simplified"""
+    logger.info("🔤 Creating MD TALK section")
     
     fixed_width = 1200
     fixed_height = 400
@@ -309,75 +145,49 @@ def create_md_talk_section(text_content=None, width=1200):
     top_margin = 60
     content_width = fixed_width - left_margin - right_margin
     
-    # Get fonts with better error handling
-    title_font = get_font(48, force_korean=True)
-    body_font = get_font(28, force_korean=True)
+    # Get fonts
+    title_font = get_font(48)
+    body_font = get_font(28)
     
-    # Create white background image
+    # Create white background
     section_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
     draw = ImageDraw.Draw(section_img)
     
     # Title
     title = "MD TALK"
-    try:
-        title_width, title_height = get_text_size(draw, title, title_font)
-        title_x = (fixed_width - title_width) // 2
-        safe_draw_text(draw, (title_x, top_margin), title, title_font, (40, 40, 40))
-    except Exception as e:
-        logger.error(f"Title drawing error: {e}")
-        title_height = 50
+    title_width, title_height = get_text_size(draw, title, title_font)
+    title_x = (fixed_width - title_width) // 2
+    draw.text((title_x, top_margin), title, font=title_font, fill=(40, 40, 40))
     
     # Text content
     if text_content and text_content.strip():
-        # Clean text - remove title if included
         text = text_content.replace('MD TALK', '').replace('MD Talk', '').strip()
     else:
         text = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다. 특별한 날은 물론 평범한 일상까지 모든 순간을 빛나게 만들어주는 당신만의 특별한 주얼리입니다."""
     
-    # Ensure text is properly encoded
-    if isinstance(text, bytes):
-        text = text.decode('utf-8', errors='replace')
-    
-    # Normalize unicode
-    import unicodedata
-    text = unicodedata.normalize('NFC', str(text)).strip()
-    
-    logger.info(f"MD TALK text (first 50 chars): {text[:50]}...")
-    logger.info(f"Text encoding: UTF-8, Length: {len(text)}")
-    
     # Wrap text
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
     
-    # Calculate positions
+    # Draw text
     line_height = 45
     title_bottom_margin = 60
     y_pos = top_margin + title_height + title_bottom_margin
     
-    # Draw body text
     for line in wrapped_lines:
         if line:
-            try:
-                line_width, _ = get_text_size(draw, line, body_font)
-                line_x = (fixed_width - line_width) // 2
-            except:
-                line_x = left_margin
-            
-            safe_draw_text(draw, (line_x, y_pos), line, body_font, (80, 80, 80))
+            line_width, _ = get_text_size(draw, line, body_font)
+            line_x = (fixed_width - line_width) // 2
+            draw.text((line_x, y_pos), line, font=body_font, fill=(80, 80, 80))
             y_pos += line_height
             
-            # Prevent text overflow
             if y_pos > fixed_height - 50:
                 break
     
-    logger.info(f"✅ MD TALK section created: {fixed_width}x{fixed_height}")
     return section_img
 
 def create_design_point_section(text_content=None, width=1200):
-    """Create DESIGN POINT section with FIXED Korean support"""
-    logger.info("🔤 Creating DESIGN POINT section with FIXED Korean support")
-    
-    # Ensure Korean font is available
-    download_korean_font()
+    """Create DESIGN POINT section - simplified"""
+    logger.info("🔤 Creating DESIGN POINT section")
     
     fixed_width = 1200
     fixed_height = 350
@@ -387,126 +197,90 @@ def create_design_point_section(text_content=None, width=1200):
     top_margin = 60
     content_width = fixed_width - left_margin - right_margin
     
-    # Get fonts with better error handling
-    title_font = get_font(48, force_korean=True)
-    body_font = get_font(24, force_korean=True)
+    # Get fonts
+    title_font = get_font(48)
+    body_font = get_font(24)
     
-    # Create white background image
+    # Create white background
     section_img = Image.new('RGB', (fixed_width, fixed_height), '#FFFFFF')
     draw = ImageDraw.Draw(section_img)
     
     # Title
     title = "DESIGN POINT"
-    try:
-        title_width, title_height = get_text_size(draw, title, title_font)
-        title_x = (fixed_width - title_width) // 2
-        safe_draw_text(draw, (title_x, top_margin), title, title_font, (40, 40, 40))
-    except Exception as e:
-        logger.error(f"Title drawing error: {e}")
-        title_height = 50
+    title_width, title_height = get_text_size(draw, title, title_font)
+    title_x = (fixed_width - title_width) // 2
+    draw.text((title_x, top_margin), title, font=title_font, fill=(40, 40, 40))
     
     # Text content
     if text_content and text_content.strip():
-        # Clean text - remove title if included
         text = text_content.replace('DESIGN POINT', '').replace('Design Point', '').strip()
     else:
         text = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일 화려하면서도 고급스러운 반짝임을 표현합니다"""
     
-    # Ensure text is properly encoded
-    if isinstance(text, bytes):
-        text = text.decode('utf-8', errors='replace')
-    
-    # Normalize unicode
-    import unicodedata
-    text = unicodedata.normalize('NFC', str(text)).strip()
-    
-    logger.info(f"DESIGN POINT text (first 50 chars): {text[:50]}...")
-    logger.info(f"Text encoding: UTF-8, Length: {len(text)}")
-    
     # Wrap text
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
     
-    # Calculate positions
+    # Draw text
     line_height = 40
     title_bottom_margin = 70
     y_pos = top_margin + title_height + title_bottom_margin
     
-    # Draw body text
     for line in wrapped_lines:
         if line:
-            try:
-                line_width, _ = get_text_size(draw, line, body_font)
-                line_x = (fixed_width - line_width) // 2
-            except:
-                line_x = left_margin
-            
-            safe_draw_text(draw, (line_x, y_pos), line, body_font, (80, 80, 80))
+            line_width, _ = get_text_size(draw, line, body_font)
+            line_x = (fixed_width - line_width) // 2
+            draw.text((line_x, y_pos), line, font=body_font, fill=(80, 80, 80))
             y_pos += line_height
             
-            # Prevent text overflow
             if y_pos > fixed_height - 50:
                 break
     
-    logger.info(f"✅ DESIGN POINT section created: {fixed_width}x{fixed_height}")
     return section_img
 
 def find_special_mode(data, path=""):
-    """Find special mode in nested data structures with deep search"""
+    """Find special mode in nested data structures"""
     if isinstance(data, str):
         if data in ['both_text_sections', 'md_talk', 'design_point']:
-            logger.info(f"✅ Found special_mode as string at {path}: {data}")
             return data
         return None
     
     if isinstance(data, dict):
-        # Direct check
         if 'special_mode' in data and data['special_mode']:
-            logger.info(f"✅ Found special_mode at {path}.special_mode: {data['special_mode']}")
             return data['special_mode']
         
-        # Check all keys recursively
         for key, value in data.items():
-            new_path = f"{path}.{key}" if path else key
-            
-            # Skip keys that are definitely not special_mode
             if key in ['enhanced_image', 'image', 'base64', 'image_base64'] and isinstance(value, str) and len(value) > 1000:
                 continue
                 
             if isinstance(value, dict):
-                result = find_special_mode(value, new_path)
+                result = find_special_mode(value, f"{path}.{key}")
                 if result:
                     return result
             elif isinstance(value, str) and value in ['both_text_sections', 'md_talk', 'design_point']:
-                logger.info(f"✅ Found special_mode at {new_path}: {value}")
                 return value
             elif isinstance(value, list):
                 for i, item in enumerate(value):
-                    result = find_special_mode(item, f"{new_path}[{i}]")
+                    result = find_special_mode(item, f"{path}.{key}[{i}]")
                     if result:
                         return result
     
     return None
 
 def find_text_content(data, content_type):
-    """Find text content for MD TALK or DESIGN POINT with deep search"""
+    """Find text content for MD TALK or DESIGN POINT"""
     if isinstance(data, dict):
-        # Keys to search for based on content type
         if content_type == 'md_talk':
-            keys = ['md_talk_content', 'md_talk', 'md_talk_text', 'text_content', 'claude_text', 'mdtalk', 'MD_TALK']
+            keys = ['md_talk_content', 'md_talk', 'md_talk_text', 'text_content', 'claude_text']
         elif content_type == 'design_point':
-            keys = ['design_point_content', 'design_point', 'design_point_text', 'text_content', 'claude_text', 'designpoint', 'DESIGN_POINT']
+            keys = ['design_point_content', 'design_point', 'design_point_text', 'text_content', 'claude_text']
         else:
             keys = ['text_content', 'claude_text', 'text']
         
-        # Direct check
         for key in keys:
             if key in data and isinstance(data[key], str) and data[key].strip():
-                logger.info(f"✅ Found {content_type} content at key: {key}")
                 return data[key]
         
-        # Check all keys recursively
         for key, value in data.items():
-            # Skip image data
             if key in ['enhanced_image', 'image', 'base64', 'image_base64'] and isinstance(value, str) and len(value) > 1000:
                 continue
                 
@@ -524,15 +298,11 @@ def find_text_content(data, content_type):
     return None
 
 def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
-    """
-    PHASE 1: Fast Ring Detection - 빠른 링 위치 파악
-    Returns: List of ring candidates with location and size
-    """
+    """PHASE 1: Fast Ring Detection"""
     try:
         logger.info("🎯 PHASE 1: Fast Ring Detection Started")
         start_time = time.time()
         
-        # Convert to numpy array
         if image.mode != 'RGB':
             image_rgb = image.convert('RGB')
         else:
@@ -542,21 +312,17 @@ def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
         gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         
         h, w = gray.shape
-        logger.info(f"Image size: {w}x{h}")
         
-        # 1. Quick Circular Detection (Hough Circles)
-        # Use loose parameters for speed
-        min_radius = int(min(h, w) * 0.05)  # 5% of image
-        max_radius = int(min(h, w) * 0.4)   # 40% of image
+        min_radius = int(min(h, w) * 0.05)
+        max_radius = int(min(h, w) * 0.4)
         
-        logger.info("🔍 Running fast Hough Circle detection...")
         circles = cv2.HoughCircles(
             gray, 
             cv2.HOUGH_GRADIENT,
-            dp=2,               # Lower = more accurate but slower
-            minDist=min_radius * 2,  # Prevent overlapping detections
-            param1=100,         # Edge detection threshold
-            param2=50,          # Circle detection threshold (lower = more circles)
+            dp=2,
+            minDist=min_radius * 2,
+            param1=100,
+            param2=50,
             minRadius=min_radius,
             maxRadius=max_radius
         )
@@ -565,16 +331,11 @@ def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
         
         if circles is not None:
             circles = np.uint16(np.around(circles))
-            logger.info(f"Found {len(circles[0])} circular candidates")
             
-            # Quick filtering based on basic criteria
             for i, (x, y, r) in enumerate(circles[0]):
-                # Basic size check
                 if r < min_radius or r > max_radius:
                     continue
                     
-                # Quick check for ring-like properties
-                # Extract region around circle
                 y1 = max(0, y - r - 10)
                 y2 = min(h, y + r + 10)
                 x1 = max(0, x - r - 10)
@@ -582,21 +343,14 @@ def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
                 
                 region = gray[y1:y2, x1:x2]
                 
-                # Simple brightness variance check
-                # Rings usually have contrast between center and edge
                 center_mask = np.zeros_like(region)
-                cv2.circle(center_mask, 
-                          (x - x1, y - y1), 
-                          int(r * 0.5), 
-                          255, -1)
+                cv2.circle(center_mask, (x - x1, y - y1), int(r * 0.5), 255, -1)
                 
                 center_brightness = np.mean(region[center_mask > 0]) if np.any(center_mask > 0) else 0
                 edge_brightness = np.mean(region[center_mask == 0]) if np.any(center_mask == 0) else 0
                 
                 brightness_diff = abs(center_brightness - edge_brightness)
-                
-                # Quick score calculation
-                score = brightness_diff / 255.0  # Normalize to 0-1
+                score = brightness_diff / 255.0
                 
                 ring_candidates.append({
                     'id': i,
@@ -608,30 +362,21 @@ def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
                     'type': 'circle'
                 })
         
-        # 2. Quick Edge-based Detection (Backup method)
         if len(ring_candidates) < 3:
-            logger.info("⚡ Running quick edge detection...")
-            
-            # Single edge detection pass
             edges = cv2.Canny(gray, 50, 150)
-            
-            # Find contours
             contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            # Quick contour filtering
-            for contour in contours[:50]:  # Limit to top 50 for speed
+            for contour in contours[:50]:
                 area = cv2.contourArea(contour)
                 if area < 500 or area > (h * w * 0.5):
                     continue
                 
-                # Fit ellipse if possible
                 if len(contour) >= 5:
                     try:
                         ellipse = cv2.fitEllipse(contour)
                         center, (width, height), angle = ellipse
                         
-                        # Quick circularity check
-                        if 0.7 < width/height < 1.3:  # Roughly circular
+                        if 0.7 < width/height < 1.3:
                             radius = int((width + height) / 4)
                             if min_radius < radius < max_radius:
                                 x, y = int(center[0]), int(center[1])
@@ -639,7 +384,7 @@ def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
                                     'id': len(ring_candidates),
                                     'center': (x, y),
                                     'radius': radius,
-                                    'score': 0.5,  # Default score
+                                    'score': 0.5,
                                     'bbox': (max(0, x-radius-10), 
                                            max(0, y-radius-10),
                                            min(w, x+radius+10),
@@ -650,24 +395,19 @@ def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
                     except:
                         continue
         
-        # Sort by score and limit candidates
         ring_candidates.sort(key=lambda x: x['score'], reverse=True)
         ring_candidates = ring_candidates[:max_candidates]
         
         elapsed = time.time() - start_time
         logger.info(f"✅ Phase 1 complete in {elapsed:.2f}s")
-        logger.info(f"📊 Found {len(ring_candidates)} ring candidates")
         
-        # Add metadata
-        detection_result = {
+        return {
             'candidates': ring_candidates,
             'image_size': (w, h),
             'detection_time': elapsed,
             'method': 'fast_detection',
             'total_candidates': len(ring_candidates)
         }
-        
-        return detection_result
         
     except Exception as e:
         logger.error(f"Fast ring detection failed: {e}")
@@ -680,45 +420,32 @@ def fast_ring_detection_phase1(image: Image.Image, max_candidates=20):
         }
 
 def precise_ring_removal_phase2(image: Image.Image, detection_result: dict):
-    """
-    PHASE 2: Precise Background Removal - 감지된 링 영역만 정밀 처리
-    Uses detection results from Phase 1 to focus processing
-    """
+    """PHASE 2: Precise Background Removal"""
     try:
         from rembg import remove
         
         logger.info("✨ PHASE 2: Precise Ring Removal Started")
         start_time = time.time()
         
-        # Get candidates from Phase 1
         candidates = detection_result.get('candidates', [])
         if not candidates:
             logger.warning("No ring candidates found, applying general removal")
             return u2net_original_optimized_removal(image)
         
-        logger.info(f"Processing {len(candidates)} ring candidates")
-        
-        # Ensure RGBA
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
         
-        # Initialize session if needed
         global REMBG_SESSION
         if REMBG_SESSION is None:
             REMBG_SESSION = init_rembg_session()
         
-        # Create working copies
         r, g, b, a = image.split()
         alpha_array = np.array(a, dtype=np.uint8)
         rgb_array = np.array(image.convert('RGB'))
         
-        # Process each ring candidate with precision
         processed_rings = []
         
-        for i, candidate in enumerate(candidates[:10]):  # Process top 10 candidates
-            logger.info(f"🔍 Processing ring {i+1}/{min(len(candidates), 10)}")
-            
-            # Extract ring region with margin
+        for i, candidate in enumerate(candidates[:10]):
             x1, y1, x2, y2 = candidate['bbox']
             margin = 20
             x1 = max(0, x1 - margin)
@@ -726,77 +453,62 @@ def precise_ring_removal_phase2(image: Image.Image, detection_result: dict):
             x2 = min(image.width, x2 + margin)
             y2 = min(image.height, y2 + margin)
             
-            # Crop region
             ring_region = image.crop((x1, y1, x2, y2))
             
-            # Apply high-quality removal to this region only
             buffered = BytesIO()
             ring_region.save(buffered, format="PNG")
             buffered.seek(0)
             
-            # Use highest quality settings for small region
             output = remove(
                 buffered.getvalue(),
                 session=REMBG_SESSION,
                 alpha_matting=True,
-                alpha_matting_foreground_threshold=240,  # More aggressive
+                alpha_matting_foreground_threshold=240,
                 alpha_matting_background_threshold=50,
                 alpha_matting_erode_size=10,
                 only_mask=False,
                 post_process_mask=True
             )
             
-            # Process the result
             processed_region = Image.open(BytesIO(output))
             if processed_region.mode != 'RGBA':
                 processed_region = processed_region.convert('RGBA')
             
-            # Extract alpha channel
             _, _, _, region_alpha = processed_region.split()
             region_alpha_array = np.array(region_alpha)
             
-            # Precise ring hole detection for this candidate
             cx, cy = candidate['center']
             radius = candidate['radius']
             inner_radius = candidate['inner_radius']
             
-            # Convert to local coordinates
             local_cx = cx - x1
             local_cy = cy - y1
             
-            # Create precise hole mask
             hole_mask = np.zeros_like(region_alpha_array)
             cv2.circle(hole_mask, (local_cx, local_cy), inner_radius, 255, -1)
             
-            # Check if center is bright (likely a hole)
             region_gray = cv2.cvtColor(np.array(ring_region.convert('RGB')), cv2.COLOR_RGB2GRAY)
             center_brightness = np.mean(
                 region_gray[max(0, local_cy-10):min(region_gray.shape[0], local_cy+10),
                            max(0, local_cx-10):min(region_gray.shape[1], local_cx+10)]
             )
             
-            if center_brightness > 230:  # Very bright center
-                # Apply hole
+            if center_brightness > 230:
                 region_alpha_array[hole_mask > 0] = 0
                 
-                # Smooth transition
                 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
                 dilated = cv2.dilate(hole_mask, kernel, iterations=2)
                 transition = (dilated > 0) & (hole_mask == 0)
                 region_alpha_array[transition] = region_alpha_array[transition] // 2
             
-            # Advanced edge refinement
-            # Bilateral filter for edge preservation
             region_alpha_array = cv2.bilateralFilter(region_alpha_array, 9, 75, 75)
             
-            # Apply sigmoid for sharp edges
             alpha_float = region_alpha_array.astype(np.float32) / 255.0
-            k = 150  # Sharpness
+            k = 150
             threshold = 0.5
             alpha_float = 1 / (1 + np.exp(-k * (alpha_float - threshold)))
             region_alpha_array = (alpha_float * 255).astype(np.uint8)
             
-            # Store processed ring info
             processed_rings.append({
                 'bbox': (x1, y1, x2, y2),
                 'alpha': region_alpha_array,
@@ -805,55 +517,41 @@ def precise_ring_removal_phase2(image: Image.Image, detection_result: dict):
                 'has_hole': center_brightness > 230
             })
             
-            # Apply to main alpha channel
             alpha_array[y1:y2, x1:x2] = region_alpha_array
         
-        # Process remaining background (areas outside rings)
-        # Create mask for processed areas
         processed_mask = np.zeros_like(alpha_array)
         for ring in processed_rings:
             x1, y1, x2, y2 = ring['bbox']
             processed_mask[y1:y2, x1:x2] = 255
         
-        # Quick removal for unprocessed areas
         if np.any(processed_mask == 0):
-            logger.info("🌟 Processing background areas...")
-            
-            # Simple threshold for non-ring areas
             gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
             hsv = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2HSV)
             h, s, v = hsv[:,:,0], hsv[:,:,1], hsv[:,:,2]
             
-            # Background detection
             is_background = (
-                ((gray > 240) | (gray < 20)) |  # Very bright or dark
-                ((s < 30) & (v > 200)) |  # Low saturation, high brightness
-                ((s < 20) & (v < 50))     # Low saturation, low brightness
+                ((gray > 240) | (gray < 20)) |
+                ((s < 30) & (v > 200)) |
+                ((s < 20) & (v < 50))
             )
             
-            # Apply to unprocessed areas only
             unprocessed = processed_mask == 0
             alpha_array[unprocessed & is_background] = 0
         
-        # Final global cleanup
-        # Remove small isolated components
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         alpha_binary = (alpha_array > 128).astype(np.uint8)
         alpha_cleaned = cv2.morphologyEx(alpha_binary, cv2.MORPH_OPEN, kernel)
         alpha_cleaned = cv2.morphologyEx(alpha_cleaned, cv2.MORPH_CLOSE, kernel)
         
-        # Restore smooth edges
         alpha_array = cv2.GaussianBlur(alpha_array, (3, 3), 0.5)
         alpha_array[alpha_cleaned == 0] = 0
         
-        # Create final image
         a_new = Image.fromarray(alpha_array)
         result = Image.merge('RGBA', (r, g, b, a_new))
         
         elapsed = time.time() - start_time
         logger.info(f"✅ Phase 2 complete in {elapsed:.2f}s")
         
-        # Return with metadata
         return {
             'image': result,
             'processed_rings': len(processed_rings),
@@ -864,7 +562,6 @@ def precise_ring_removal_phase2(image: Image.Image, detection_result: dict):
         
     except Exception as e:
         logger.error(f"Precise removal failed: {e}")
-        # Fallback to general removal
         return {
             'image': u2net_original_optimized_removal(image),
             'error': str(e),
@@ -872,34 +569,26 @@ def precise_ring_removal_phase2(image: Image.Image, detection_result: dict):
         }
 
 def combined_two_phase_processing(image: Image.Image):
-    """
-    Combined 2-phase processing: Fast detection → Precise removal
-    """
+    """Combined 2-phase processing"""
     logger.info("🚀 Starting 2-Phase Ring Processing")
     total_start = time.time()
     
-    # PHASE 1: Fast Detection
     detection_result = fast_ring_detection_phase1(image, max_candidates=15)
-    
-    # PHASE 2: Precise Removal
     removal_result = precise_ring_removal_phase2(image, detection_result)
     
     total_elapsed = time.time() - total_start
     
-    # Extract image from result
     if isinstance(removal_result, dict) and 'image' in removal_result:
         result_image = removal_result['image']
     else:
         result_image = removal_result
     
     logger.info(f"✨ Total processing time: {total_elapsed:.2f}s")
-    logger.info(f"📊 Detection: {detection_result['detection_time']:.2f}s")
-    logger.info(f"📊 Removal: {removal_result.get('processing_time', 0):.2f}s")
     
     return result_image
 
 def u2net_original_optimized_removal(image: Image.Image) -> Image.Image:
-    """Original optimized removal method (fallback)"""
+    """Original optimized removal method"""
     try:
         from rembg import remove
         
@@ -909,27 +598,22 @@ def u2net_original_optimized_removal(image: Image.Image) -> Image.Image:
             if REMBG_SESSION is None:
                 return image
         
-        logger.info("🚀 U2Net Original Optimized")
-        
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
         
-        # Minimal pre-processing (faster)
         contrast = ImageEnhance.Contrast(image)
         image_enhanced = contrast.enhance(1.3)
         
-        # Save to buffer with lower compression (faster)
         buffered = BytesIO()
         image_enhanced.save(buffered, format="PNG", compress_level=1)
         buffered.seek(0)
         img_data = buffered.getvalue()
         
-        # Apply U2Net with balanced settings
         output = remove(
             img_data,
             session=REMBG_SESSION,
             alpha_matting=True,
-            alpha_matting_foreground_threshold=270,  # Balanced threshold
+            alpha_matting_foreground_threshold=270,
             alpha_matting_background_threshold=0,
             alpha_matting_erode_size=0,
             only_mask=False,
@@ -950,31 +634,18 @@ def u2net_original_optimized_removal(image: Image.Image) -> Image.Image:
         return image
 
 def u2net_optimized_removal(image: Image.Image) -> Image.Image:
-    """
-    NEW: 2-Phase optimized removal
-    """
+    """2-Phase optimized removal"""
     try:
-        logger.info("🚀 Starting 2-Phase Optimized Removal")
-        
-        # Use the new 2-phase approach
         result = combined_two_phase_processing(image)
         
         if result and result.mode == 'RGBA':
             return result
         else:
-            # Fallback to original method
             return u2net_original_optimized_removal(image)
             
     except Exception as e:
         logger.error(f"2-Phase removal failed: {e}")
-        # Fallback to original optimized method
         return u2net_original_optimized_removal(image)
-
-def ensure_ring_holes_transparent_optimized(image: Image.Image) -> Image.Image:
-    """Ring hole detection - now integrated in Phase 2"""
-    # This is now handled within the 2-phase processing
-    # Keeping for compatibility
-    return image
 
 def image_to_base64(image, keep_transparency=True):
     """Convert to base64 WITH padding"""
@@ -1024,77 +695,43 @@ def process_special_mode(job):
     """Process special modes - MD TALK and DESIGN POINT"""
     special_mode = job.get('special_mode', '')
     
-    # If special_mode is not found in job, try to find it again
     if not special_mode:
         special_mode = find_special_mode(job)
     
     logger.info(f"🔤 Processing special mode: '{special_mode}'")
     
-    # Validate special_mode
     if not special_mode or special_mode not in ['both_text_sections', 'md_talk', 'design_point']:
-        logger.error(f"❌ Invalid special mode: '{special_mode}'")
-        logger.info("📋 Valid modes: both_text_sections, md_talk, design_point")
-        
-        # Try to auto-detect based on content
         md_talk_content = find_text_content(job, 'md_talk')
         design_point_content = find_text_content(job, 'design_point')
         
         if md_talk_content and design_point_content:
-            logger.info("📝 Auto-detected: both_text_sections")
             special_mode = 'both_text_sections'
         elif md_talk_content:
-            logger.info("📝 Auto-detected: md_talk")
             special_mode = 'md_talk'
         elif design_point_content:
-            logger.info("📝 Auto-detected: design_point")
             special_mode = 'design_point'
         else:
             return {
                 "output": {
-                    "error": f"Invalid or missing special mode. Got: '{special_mode}'. Valid modes: both_text_sections, md_talk, design_point",
+                    "error": f"Invalid or missing special mode",
                     "status": "error",
-                    "version": VERSION,
-                    "debug_info": {
-                        "special_mode_found": special_mode,
-                        "md_talk_content_found": bool(md_talk_content),
-                        "design_point_content_found": bool(design_point_content)
-                    }
+                    "version": VERSION
                 }
             }
     
-    # Ensure Korean font is downloaded before processing
-    download_korean_font()
-    
     if special_mode == 'both_text_sections':
-        # Find text content with improved search
         md_talk_text = find_text_content(job, 'md_talk')
         design_point_text = find_text_content(job, 'design_point')
         
-        # Default texts if not found
         if not md_talk_text:
             md_talk_text = """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다 :)"""
         
         if not design_point_text:
             design_point_text = """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
         
-        # Ensure text is properly decoded
-        if isinstance(md_talk_text, bytes):
-            md_talk_text = md_talk_text.decode('utf-8', errors='replace')
-        if isinstance(design_point_text, bytes):
-            design_point_text = design_point_text.decode('utf-8', errors='replace')
-        
-        md_talk_text = str(md_talk_text).strip()
-        design_point_text = str(design_point_text).strip()
-        
-        logger.info(f"✅ Creating both Korean sections")
-        logger.info(f"MD TALK text: {md_talk_text[:50]}...")
-        logger.info(f"DESIGN POINT text: {design_point_text[:50]}...")
-        
-        # Create sections with verified Korean font
         md_section = create_md_talk_section(md_talk_text)
         design_section = create_design_point_section(design_point_text)
         
-        # Convert to base64
         md_base64 = image_to_base64(md_section, keep_transparency=False)
         design_base64 = image_to_base64(design_section, keep_transparency=False)
         
@@ -1125,26 +762,15 @@ def process_special_mode(job):
                 "sections_included": ["MD_TALK", "DESIGN_POINT"],
                 "version": VERSION,
                 "status": "success",
-                "korean_encoding": "UTF-8",
-                "korean_font_verified": True,
-                "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED"
             }
         }
     
     elif special_mode == 'md_talk':
-        # Find text content with improved search
         text_content = find_text_content(job, 'md_talk')
         
         if not text_content:
             text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다. 특별한 날은 물론 평범한 일상까지 모든 순간을 빛나게 만들어주는 당신만의 특별한 주얼리입니다."""
-        
-        if isinstance(text_content, bytes):
-            text_content = text_content.decode('utf-8', errors='replace')
-        text_content = str(text_content).strip()
-        
-        logger.info(f"✅ Creating MD TALK section")
-        logger.info(f"Text: {text_content[:50]}...")
         
         section_image = create_md_talk_section(text_content)
         section_base64 = image_to_base64(section_image, keep_transparency=False)
@@ -1161,25 +787,15 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "korean_font_verified": True,
-                "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED"
             }
         }
     
     elif special_mode == 'design_point':
-        # Find text content with improved search
         text_content = find_text_content(job, 'design_point')
         
         if not text_content:
             text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
-        
-        if isinstance(text_content, bytes):
-            text_content = text_content.decode('utf-8', errors='replace')
-        text_content = str(text_content).strip()
-        
-        logger.info(f"✅ Creating DESIGN POINT section")
-        logger.info(f"Text: {text_content[:50]}...")
         
         section_image = create_design_point_section(text_content)
         section_base64 = image_to_base64(section_image, keep_transparency=False)
@@ -1196,19 +812,7 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "korean_font_verified": True,
-                "korean_font_path": KOREAN_FONT_PATH,
                 "base64_padding": "INCLUDED"
-            }
-        }
-    
-    else:
-        logger.error(f"❌ Unexpected special mode after validation: '{special_mode}'")
-        return {
-            "output": {
-                "error": f"Unexpected special mode: '{special_mode}'. This should not happen after validation.",
-                "status": "error",
-                "version": VERSION
             }
         }
 
@@ -1228,34 +832,27 @@ def extract_file_number(filename: str) -> str:
     return None
 
 def find_input_data_fast(data, depth=0, max_depth=10):
-    """Find input data - improved recursive search"""
+    """Find input data"""
     if depth > max_depth:
         return None
         
-    # Direct string check
     if isinstance(data, str) and len(data) > 50:
-        # Basic check if it looks like base64
         sample = data[:100].strip()
         if all(c in string.ascii_letters + string.digits + '+/=' for c in sample):
             return data
     
     if isinstance(data, dict):
-        # Priority keys for image data
         priority_keys = ['enhanced_image', 'image', 'image_base64', 'base64', 'img', 
                         'input_image', 'original_image', 'base64_image', 'imageData']
         
-        # Check priority keys first
         for key in priority_keys:
             if key in data and isinstance(data[key], str) and len(data[key]) > 50:
                 return data[key]
         
-        # Recursive search all keys
         for key, value in data.items():
             if isinstance(value, str) and len(value) > 1000:
-                # Check if it might be base64
                 sample = value[:100].strip()
                 if all(c in string.ascii_letters + string.digits + '+/=' for c in sample):
-                    logger.info(f"✅ Found potential image data at key: {key}")
                     return value
             elif isinstance(value, (dict, list)):
                 result = find_input_data_fast(value, depth + 1, max_depth)
@@ -1271,17 +868,15 @@ def find_input_data_fast(data, depth=0, max_depth=10):
     return None
 
 def find_filename_fast(data, depth=0, max_depth=10):
-    """Find filename - recursive search"""
+    """Find filename"""
     if depth > max_depth:
         return None
         
     if isinstance(data, dict):
-        # Direct filename keys
         for key in ['filename', 'file_name', 'name', 'fileName', 'file', 'fname']:
             if key in data and isinstance(data[key], str) and data[key].strip():
                 return data[key]
         
-        # Recursive search all keys
         for key, value in data.items():
             if isinstance(value, (dict, list)):
                 result = find_filename_fast(value, depth + 1, max_depth)
@@ -1297,28 +892,23 @@ def find_filename_fast(data, depth=0, max_depth=10):
     return None
 
 def decode_base64_fast(base64_str: str) -> bytes:
-    """Fast base64 decode with padding support"""
+    """Fast base64 decode"""
     try:
         if not base64_str or len(base64_str) < 50:
             raise ValueError("Invalid base64 string")
         
-        # Remove data URI prefix if present
         if 'base64,' in base64_str:
             base64_str = base64_str.split('base64,')[-1]
         
-        # Remove whitespace
         base64_str = ''.join(base64_str.split())
         
-        # Remove invalid characters
         valid_chars = set(string.ascii_letters + string.digits + '+/=')
         base64_str = ''.join(c for c in base64_str if c in valid_chars)
         
-        # Try with existing padding first
         try:
             decoded = base64.b64decode(base64_str, validate=True)
             return decoded
         except:
-            # Add proper padding if needed
             no_pad = base64_str.rstrip('=')
             padding_needed = (4 - len(no_pad) % 4) % 4
             padded = no_pad + ('=' * padding_needed)
@@ -1330,66 +920,34 @@ def decode_base64_fast(base64_str: str) -> bytes:
         raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def handler(event):
-    """Enhancement handler - V3 with 2-Phase Processing"""
+    """Enhancement handler - Simplified Korean"""
     try:
         logger.info(f"=== {VERSION} Started ===")
-        logger.info("🚀 V3 - 2-Phase Processing with Fixed Korean Support")
-        logger.info("✅ Phase 1: Fast ring detection (0.1-0.2s)")
-        logger.info("✅ Phase 2: Focused precise removal (0.5-1s)")
-        logger.info("✅ Fixed: Korean font download and verification")
-        logger.info("✅ Fixed: Text encoding and rendering")
-        logger.info("✅ Fixed: Special mode detection in nested structures")
         
-        # Log input structure for debugging
-        logger.info(f"Input event type: {type(event)}")
-        if isinstance(event, dict):
-            logger.info(f"Input keys: {list(event.keys())[:10]}")  # First 10 keys
-            # Log more details for debugging
-            logger.info(f"Event structure (first 1000 chars): {json.dumps(event, indent=2)[:1000]}...")
-        
-        # IMPROVED: Find special mode in nested structures with deep search
         special_mode = find_special_mode(event)
-        logger.info(f"🔍 Special mode search result: {special_mode}")
         
-        # Check if this is a text section request
         if special_mode and special_mode in ['both_text_sections', 'md_talk', 'design_point']:
-            logger.info(f"📝 Processing special mode: {special_mode}")
             return process_special_mode(event)
         
-        # If no special mode or image processing request
-        logger.info("📸 No special mode found or image processing requested")
-        
-        # Find input data
-        logger.info("🔍 Searching for input data...")
         filename = find_filename_fast(event)
         image_data_str = find_input_data_fast(event)
         
         if not image_data_str:
-            # This might be a text-only request without special_mode set properly
-            # Check for text content as last resort
             md_talk_content = find_text_content(event, 'md_talk')
             design_point_content = find_text_content(event, 'design_point')
             
             if md_talk_content and design_point_content:
-                logger.info("📝 Found both text contents, assuming both_text_sections mode")
                 event['special_mode'] = 'both_text_sections'
                 return process_special_mode(event)
             elif md_talk_content:
-                logger.info("📝 Found MD TALK content, assuming md_talk mode")
                 event['special_mode'] = 'md_talk'
                 return process_special_mode(event)
             elif design_point_content:
-                logger.info("📝 Found DESIGN POINT content, assuming design_point mode")
                 event['special_mode'] = 'design_point'
                 return process_special_mode(event)
             
-            logger.error("❌ No input image data or text content found")
-            logger.error(f"Event structure: {json.dumps(event, indent=2)[:1000]}...")
             raise ValueError("No input image data or text content found")
         
-        logger.info(f"✅ Found image data, length: {len(image_data_str)}")
-        
-        # Decode and open image
         start_time = time.time()
         image_bytes = decode_base64_fast(image_data_str)
         image = Image.open(BytesIO(image_bytes))
@@ -1398,45 +956,30 @@ def handler(event):
             image = image.convert('RGBA')
         
         decode_time = time.time() - start_time
-        logger.info(f"⏱️ Image decode: {decode_time:.2f}s")
-        logger.info(f"📐 Original size: {image.size}")
         
-        # STEP 1 & 2: Apply 2-phase processing (detection + removal combined)
         start_time = time.time()
-        logger.info("📸 Applying 2-Phase background removal")
         image = u2net_optimized_removal(image)
-        
         removal_time = time.time() - start_time
-        logger.info(f"⏱️ 2-Phase processing: {removal_time:.2f}s")
         
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
         
-        # STEP 3: Resize to target dimensions
         start_time = time.time()
-        logger.info("📏 STEP 3: Resizing to 1200x1560")
         image = resize_image_proportional(image, 1200, 1560)
-        
         resize_time = time.time() - start_time
-        logger.info(f"⏱️ Resize: {resize_time:.2f}s")
         
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
         
-        # Convert to base64
         start_time = time.time()
         enhanced_base64 = image_to_base64(image, keep_transparency=True)
         encode_time = time.time() - start_time
-        logger.info(f"⏱️ Base64 encode: {encode_time:.2f}s")
         
-        # Total time
         total_time = decode_time + removal_time + resize_time + encode_time
-        logger.info(f"⏱️ TOTAL TIME: {total_time:.2f}s")
         
         output_filename = filename or "enhanced_image.png"
         file_number = extract_file_number(output_filename)
         
-        # Build response with proper structure for Make.com
         return {
             "output": {
                 "enhanced_image": enhanced_base64,
@@ -1460,22 +1003,6 @@ def handler(event):
                     "resize": f"{resize_time:.2f}s",
                     "encode": f"{encode_time:.2f}s",
                     "total": f"{total_time:.2f}s"
-                },
-                "v3_improvements": [
-                    "✅ 2-Phase Processing: Detection → Focused Removal",
-                    "✅ Fast ring detection (Hough circles + edge backup)",
-                    "✅ Precise removal only on detected ring areas",
-                    "✅ Simple threshold for background areas",
-                    "✅ Expected 8-17x speedup vs original",
-                    "✅ Better quality through focused processing",
-                    "✅ Fixed Korean font download and verification",
-                    "✅ Fixed text encoding and rendering for MD TALK/DESIGN POINT",
-                    "✅ Fixed special mode detection in nested Make.com structures"
-                ],
-                "phase_info": {
-                    "phase1": "Fast detection (0.1-0.2s)",
-                    "phase2": "Focused removal (0.5-1s)",
-                    "total_expected": "1-2s (vs 17s original)"
                 }
             }
         }
