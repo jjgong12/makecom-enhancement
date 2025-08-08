@@ -15,17 +15,18 @@ from scipy import ndimage
 from concurrent.futures import ThreadPoolExecutor
 import functools
 import unicodedata
+import codecs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Enhancement-V5-Fixed-Korean
-# Complete Korean font support with fixes
+# VERSION: Enhancement-V6-UTF8-Fixed
+# Complete UTF-8 Korean support with encoding fixes
 ################################
 
-VERSION = "Enhancement-V5-Fixed-Korean"
+VERSION = "Enhancement-V6-UTF8-Fixed"
 logger.info(f"🚀 Module loaded: {VERSION}")
 
 # Global rembg session with U2Net
@@ -54,24 +55,48 @@ def init_rembg_session():
 logger.info("🔧 Initializing U2Net session on module load...")
 init_rembg_session()
 
+def ensure_utf8_string(text):
+    """Ensure text is properly UTF-8 encoded string"""
+    if text is None:
+        return ""
+    
+    # If bytes, decode to string
+    if isinstance(text, bytes):
+        try:
+            text = text.decode('utf-8', errors='replace')
+        except:
+            text = text.decode('utf-8', errors='ignore')
+    
+    # Convert to string if not already
+    text = str(text)
+    
+    # Normalize unicode - NFC is the standard form
+    text = unicodedata.normalize('NFC', text)
+    
+    # Remove any zero-width characters or control characters
+    text = ''.join(ch for ch in text if unicodedata.category(ch)[0] not in ['C', 'Z'] or ch in [' ', '\n', '\t'])
+    
+    return text.strip()
+
 def download_korean_font():
-    """Download and verify Korean font - COMPLETE FIX WITH MORE OPTIONS"""
+    """Download and verify Korean font - ENHANCED UTF-8 SUPPORT"""
     global KOREAN_FONT_PATH
     
     if KOREAN_FONT_PATH and os.path.exists(KOREAN_FONT_PATH):
         try:
-            # Verify existing font
-            test_font = ImageFont.truetype(KOREAN_FONT_PATH, 24)
+            # Verify existing font with UTF-8 text
+            test_font = ImageFont.truetype(KOREAN_FONT_PATH, 24, encoding='utf-8')
             test_img = Image.new('RGB', (100, 50), 'white')
             test_draw = ImageDraw.Draw(test_img)
-            test_draw.text((10, 10), "한글테스트", font=test_font, fill='black')
+            test_text = ensure_utf8_string("한글테스트")
+            test_draw.text((10, 10), test_text, font=test_font, fill='black')
             logger.info(f"✅ Using existing Korean font: {KOREAN_FONT_PATH}")
             return KOREAN_FONT_PATH
         except:
             KOREAN_FONT_PATH = None
     
     try:
-        # Extended font options
+        # Extended font options with better UTF-8 support
         font_options = [
             {
                 'name': 'NanumGothic',
@@ -92,19 +117,19 @@ def download_korean_font():
                 ]
             },
             {
-                'name': 'D2Coding',
-                'path': '/tmp/D2Coding.ttf',
-                'urls': [
-                    'https://github.com/naver/d2codingfont/raw/master/D2Coding/D2Coding-Ver1.3.2-20180524.ttf',
-                    'https://raw.githubusercontent.com/naver/d2codingfont/master/D2Coding/D2Coding-Ver1.3.2-20180524.ttf'
-                ]
-            },
-            {
                 'name': 'NanumBarunGothic',
                 'path': '/tmp/NanumBarunGothic.ttf',
                 'urls': [
                     'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_BARUNGOTHIC/NanumBarunGothic.ttf',
                     'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_BARUNGOTHIC/NanumBarunGothic.ttf'
+                ]
+            },
+            {
+                'name': 'Pretendard-Regular',
+                'path': '/tmp/Pretendard-Regular.otf',
+                'urls': [
+                    'https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/Pretendard-Regular.otf',
+                    'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@main/packages/pretendard/dist/public/static/Pretendard-Regular.otf'
                 ]
             }
         ]
@@ -116,11 +141,12 @@ def download_korean_font():
             # Check if already exists
             if os.path.exists(font_path):
                 try:
-                    # Test font with Korean text
+                    # Test font with Korean text (UTF-8)
                     test_font = ImageFont.truetype(font_path, 24, encoding='utf-8')
                     test_img = Image.new('RGB', (200, 50), 'white')
                     test_draw = ImageDraw.Draw(test_img)
-                    test_draw.text((10, 10), "한글 테스트 가나다", font=test_font, fill='black')
+                    test_text = ensure_utf8_string("한글 테스트 가나다")
+                    test_draw.text((10, 10), test_text, font=test_font, fill='black')
                     
                     KOREAN_FONT_PATH = font_path
                     logger.info(f"✅ Korean font loaded from cache: {font_path}")
@@ -139,7 +165,8 @@ def download_korean_font():
                     logger.info(f"📥 Downloading from: {url}")
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': '*/*'
+                        'Accept': '*/*',
+                        'Accept-Encoding': 'gzip, deflate'
                     }
                     response = requests.get(url, timeout=30, headers=headers, allow_redirects=True)
                     
@@ -157,8 +184,8 @@ def download_korean_font():
                             test_img = Image.new('RGB', (200, 50), 'white')
                             test_draw = ImageDraw.Draw(test_img)
                             
-                            # Test with actual Korean text
-                            test_text = "한글 폰트 테스트"
+                            # Test with actual Korean text (UTF-8)
+                            test_text = ensure_utf8_string("한글 폰트 테스트")
                             test_draw.text((10, 10), test_text, font=test_font, fill='black')
                             
                             # Additional verification
@@ -181,7 +208,8 @@ def download_korean_font():
         system_font_paths = [
             '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
             '/usr/share/fonts/truetype/noto/NotoSansKR-Regular.otf',
-            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            '/System/Library/Fonts/AppleSDGothicNeo.ttc'  # macOS
         ]
         
         for sys_font in system_font_paths:
@@ -202,7 +230,7 @@ def download_korean_font():
         return None
 
 def get_font(size, force_korean=True):
-    """Get font with Korean support - IMPROVED"""
+    """Get font with Korean support - IMPROVED UTF-8 HANDLING"""
     global KOREAN_FONT_PATH, FONT_CACHE
     
     cache_key = f"{size}_{force_korean}"
@@ -218,6 +246,7 @@ def get_font(size, force_korean=True):
         
         if KOREAN_FONT_PATH and os.path.exists(KOREAN_FONT_PATH):
             try:
+                # Always use UTF-8 encoding
                 font = ImageFont.truetype(KOREAN_FONT_PATH, size, encoding='utf-8')
                 logger.info(f"✅ Korean font loaded size={size}")
             except Exception as e:
@@ -231,6 +260,7 @@ def get_font(size, force_korean=True):
             logger.warning("⚠️ Using Liberation font - Korean may not display properly!")
         except:
             try:
+                # Default font
                 font = ImageFont.load_default()
                 logger.warning("⚠️ Using default font - Korean will not display properly!")
             except:
@@ -240,51 +270,58 @@ def get_font(size, force_korean=True):
     return font
 
 def safe_draw_text(draw, position, text, font, fill):
-    """Safely draw Korean text with better error handling"""
+    """Safely draw Korean text with UTF-8 encoding"""
     try:
         if not text:
             return
         
-        # Ensure text is properly encoded UTF-8
-        if isinstance(text, bytes):
-            text = text.decode('utf-8', errors='replace')
-        else:
-            text = str(text)
+        # Ensure proper UTF-8 encoding
+        text = ensure_utf8_string(text)
         
-        # Normalize unicode
-        text = unicodedata.normalize('NFC', text)
-        
-        text = text.strip()
         if not text:
             return
         
         # Try to draw text
         draw.text(position, text, font=font, fill=fill)
-        logger.info(f"✅ Drew text: {text[:20]}...")
+        logger.info(f"✅ Drew text (UTF-8): {text[:20]}...")
         
+    except UnicodeDecodeError as e:
+        logger.error(f"❌ Unicode decode error: {e}")
+        # Try to fix encoding
+        try:
+            if isinstance(text, bytes):
+                # Try different encodings
+                for encoding in ['utf-8', 'cp949', 'euc-kr']:
+                    try:
+                        text = text.decode(encoding)
+                        draw.text(position, text, font=font, fill=fill)
+                        logger.info(f"✅ Drew text with {encoding} encoding")
+                        return
+                    except:
+                        continue
+        except:
+            pass
+            
     except Exception as e:
         logger.error(f"❌ Text drawing error: {e}")
         # Fallback - try with ASCII only
         try:
             import re
             # Replace Korean with [Korean] marker
-            fallback_text = re.sub(r'[가-힣]+', '[Korean]', text)
+            fallback_text = re.sub(r'[가-힣]+', '[Korean]', str(text))
             draw.text(position, fallback_text, font=font, fill=fill)
             logger.warning(f"⚠️ Used fallback text: {fallback_text[:20]}...")
         except Exception as e2:
             logger.error(f"❌ Fallback text drawing also failed: {e2}")
 
 def get_text_size(draw, text, font):
-    """Get text size with compatibility for different PIL versions"""
+    """Get text size with UTF-8 encoding support"""
     try:
         if not text or not font:
             return (0, 0)
         
-        if isinstance(text, bytes):
-            text = text.decode('utf-8', errors='replace')
-        
-        # Normalize unicode
-        text = unicodedata.normalize('NFC', str(text)).strip()
+        # Ensure UTF-8 encoding
+        text = ensure_utf8_string(text)
         
         if not text:
             return (0, 0)
@@ -298,7 +335,7 @@ def get_text_size(draw, text, font):
             try:
                 return draw.textsize(text, font=font)
             except:
-                # Ultimate fallback
+                # Ultimate fallback - estimate based on character count
                 char_width = 24 if any('\u3131' <= c <= '\u318E' or '\uAC00' <= c <= '\uD7A3' for c in text) else 12
                 return (len(text) * char_width, 30)
     except Exception as e:
@@ -306,15 +343,12 @@ def get_text_size(draw, text, font):
         return (100, 30)
 
 def wrap_text(text, font, max_width, draw):
-    """Wrap text to fit within max_width with better Korean handling"""
+    """Wrap text to fit within max_width with UTF-8 Korean support"""
     if not text or not font:
         return []
     
-    if isinstance(text, bytes):
-        text = text.decode('utf-8', errors='replace')
-    
-    # Normalize unicode
-    text = unicodedata.normalize('NFC', str(text)).strip()
+    # Ensure UTF-8 encoding
+    text = ensure_utf8_string(text)
     
     lines = []
     paragraphs = text.split('\n')
@@ -324,36 +358,59 @@ def wrap_text(text, font, max_width, draw):
             lines.append('')
             continue
         
-        # Split by words for better wrapping
-        words = paragraph.split(' ')
-        current_line = ""
-        
-        for word in words:
-            if current_line:
-                test_line = current_line + " " + word
-            else:
-                test_line = word
+        # Split by words for better wrapping - handle Korean properly
+        # Korean doesn't use spaces between words often, so we need different logic
+        if any('\uAC00' <= c <= '\uD7A3' for c in paragraph):
+            # Korean text - split by characters if needed
+            current_line = ""
+            for char in paragraph:
+                test_line = current_line + char
                 
-            try:
-                width, _ = get_text_size(draw, test_line, font)
-            except:
-                width = len(test_line) * 20
+                try:
+                    width, _ = get_text_size(draw, test_line, font)
+                except:
+                    width = len(test_line) * 20
+                
+                if width <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = char
             
-            if width <= max_width:
-                current_line = test_line
-            else:
+            if current_line:
+                lines.append(current_line)
+        else:
+            # Non-Korean text - split by words
+            words = paragraph.split(' ')
+            current_line = ""
+            
+            for word in words:
                 if current_line:
-                    lines.append(current_line)
-                current_line = word
-        
-        if current_line:
-            lines.append(current_line)
+                    test_line = current_line + " " + word
+                else:
+                    test_line = word
+                    
+                try:
+                    width, _ = get_text_size(draw, test_line, font)
+                except:
+                    width = len(test_line) * 20
+                
+                if width <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            
+            if current_line:
+                lines.append(current_line)
     
     return lines
 
 def create_md_talk_section(text_content=None, width=1200):
-    """Create MD TALK section with PERFECT Korean support"""
-    logger.info("🔤 Creating MD TALK section with Korean support")
+    """Create MD TALK section with PERFECT UTF-8 Korean support"""
+    logger.info("🔤 Creating MD TALK section with UTF-8 Korean support")
     
     # Force Korean font download at start
     font_path = download_korean_font()
@@ -386,20 +443,13 @@ def create_md_talk_section(text_content=None, width=1200):
         logger.error(f"Title drawing error: {e}")
         title_height = 50
     
-    # Text content
+    # Text content - ensure UTF-8
     if text_content and text_content.strip():
-        text = text_content.replace('MD TALK', '').replace('MD Talk', '').strip()
+        text = ensure_utf8_string(text_content.replace('MD TALK', '').replace('MD Talk', '').strip())
     else:
-        text = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."""
+        text = ensure_utf8_string("이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다.")
     
-    # Ensure text is properly encoded
-    if isinstance(text, bytes):
-        text = text.decode('utf-8', errors='replace')
-    
-    # Normalize unicode
-    text = unicodedata.normalize('NFC', str(text)).strip()
-    
-    logger.info(f"MD TALK text (first 50 chars): {text[:50]}...")
+    logger.info(f"MD TALK text (UTF-8, first 50 chars): {text[:50]}...")
     
     # Wrap text
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
@@ -429,8 +479,8 @@ def create_md_talk_section(text_content=None, width=1200):
     return section_img
 
 def create_design_point_section(text_content=None, width=1200):
-    """Create DESIGN POINT section with PERFECT Korean support"""
-    logger.info("🔤 Creating DESIGN POINT section with Korean support")
+    """Create DESIGN POINT section with PERFECT UTF-8 Korean support"""
+    logger.info("🔤 Creating DESIGN POINT section with UTF-8 Korean support")
     
     # Force Korean font download at start
     font_path = download_korean_font()
@@ -463,20 +513,13 @@ def create_design_point_section(text_content=None, width=1200):
         logger.error(f"Title drawing error: {e}")
         title_height = 50
     
-    # Text content
+    # Text content - ensure UTF-8
     if text_content and text_content.strip():
-        text = text_content.replace('DESIGN POINT', '').replace('Design Point', '').strip()
+        text = ensure_utf8_string(text_content.replace('DESIGN POINT', '').replace('Design Point', '').strip())
     else:
-        text = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
+        text = ensure_utf8_string("남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다.")
     
-    # Ensure text is properly encoded
-    if isinstance(text, bytes):
-        text = text.decode('utf-8', errors='replace')
-    
-    # Normalize unicode
-    text = unicodedata.normalize('NFC', str(text)).strip()
-    
-    logger.info(f"DESIGN POINT text (first 50 chars): {text[:50]}...")
+    logger.info(f"DESIGN POINT text (UTF-8, first 50 chars): {text[:50]}...")
     
     # Wrap text
     wrapped_lines = wrap_text(text, body_font, content_width, draw)
@@ -543,7 +586,7 @@ def find_special_mode(data, path=""):
     return None
 
 def find_text_content(data, content_type):
-    """Find text content for MD TALK or DESIGN POINT with deep search"""
+    """Find text content for MD TALK or DESIGN POINT with UTF-8 support"""
     if isinstance(data, dict):
         # Keys to search for based on content type
         if content_type == 'md_talk':
@@ -557,7 +600,8 @@ def find_text_content(data, content_type):
         for key in keys:
             if key in data and isinstance(data[key], str) and data[key].strip():
                 logger.info(f"✅ Found {content_type} content at key: {key}")
-                return data[key]
+                # Ensure UTF-8 encoding
+                return ensure_utf8_string(data[key])
         
         # Check all keys recursively
         for key, value in data.items():
@@ -642,7 +686,7 @@ def image_to_base64(image, keep_transparency=True):
         image.save(buffered, format='PNG', optimize=True, compress_level=3)
     
     buffered.seek(0)
-    # ALWAYS include padding
+    # ALWAYS include padding - never remove
     base64_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
     return base64_str
 
@@ -675,7 +719,7 @@ def resize_image_proportional(image, target_width=1200, target_height=1560):
     return result
 
 def process_special_mode(job):
-    """Process special modes - MD TALK and DESIGN POINT"""
+    """Process special modes - MD TALK and DESIGN POINT with UTF-8 support"""
     special_mode = job.get('special_mode', '')
     
     # If special_mode is not found in job, try to find it again
@@ -719,16 +763,16 @@ def process_special_mode(job):
         logger.info(f"✅ Korean font ready: {font_path}")
     
     if special_mode == 'both_text_sections':
-        # Find text content
+        # Find text content - ensure UTF-8
         md_talk_text = find_text_content(job, 'md_talk')
         design_point_text = find_text_content(job, 'design_point')
         
-        # Default texts if not found
+        # Default texts if not found - UTF-8 encoded
         if not md_talk_text:
-            md_talk_text = """각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다."""
+            md_talk_text = ensure_utf8_string("각도에 따라 달라지는 빛의 결들이 두 사람의 특별한 순간순간을 더 찬란하게 만들며 360도 새겨진 패턴으로 매일 새로운 반짝임을 보여줍니다.")
         
         if not design_point_text:
-            design_point_text = """입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다."""
+            design_point_text = ensure_utf8_string("입체적인 컷팅 위로 섬세하게 빛나는 패턴이 고급스러움을 완성하며 각진 텍스처가 심플하면서 유니크한 매력을 더해줍니다.")
         
         # Create sections
         md_section = create_md_talk_section(md_talk_text)
@@ -748,7 +792,8 @@ def process_special_mode(job):
                         "filename": "ac_wedding_004.png",
                         "file_number": "004",
                         "final_size": list(md_section.size),
-                        "format": "PNG"
+                        "format": "PNG",
+                        "encoding": "UTF-8"
                     },
                     {
                         "enhanced_image": design_base64,
@@ -757,7 +802,8 @@ def process_special_mode(job):
                         "filename": "ac_wedding_008.png",
                         "file_number": "008",
                         "final_size": list(design_section.size),
-                        "format": "PNG"
+                        "format": "PNG",
+                        "encoding": "UTF-8"
                     }
                 ],
                 "total_images": 2,
@@ -765,7 +811,8 @@ def process_special_mode(job):
                 "sections_included": ["MD_TALK", "DESIGN_POINT"],
                 "version": VERSION,
                 "status": "success",
-                "base64_padding": "INCLUDED"
+                "base64_padding": "INCLUDED",
+                "text_encoding": "UTF-8"
             }
         }
     
@@ -773,7 +820,7 @@ def process_special_mode(job):
         text_content = find_text_content(job, 'md_talk')
         
         if not text_content:
-            text_content = """이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다."""
+            text_content = ensure_utf8_string("이 제품은 일상에서도 부담없이 착용할 수 있는 편안한 디자인으로 매일의 스타일링에 포인트를 더해줍니다.")
         
         section_image = create_md_talk_section(text_content)
         section_base64 = image_to_base64(section_image, keep_transparency=False)
@@ -790,7 +837,8 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "base64_padding": "INCLUDED"
+                "base64_padding": "INCLUDED",
+                "encoding": "UTF-8"
             }
         }
     
@@ -798,7 +846,7 @@ def process_special_mode(job):
         text_content = find_text_content(job, 'design_point')
         
         if not text_content:
-            text_content = """남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다."""
+            text_content = ensure_utf8_string("남성 단품은 무광 텍스처와 유광 라인의 조화가 견고한 감성을 전하고 여자 단품은 파베 세팅과 섬세한 밀그레인의 디테일로 화려하면서도 고급스러운 반짝임을 표현합니다.")
         
         section_image = create_design_point_section(text_content)
         section_base64 = image_to_base64(section_image, keep_transparency=False)
@@ -815,7 +863,8 @@ def process_special_mode(job):
                 "status": "success",
                 "format": "PNG",
                 "special_mode": special_mode,
-                "base64_padding": "INCLUDED"
+                "base64_padding": "INCLUDED",
+                "encoding": "UTF-8"
             }
         }
     
@@ -946,16 +995,16 @@ def decode_base64_fast(base64_str: str) -> bytes:
         raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def handler(event):
-    """Enhancement handler - V5 Fixed Korean"""
+    """Enhancement handler - V6 UTF-8 Fixed"""
     try:
         logger.info("=" * 60)
         logger.info(f"🚀 {VERSION} Handler Started")
         logger.info("=" * 60)
-        logger.info("✅ Improvements in V5-Fixed:")
-        logger.info("  - Enhanced Korean font download with more sources")
-        logger.info("  - Better font fallback handling")
-        logger.info("  - Improved text wrapping for Korean")
-        logger.info("  - More robust font verification")
+        logger.info("✅ Improvements in V6-UTF8-Fixed:")
+        logger.info("  - Complete UTF-8 encoding support")
+        logger.info("  - Better Korean font handling")
+        logger.info("  - Unicode normalization")
+        logger.info("  - Multiple encoding fallbacks")
         
         # Force font download at startup
         logger.info("📥 Pre-loading Korean font...")
@@ -1076,13 +1125,22 @@ def handler(event):
                 "background_removed": True,
                 "base64_padding": "INCLUDED",
                 "compression": "level_3",
+                "encoding": "UTF-8",
                 "processing_times": {
                     "decode": f"{decode_time:.2f}s",
                     "background_removal": f"{removal_time:.2f}s",
                     "resize": f"{resize_time:.2f}s",
                     "encode": f"{encode_time:.2f}s",
                     "total": f"{total_time:.2f}s"
-                }
+                },
+                "v6_improvements": [
+                    "Complete UTF-8 encoding support",
+                    "ensure_utf8_string function for text processing",
+                    "Unicode normalization (NFC)",
+                    "Multiple encoding fallbacks",
+                    "Better Korean character handling",
+                    "Improved text wrapping for Korean"
+                ]
             }
         }
         
