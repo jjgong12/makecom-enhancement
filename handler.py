@@ -21,11 +21,11 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Enhancement-V5-Complete
+# VERSION: Enhancement-V5-Fixed-Korean
 # Complete Korean font support with fixes
 ################################
 
-VERSION = "Enhancement-V5-Complete"
+VERSION = "Enhancement-V5-Fixed-Korean"
 logger.info(f"🚀 Module loaded: {VERSION}")
 
 # Global rembg session with U2Net
@@ -55,7 +55,7 @@ logger.info("🔧 Initializing U2Net session on module load...")
 init_rembg_session()
 
 def download_korean_font():
-    """Download and verify Korean font - COMPLETE FIX"""
+    """Download and verify Korean font - COMPLETE FIX WITH MORE OPTIONS"""
     global KOREAN_FONT_PATH
     
     if KOREAN_FONT_PATH and os.path.exists(KOREAN_FONT_PATH):
@@ -71,14 +71,15 @@ def download_korean_font():
             KOREAN_FONT_PATH = None
     
     try:
-        # Try multiple font options in order of preference
+        # Extended font options
         font_options = [
             {
                 'name': 'NanumGothic',
                 'path': '/tmp/NanumGothic.ttf',
                 'urls': [
                     'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
-                    'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf'
+                    'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf',
+                    'https://raw.githubusercontent.com/naver/nanumfont/master/fonts/NanumFontSetup_TTF_GOTHIC/NanumGothic.ttf'
                 ]
             },
             {
@@ -86,7 +87,24 @@ def download_korean_font():
                 'path': '/tmp/NotoSansKR-Regular.otf',
                 'urls': [
                     'https://github.com/google/fonts/raw/main/ofl/notosanskr/NotoSansKR-Regular.otf',
-                    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR-Regular.otf'
+                    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR-Regular.otf',
+                    'https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR-Regular.otf'
+                ]
+            },
+            {
+                'name': 'D2Coding',
+                'path': '/tmp/D2Coding.ttf',
+                'urls': [
+                    'https://github.com/naver/d2codingfont/raw/master/D2Coding/D2Coding-Ver1.3.2-20180524.ttf',
+                    'https://raw.githubusercontent.com/naver/d2codingfont/master/D2Coding/D2Coding-Ver1.3.2-20180524.ttf'
+                ]
+            },
+            {
+                'name': 'NanumBarunGothic',
+                'path': '/tmp/NanumBarunGothic.ttf',
+                'urls': [
+                    'https://github.com/naver/nanumfont/raw/master/fonts/NanumFontSetup_TTF_BARUNGOTHIC/NanumBarunGothic.ttf',
+                    'https://cdn.jsdelivr.net/gh/naver/nanumfont@master/fonts/NanumFontSetup_TTF_BARUNGOTHIC/NanumBarunGothic.ttf'
                 ]
             }
         ]
@@ -120,36 +138,60 @@ def download_korean_font():
                 try:
                     logger.info(f"📥 Downloading from: {url}")
                     headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': '*/*'
                     }
-                    response = requests.get(url, timeout=30, headers=headers)
+                    response = requests.get(url, timeout=30, headers=headers, allow_redirects=True)
                     
-                    if response.status_code == 200 and len(response.content) > 100000:
-                        # Save font
-                        with open(font_path, 'wb') as f:
-                            f.write(response.content)
+                    if response.status_code == 200:
+                        content_length = len(response.content)
+                        logger.info(f"📦 Downloaded {content_length} bytes")
                         
-                        # Verify font with Korean text
-                        test_font = ImageFont.truetype(font_path, 24, encoding='utf-8')
-                        test_img = Image.new('RGB', (200, 50), 'white')
-                        test_draw = ImageDraw.Draw(test_img)
-                        
-                        # Test with actual Korean text
-                        test_text = "한글 폰트 테스트"
-                        test_draw.text((10, 10), test_text, font=test_font, fill='black')
-                        
-                        # Additional verification
-                        bbox = test_draw.textbbox((10, 10), test_text, font=test_font)
-                        if bbox[2] - bbox[0] > 50:
-                            KOREAN_FONT_PATH = font_path
-                            logger.info(f"✅ Korean font downloaded and verified: {font_path}")
-                            return font_path
+                        if content_length > 100000:  # Font should be > 100KB
+                            # Save font
+                            with open(font_path, 'wb') as f:
+                                f.write(response.content)
+                            
+                            # Verify font with Korean text
+                            test_font = ImageFont.truetype(font_path, 24, encoding='utf-8')
+                            test_img = Image.new('RGB', (200, 50), 'white')
+                            test_draw = ImageDraw.Draw(test_img)
+                            
+                            # Test with actual Korean text
+                            test_text = "한글 폰트 테스트"
+                            test_draw.text((10, 10), test_text, font=test_font, fill='black')
+                            
+                            # Additional verification
+                            bbox = test_draw.textbbox((10, 10), test_text, font=test_font)
+                            if bbox[2] - bbox[0] > 50:
+                                KOREAN_FONT_PATH = font_path
+                                logger.info(f"✅ Korean font downloaded and verified: {font_path}")
+                                return font_path
+                            else:
+                                logger.error("❌ Font verification failed - text too small")
+                                os.remove(font_path)
                         else:
-                            logger.error("❌ Font verification failed - text too small")
-                            os.remove(font_path)
+                            logger.error(f"❌ File too small: {content_length} bytes")
                             
                 except Exception as e:
                     logger.error(f"❌ Download failed from {url}: {str(e)}")
+                    continue
+        
+        # Last resort - try system fonts
+        system_font_paths = [
+            '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
+            '/usr/share/fonts/truetype/noto/NotoSansKR-Regular.otf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+        ]
+        
+        for sys_font in system_font_paths:
+            if os.path.exists(sys_font):
+                try:
+                    test_font = ImageFont.truetype(sys_font, 24, encoding='utf-8')
+                    KOREAN_FONT_PATH = sys_font
+                    logger.info(f"✅ Using system font: {sys_font}")
+                    return sys_font
+                except:
                     continue
         
         logger.error("❌ All font attempts failed")
@@ -183,12 +225,16 @@ def get_font(size, force_korean=True):
                 font = None
     
     if font is None:
-        # Fallback to default font
+        # Try to get a basic font with larger size
         try:
-            font = ImageFont.load_default()
-            logger.warning("⚠️ Using default font - Korean will not display properly!")
+            font = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", size)
+            logger.warning("⚠️ Using Liberation font - Korean may not display properly!")
         except:
-            font = ImageFont.load_default()
+            try:
+                font = ImageFont.load_default()
+                logger.warning("⚠️ Using default font - Korean will not display properly!")
+            except:
+                font = ImageFont.load_default()
     
     FONT_CACHE[cache_key] = font
     return font
@@ -218,13 +264,12 @@ def safe_draw_text(draw, position, text, font, fill):
         
     except Exception as e:
         logger.error(f"❌ Text drawing error: {e}")
-        # Fallback
+        # Fallback - try with ASCII only
         try:
-            default_font = ImageFont.load_default()
-            # Replace Korean with squares for default font
             import re
-            fallback_text = re.sub(r'[가-힣]', '□', text)
-            draw.text(position, fallback_text, font=default_font, fill=fill)
+            # Replace Korean with [Korean] marker
+            fallback_text = re.sub(r'[가-힣]+', '[Korean]', text)
+            draw.text(position, fallback_text, font=font, fill=fill)
             logger.warning(f"⚠️ Used fallback text: {fallback_text[:20]}...")
         except Exception as e2:
             logger.error(f"❌ Fallback text drawing also failed: {e2}")
@@ -279,11 +324,16 @@ def wrap_text(text, font, max_width, draw):
             lines.append('')
             continue
         
-        # For Korean text, handle character by character
+        # Split by words for better wrapping
+        words = paragraph.split(' ')
         current_line = ""
         
-        for char in paragraph:
-            test_line = current_line + char
+        for word in words:
+            if current_line:
+                test_line = current_line + " " + word
+            else:
+                test_line = word
+                
             try:
                 width, _ = get_text_size(draw, test_line, font)
             except:
@@ -294,7 +344,7 @@ def wrap_text(text, font, max_width, draw):
             else:
                 if current_line:
                     lines.append(current_line)
-                current_line = char
+                current_line = word
         
         if current_line:
             lines.append(current_line)
@@ -308,7 +358,7 @@ def create_md_talk_section(text_content=None, width=1200):
     # Force Korean font download at start
     font_path = download_korean_font()
     if not font_path:
-        logger.error("❌ Failed to get Korean font, but continuing...")
+        logger.error("❌ Failed to get Korean font, using fallback...")
     
     fixed_width = 1200
     fixed_height = 400
@@ -385,7 +435,7 @@ def create_design_point_section(text_content=None, width=1200):
     # Force Korean font download at start
     font_path = download_korean_font()
     if not font_path:
-        logger.error("❌ Failed to get Korean font, but continuing...")
+        logger.error("❌ Failed to get Korean font, using fallback...")
     
     fixed_width = 1200
     fixed_height = 350
@@ -896,16 +946,16 @@ def decode_base64_fast(base64_str: str) -> bytes:
         raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def handler(event):
-    """Enhancement handler - V5 Complete with fixes"""
+    """Enhancement handler - V5 Fixed Korean"""
     try:
         logger.info("=" * 60)
         logger.info(f"🚀 {VERSION} Handler Started")
         logger.info("=" * 60)
-        logger.info("✅ Improvements in V5:")
-        logger.info("  - Perfect Korean font support")
-        logger.info("  - Base64 padding always included")
-        logger.info("  - Proper return structure for Make.com")
-        logger.info("  - Better error handling")
+        logger.info("✅ Improvements in V5-Fixed:")
+        logger.info("  - Enhanced Korean font download with more sources")
+        logger.info("  - Better font fallback handling")
+        logger.info("  - Improved text wrapping for Korean")
+        logger.info("  - More robust font verification")
         
         # Force font download at startup
         logger.info("📥 Pre-loading Korean font...")
@@ -913,7 +963,7 @@ def handler(event):
         if font_path:
             logger.info(f"✅ Korean font ready: {font_path}")
         else:
-            logger.warning("⚠️ Korean font not available")
+            logger.warning("⚠️ Korean font not available, will use fallback")
         
         # Log input structure
         logger.info(f"Input event type: {type(event)}")
