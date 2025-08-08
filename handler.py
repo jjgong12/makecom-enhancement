@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Enhancement-V6-UTF8-Fixed
-# Complete UTF-8 Korean support with encoding fixes
+# VERSION: Enhancement-V6-UTF8-Fixed-NoPreload
+# Complete UTF-8 Korean support without module preload
 ################################
 
-VERSION = "Enhancement-V6-UTF8-Fixed"
+VERSION = "Enhancement-V6-UTF8-Fixed-NoPreload"
 logger.info(f"🚀 Module loaded: {VERSION}")
 
 # Global rembg session with U2Net
@@ -51,9 +51,9 @@ def init_rembg_session():
             REMBG_SESSION = None
     return REMBG_SESSION
 
-# Initialize on module load
-logger.info("🔧 Initializing U2Net session on module load...")
-init_rembg_session()
+# REMOVED MODULE LOAD INITIALIZATION - Will initialize on first use
+# logger.info("🔧 Initializing U2Net session on module load...")
+# init_rembg_session()
 
 def ensure_utf8_string(text):
     """Ensure text is properly UTF-8 encoded string"""
@@ -623,14 +623,16 @@ def find_text_content(data, content_type):
     return None
 
 def u2net_optimized_removal(image: Image.Image) -> Image.Image:
-    """U2Net optimized background removal"""
+    """U2Net optimized background removal - LAZY INITIALIZATION"""
     try:
         from rembg import remove
         
         global REMBG_SESSION
         if REMBG_SESSION is None:
+            logger.info("🔧 Initializing U2Net session on first use...")
             REMBG_SESSION = init_rembg_session()
             if REMBG_SESSION is None:
+                logger.error("❌ Failed to initialize U2Net session")
                 return image
         
         logger.info("🚀 U2Net Optimized Removal")
@@ -995,16 +997,17 @@ def decode_base64_fast(base64_str: str) -> bytes:
         raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def handler(event):
-    """Enhancement handler - V6 UTF-8 Fixed"""
+    """Enhancement handler - V6 UTF-8 Fixed NoPreload"""
     try:
         logger.info("=" * 60)
         logger.info(f"🚀 {VERSION} Handler Started")
         logger.info("=" * 60)
-        logger.info("✅ Improvements in V6-UTF8-Fixed:")
+        logger.info("✅ Improvements in V6-UTF8-Fixed-NoPreload:")
         logger.info("  - Complete UTF-8 encoding support")
         logger.info("  - Better Korean font handling")
         logger.info("  - Unicode normalization")
         logger.info("  - Multiple encoding fallbacks")
+        logger.info("  - NO MODULE PRELOAD - Lazy initialization")
         
         # Force font download at startup
         logger.info("📥 Pre-loading Korean font...")
@@ -1139,7 +1142,8 @@ def handler(event):
                     "Unicode normalization (NFC)",
                     "Multiple encoding fallbacks",
                     "Better Korean character handling",
-                    "Improved text wrapping for Korean"
+                    "Improved text wrapping for Korean",
+                    "NO MODULE PRELOAD - Lazy initialization"
                 ]
             }
         }
@@ -1160,11 +1164,12 @@ def handler(event):
             }
         }
 
-# Start message
+# Start message - NO PRELOAD INITIALIZATION
 logger.info("=" * 60)
 logger.info(f"🚀 RunPod Serverless Worker Starting")
 logger.info(f"📦 Version: {VERSION}")
 logger.info(f"📅 Date: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+logger.info(f"⚡ Lazy Loading: U2Net will initialize on first use")
 logger.info("=" * 60)
 
 # RunPod handler
