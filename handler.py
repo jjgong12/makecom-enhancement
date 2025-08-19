@@ -22,11 +22,12 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Enhancement-V6-UTF8-Fixed-NoPreload
+# VERSION: Enhancement-V6-UTF8-Fixed-NoPreload-MakeCompatible
 # Complete UTF-8 Korean support without module preload
+# Fixed MD TALK and DESIGN POINT output for Make.com
 ################################
 
-VERSION = "Enhancement-V6-UTF8-Fixed-NoPreload"
+VERSION = "Enhancement-V6-UTF8-Fixed-NoPreload-MakeCompatible"
 logger.info(f"🚀 Module loaded: {VERSION}")
 
 # Global rembg session with U2Net
@@ -50,10 +51,6 @@ def init_rembg_session():
             logger.error(f"❌ Failed to initialize rembg: {e}")
             REMBG_SESSION = None
     return REMBG_SESSION
-
-# REMOVED MODULE LOAD INITIALIZATION - Will initialize on first use
-# logger.info("🔧 Initializing U2Net session on module load...")
-# init_rembg_session()
 
 def ensure_utf8_string(text):
     """Ensure text is properly UTF-8 encoded string"""
@@ -586,7 +583,19 @@ def find_special_mode(data, path=""):
     return None
 
 def find_text_content(data, content_type):
-    """Find text content for MD TALK or DESIGN POINT with UTF-8 support"""
+    """Find text content for MD TALK or DESIGN POINT with UTF-8 support - IMPROVED"""
+    # Check if data is nested in 'input' or 'output' structures
+    if isinstance(data, dict):
+        # Handle Make.com nested structures
+        if 'data' in data:
+            data = data['data']
+        if 'output' in data:
+            data = data['output']
+        if 'output' in data:  # Double nested
+            data = data['output']
+        if 'input' in data:
+            data = data['input']
+    
     if isinstance(data, dict):
         # Keys to search for based on content type
         if content_type == 'md_talk':
@@ -721,7 +730,7 @@ def resize_image_proportional(image, target_width=1200, target_height=1560):
     return result
 
 def process_special_mode(job):
-    """Process special modes - MD TALK and DESIGN POINT with UTF-8 support"""
+    """Process special modes - MD TALK and DESIGN POINT with UTF-8 support - FIXED for Make.com"""
     special_mode = job.get('special_mode', '')
     
     # If special_mode is not found in job, try to find it again
@@ -784,35 +793,35 @@ def process_special_mode(job):
         md_base64 = image_to_base64(md_section, keep_transparency=False)
         design_base64 = image_to_base64(design_section, keep_transparency=False)
         
+        # FIXED: Return separate images for Make.com compatibility
         return {
             "output": {
-                "images": [
-                    {
-                        "enhanced_image": md_base64,
-                        "enhanced_image_with_prefix": f"data:image/png;base64,{md_base64}",
-                        "section_type": "md_talk",
-                        "filename": "ac_wedding_004.png",
-                        "file_number": "004",
-                        "final_size": list(md_section.size),
-                        "format": "PNG",
-                        "encoding": "UTF-8"
-                    },
-                    {
-                        "enhanced_image": design_base64,
-                        "enhanced_image_with_prefix": f"data:image/png;base64,{design_base64}",
-                        "section_type": "design_point", 
-                        "filename": "ac_wedding_008.png",
-                        "file_number": "008",
-                        "final_size": list(design_section.size),
-                        "format": "PNG",
-                        "encoding": "UTF-8"
-                    }
-                ],
+                # Primary MD TALK image
+                "enhanced_image": md_base64,
+                "enhanced_image_with_prefix": f"data:image/png;base64,{md_base64}",
+                
+                # Secondary DESIGN POINT image 
+                "design_point_image": design_base64,
+                "design_point_image_with_prefix": f"data:image/png;base64,{design_base64}",
+                
+                # Individual sections for easy access
+                "md_talk_image": md_base64,
+                "md_talk_image_with_prefix": f"data:image/png;base64,{md_base64}",
+                
+                # Metadata
+                "section_type": "both",
+                "sections_included": ["MD_TALK", "DESIGN_POINT"],
+                "filename_md_talk": "ac_wedding_004.png",
+                "filename_design_point": "ac_wedding_008.png",
+                "file_number_md_talk": "004",
+                "file_number_design_point": "008",
+                "md_talk_size": list(md_section.size),
+                "design_point_size": list(design_section.size),
                 "total_images": 2,
                 "special_mode": special_mode,
-                "sections_included": ["MD_TALK", "DESIGN_POINT"],
                 "version": VERSION,
                 "status": "success",
+                "format": "PNG",
                 "base64_padding": "INCLUDED",
                 "text_encoding": "UTF-8"
             }
@@ -997,17 +1006,18 @@ def decode_base64_fast(base64_str: str) -> bytes:
         raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def handler(event):
-    """Enhancement handler - V6 UTF-8 Fixed NoPreload"""
+    """Enhancement handler - V6 UTF-8 Fixed NoPreload MakeCompatible"""
     try:
         logger.info("=" * 60)
         logger.info(f"🚀 {VERSION} Handler Started")
         logger.info("=" * 60)
-        logger.info("✅ Improvements in V6-UTF8-Fixed-NoPreload:")
+        logger.info("✅ Improvements in V6-UTF8-Fixed-NoPreload-MakeCompatible:")
         logger.info("  - Complete UTF-8 encoding support")
         logger.info("  - Better Korean font handling")
         logger.info("  - Unicode normalization")
         logger.info("  - Multiple encoding fallbacks")
         logger.info("  - NO MODULE PRELOAD - Lazy initialization")
+        logger.info("  - FIXED: MD TALK and DESIGN POINT output for Make.com")
         
         # Force font download at startup
         logger.info("📥 Pre-loading Korean font...")
@@ -1143,7 +1153,8 @@ def handler(event):
                     "Multiple encoding fallbacks",
                     "Better Korean character handling",
                     "Improved text wrapping for Korean",
-                    "NO MODULE PRELOAD - Lazy initialization"
+                    "NO MODULE PRELOAD - Lazy initialization",
+                    "FIXED: MD TALK and DESIGN POINT output for Make.com"
                 ]
             }
         }
