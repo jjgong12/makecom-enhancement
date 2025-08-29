@@ -5,8 +5,7 @@ import time
 import base64
 import numpy as np
 from io import BytesIO
-from PIL import Image, ImageEnhance, ImageFilter, ImageDraw, ImageFont
-import cv2
+from PIL import Image, ImageDraw, ImageFont
 import logging
 import re
 import requests
@@ -18,34 +17,17 @@ logger = logging.getLogger(__name__)
 
 ################################
 # ENHANCEMENT HANDLER - 1200x1560
-# VERSION: Enhancement-V7-Optimized
-# Alpha Matting removed for better performance
+# VERSION: Enhancement-V8-ResizeOnly
+# Background removal removed - Resize only
 ################################
 
-VERSION = "Enhancement-V7-Optimized"
+VERSION = "Enhancement-V8-ResizeOnly"
 logger.info(f"🚀 Module loaded: {VERSION}")
-
-# Global rembg session with U2Net
-REMBG_SESSION = None
 
 # Korean font cache
 KOREAN_FONT_PATH = None
 FONT_CACHE = {}
 DEFAULT_FONT_CACHE = {}
-
-def init_rembg_session():
-    """Initialize rembg session with U2Net for faster processing"""
-    global REMBG_SESSION
-    if REMBG_SESSION is None:
-        try:
-            from rembg import new_session
-            # Use U2Net for faster processing
-            REMBG_SESSION = new_session('u2net')
-            logger.info("✅ U2Net session initialized successfully")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize rembg: {e}")
-            REMBG_SESSION = None
-    return REMBG_SESSION
 
 def ensure_utf8_string(text):
     """Ensure text is properly UTF-8 encoded string"""
@@ -626,56 +608,6 @@ def find_text_content(data, content_type):
     
     return None
 
-def u2net_optimized_removal(image: Image.Image) -> Image.Image:
-    """U2Net optimized background removal - WITHOUT Alpha Matting"""
-    try:
-        from rembg import remove
-        
-        global REMBG_SESSION
-        if REMBG_SESSION is None:
-            logger.info("🔧 Initializing U2Net session on first use...")
-            REMBG_SESSION = init_rembg_session()
-            if REMBG_SESSION is None:
-                logger.error("❌ Failed to initialize U2Net session")
-                return image
-        
-        logger.info("🚀 U2Net Optimized Removal (No Alpha Matting)")
-        
-        if image.mode != 'RGBA':
-            image = image.convert('RGBA')
-        
-        # Light pre-processing
-        contrast = ImageEnhance.Contrast(image)
-        image_enhanced = contrast.enhance(1.3)
-        
-        # Save to buffer
-        buffered = BytesIO()
-        image_enhanced.save(buffered, format="PNG", compress_level=1)
-        buffered.seek(0)
-        img_data = buffered.getvalue()
-        
-        # Apply U2Net WITHOUT alpha matting for faster processing
-        output = remove(
-            img_data,
-            session=REMBG_SESSION,
-            only_mask=False,
-            post_process_mask=True
-        )
-        
-        result_image = Image.open(BytesIO(output))
-        
-        if result_image.mode != 'RGBA':
-            result_image = result_image.convert('RGBA')
-        
-        logger.info("✅ Background removal complete (fast mode)")
-        return result_image
-        
-    except Exception as e:
-        logger.error(f"U2Net removal failed: {e}")
-        if image.mode != 'RGBA':
-            return image.convert('RGBA')
-        return image
-
 def image_to_base64(image, keep_transparency=True):
     """Convert to base64 WITH padding - ALWAYS"""
     buffered = BytesIO()
@@ -998,18 +930,17 @@ def decode_base64_fast(base64_str: str) -> bytes:
         raise ValueError(f"Invalid base64 data: {str(e)}")
 
 def handler(event):
-    """Enhancement handler - V7 Optimized"""
+    """Enhancement handler - V8 Resize Only (No Background Removal)"""
     try:
         logger.info("=" * 60)
         logger.info(f"🚀 {VERSION} Handler Started")
         logger.info("=" * 60)
-        logger.info("✅ Improvements in V7-Optimized:")
-        logger.info("  - Removed Alpha Matting for 3-5x faster processing")
-        logger.info("  - Cleaned up unused imports")
+        logger.info("✅ Changes in V8-ResizeOnly:")
+        logger.info("  - REMOVED all background removal functionality")
+        logger.info("  - RESIZE ONLY mode")
+        logger.info("  - Preserved MD TALK and DESIGN POINT generation")
         logger.info("  - Complete UTF-8 encoding support")
-        logger.info("  - Better Korean font handling")
-        logger.info("  - Unicode normalization")
-        logger.info("  - FIXED: MD TALK and DESIGN POINT output for Make.com")
+        logger.info("  - Korean font handling")
         
         # Force font download at startup
         logger.info("📥 Pre-loading Korean font...")
@@ -1034,7 +965,7 @@ def handler(event):
             return process_special_mode(event)
         
         # Image processing request
-        logger.info("📸 Processing image enhancement request")
+        logger.info("📸 Processing image resize request")
         
         # Find input data
         logger.info("🔍 Searching for input data...")
@@ -1076,18 +1007,7 @@ def handler(event):
         logger.info(f"⏱️ Image decode: {decode_time:.2f}s")
         logger.info(f"📐 Original size: {image.size}")
         
-        # STEP 1: Apply background removal (WITHOUT Alpha Matting)
-        start_time = time.time()
-        logger.info("📸 Applying fast background removal")
-        image = u2net_optimized_removal(image)
-        
-        removal_time = time.time() - start_time
-        logger.info(f"⏱️ Background removal: {removal_time:.2f}s")
-        
-        if image.mode != 'RGBA':
-            image = image.convert('RGBA')
-        
-        # STEP 2: Resize to target dimensions
+        # ONLY RESIZE - NO BACKGROUND REMOVAL
         start_time = time.time()
         logger.info("📏 Resizing to 1200x1560")
         image = resize_image_proportional(image, 1200, 1560)
@@ -1106,7 +1026,7 @@ def handler(event):
         logger.info(f"📊 Base64 length: {len(enhanced_base64)}")
         
         # Total time
-        total_time = decode_time + removal_time + resize_time + encode_time
+        total_time = decode_time + resize_time + encode_time
         logger.info(f"⏱️ TOTAL TIME: {total_time:.2f}s")
         
         output_filename = filename or "enhanced_image.png"
@@ -1127,24 +1047,22 @@ def handler(event):
                 "mode": "RGBA",
                 "has_transparency": True,
                 "transparency_preserved": True,
-                "background_removed": True,
+                "background_removed": False,  # No background removal
                 "base64_padding": "INCLUDED",
                 "compression": "level_3",
                 "encoding": "UTF-8",
                 "processing_times": {
                     "decode": f"{decode_time:.2f}s",
-                    "background_removal": f"{removal_time:.2f}s",
                     "resize": f"{resize_time:.2f}s",
                     "encode": f"{encode_time:.2f}s",
                     "total": f"{total_time:.2f}s"
                 },
-                "v7_improvements": [
-                    "Removed Alpha Matting for 3-5x faster processing",
-                    "Cleaned up unused imports",
-                    "Optimized background removal settings",
+                "v8_changes": [
+                    "REMOVED all background removal functionality",
+                    "RESIZE ONLY mode",
+                    "Preserved MD TALK and DESIGN POINT generation",
                     "Maintained UTF-8 encoding support",
-                    "Preserved Korean font handling",
-                    "FIXED: MD TALK and DESIGN POINT output for Make.com"
+                    "Preserved Korean font handling"
                 ]
             }
         }
@@ -1165,12 +1083,12 @@ def handler(event):
             }
         }
 
-# Start message - NO PRELOAD INITIALIZATION
+# Start message
 logger.info("=" * 60)
 logger.info(f"🚀 RunPod Serverless Worker Starting")
 logger.info(f"📦 Version: {VERSION}")
 logger.info(f"📅 Date: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-logger.info(f"⚡ Lazy Loading: U2Net will initialize on first use")
+logger.info(f"⚡ Mode: RESIZE ONLY (No Background Removal)")
 logger.info("=" * 60)
 
 # RunPod handler
